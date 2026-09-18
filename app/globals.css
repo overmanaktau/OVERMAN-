@@ -8,5 +8,5 @@ body {
 
 /* Tabular numbers for anything money/count-like, matching the mockup */
 .num {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums; font-family: 'Segoe UI', Arial, sans-serif;
 }
