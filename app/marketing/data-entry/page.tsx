@@ -100,9 +100,11 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
 
 export default function DataEntryPage() {
   const { isAdmin, permissions } = useAuth();
-  const canEditLocked = isAdmin;
   const canView = isAdmin || permissions["marketing.data_entry"].canView;
   const canEditSection = isAdmin || permissions["marketing.data_entry"].canEdit;
+  // Locking/unlocking the month follows the same edit permission as the data
+  // itself — no separate admin-only gate; restrict a role via its edit checkbox instead.
+  const canEditLocked = canEditSection;
 
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -327,13 +329,13 @@ export default function DataEntryPage() {
           <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
           {locked && (
             <span className="text-[11px] tracking-wide uppercase text-muted bg-[#EDE8DC] border border-border rounded-full px-2.5 py-1">
-              месяц закрыт — только полный доступ
+              месяц закрыт
             </span>
           )}
         </div>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Трафик и расходы по каналам вводятся вручную за каждый день. После сохранения месяца
-          редактировать данные может только пользователь с полным доступом.
+          Трафик и расходы по каналам вводятся вручную за каждый день. Сохранить месяц и снова
+          открыть его для правок может любой пользователь с правом редактирования этого раздела.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
