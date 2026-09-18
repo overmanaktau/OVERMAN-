@@ -3,13 +3,22 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { emptyPermissions, fullPermissions, type Permissions } from "@/lib/permissions";
+import { getErrorMessage } from "@/lib/errors";
 
 type AuthContextValue = {
   email: string | null;
   role: "admin" | "editor" | null;
+  isAdmin: boolean;
+  permissions: Permissions;
 };
 
-const AuthContext = createContext<AuthContextValue>({ email: null, role: null });
+const AuthContext = createContext<AuthContextValue>({
+  email: null,
+  role: null,
+  isAdmin: false,
+  permissions: emptyPermissions(),
+});
 
 export function useAuth() {
   return useContext(AuthContext);
@@ -19,7 +28,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [value, setValue] = useState<AuthContextValue>({ email: null, role: null });
+  const [value, setValue] = useState<AuthContextValue>({
+    email: null,
+    role: null,
+    isAdmin: false,
+    permissions: emptyPermissions(),
+  });
 
   useEffect(() => {
     let active = true;
@@ -41,20 +55,44 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
         const { data: roleRow, error: roleError } = await supabase
           .from("user_roles")
-          .select("role")
+          .select("role, role_id")
           .eq("user_id", session.user.id)
           .maybeSingle();
         if (roleError) throw roleError;
 
+        const role = (roleRow?.role as "admin" | "editor") ?? "editor";
+        const isAdmin = role === "admin";
+
+        let permissions = emptyPermissions();
+        if (isAdmin) {
+          permissions = fullPermissions();
+        } else if (roleRow?.role_id) {
+          const { data: permRows, error: permError } = await supabase
+            .from("role_permissions")
+            .select("section, can_view, can_edit")
+            .eq("role_id", roleRow.role_id);
+          if (permError) throw permError;
+          for (const row of permRows ?? []) {
+            if (row.section in permissions) {
+              permissions[row.section as keyof Permissions] = {
+                canView: row.can_view,
+                canEdit: row.can_edit,
+              };
+            }
+          }
+        }
+
         if (!active) return;
         setValue({
           email: session.user.email ?? null,
-          role: (roleRow?.role as "admin" | "editor") ?? "editor",
+          role,
+          isAdmin,
+          permissions,
         });
         setStatus("ready");
       } catch (e) {
         if (!active) return;
-        const message = e instanceof Error ? e.message : String(e);
+        const message = getErrorMessage(e);
         setErrorMsg(
           /fetch|network/i.test(message)
             ? "Нет связи с сервером. Проверьте интернет-соединение и попробуйте снова."

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
+import { getErrorMessage } from "@/lib/errors";
 
 // Only one physical point exists in the UI so far (Sidebar's point checkboxes
 // aren't wired to a selector yet) — hardcoded until multi-store switching lands.
@@ -65,7 +66,7 @@ function daysInMonth(year: number, monthIndex: number) {
 }
 
 function friendlyError(e: unknown): string {
-  const message = e instanceof Error ? e.message : String(e);
+  const message = getErrorMessage(e);
   if (/fetch|network|failed to fetch/i.test(message)) {
     return "Нет связи с сервером базы данных. Проверьте интернет-соединение и попробуйте снова.";
   }
@@ -98,8 +99,10 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
 }
 
 export default function DataEntryPage() {
-  const { role } = useAuth();
-  const canEditLocked = role === "admin";
+  const { isAdmin, permissions } = useAuth();
+  const canEditLocked = isAdmin;
+  const canView = isAdmin || permissions["marketing.data_entry"].canView;
+  const canEditSection = isAdmin || permissions["marketing.data_entry"].canEdit;
 
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -114,7 +117,7 @@ export default function DataEntryPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const editable = !locked || canEditLocked;
+  const editable = canEditSection && (!locked || canEditLocked);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -306,6 +309,14 @@ export default function DataEntryPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (!canView) {
+    return (
+      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+        <p className="text-sm text-muted">У вас нет доступа к разделу «Внесение данных».</p>
+      </div>
+    );
   }
 
   return (

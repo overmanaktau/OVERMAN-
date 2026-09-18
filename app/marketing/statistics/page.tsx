@@ -1,4 +1,7 @@
+"use client";
+
 import KpiCard from "@/components/KpiCard";
+import { useAuth } from "@/components/AuthGate";
 
 // Demo data for now — this is exactly what stage 3 (Supabase) will
 // replace with real aggregates from traffic_entries / extra_expenses.
@@ -23,6 +26,15 @@ const CHANNELS = [
 ];
 
 export default function StatisticsPage() {
+  const { isAdmin, permissions } = useAuth();
+  if (!isAdmin && !permissions["marketing.statistics"].canView) {
+    return (
+      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+        <p className="text-sm text-muted">У вас нет доступа к разделу «Статистика».</p>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex flex-col gap-1">

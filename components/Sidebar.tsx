@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
+import type { SectionKey } from "@/lib/permissions";
 
 const TOP_LEVEL: { label: string; soon: boolean }[] = [
   { label: "Обзор", soon: true },
@@ -11,17 +12,20 @@ const TOP_LEVEL: { label: string; soon: boolean }[] = [
   { label: "Склад", soon: true },
 ];
 
-const MARKETING_SUBMENU = [
-  { label: "Статистика", href: "/marketing/statistics" },
-  { label: "Публикации", href: "/marketing/publications" },
-  { label: "Инстаграм таргет", href: "/marketing/instagram-target" },
-  { label: "Внесение данных", href: "/marketing/data-entry" },
+const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
+  { label: "Статистика", href: "/marketing/statistics", section: "marketing.statistics" },
+  { label: "Публикации", href: "/marketing/publications", section: "marketing.publications" },
+  { label: "Инстаграм таргет", href: "/marketing/instagram-target", section: "marketing.instagram_target" },
+  { label: "Внесение данных", href: "/marketing/data-entry", section: "marketing.data_entry" },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { email } = useAuth();
+  const { email, isAdmin, permissions } = useAuth();
+  const visibleMarketing = MARKETING_SUBMENU.filter(
+    (item) => isAdmin || permissions[item.section]?.canView
+  );
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -50,29 +54,31 @@ export default function Sidebar() {
           </div>
         ))}
 
-        <div className="flex flex-col gap-0.5 mt-1">
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold">
-            Маркетинг
+        {visibleMarketing.length > 0 && (
+          <div className="flex flex-col gap-0.5 mt-1">
+            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold">
+              Маркетинг
+            </div>
+            <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
+              {visibleMarketing.map((item) => {
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`px-3 py-2 rounded-md text-[13px] ${
+                      active
+                        ? "bg-accent text-paper font-semibold"
+                        : "text-[#A39D8E] font-medium hover:text-sidebarText"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
           </div>
-          <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
-            {MARKETING_SUBMENU.map((item) => {
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`px-3 py-2 rounded-md text-[13px] ${
-                    active
-                      ? "bg-accent text-paper font-semibold"
-                      : "text-[#A39D8E] font-medium hover:text-sidebarText"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+        )}
 
         <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium mt-1">
           <span>Финансы</span>
@@ -80,6 +86,19 @@ export default function Sidebar() {
             скоро
           </span>
         </div>
+
+        {isAdmin && (
+          <Link
+            href="/settings/employees"
+            className={`px-3 py-2.5 rounded-lg text-sm font-medium mt-1 ${
+              pathname.startsWith("/settings")
+                ? "bg-accent text-paper font-semibold"
+                : "text-[#6B6455] hover:text-sidebarText"
+            }`}
+          >
+            Настройки
+          </Link>
+        )}
       </nav>
 
       <div className="mt-auto flex flex-col gap-2.5">
