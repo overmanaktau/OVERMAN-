@@ -3,7 +3,7 @@ import { Newsreader, Manrope } from "next/font/google";
 import "./globals.css";
 
 const newsreader = Newsreader({
-  subsets: ["latin", "cyrillic"],
+  subsets: ["latin"],
   weight: ["400", "500", "600"],
   variable: "--font-newsreader",
 });
