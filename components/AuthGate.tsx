@@ -17,34 +17,51 @@ export function useAuth() {
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [status, setStatus] = useState<"loading" | "ready">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [value, setValue] = useState<AuthContextValue>({ email: null, role: null });
 
   useEffect(() => {
     let active = true;
 
     async function load() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      setStatus("loading");
+      setErrorMsg(null);
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
 
-      if (!session) {
-        router.replace("/login");
-        return;
+        if (!session) {
+          router.replace("/login");
+          return;
+        }
+
+        const { data: roleRow, error: roleError } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", session.user.id)
+          .maybeSingle();
+        if (roleError) throw roleError;
+
+        if (!active) return;
+        setValue({
+          email: session.user.email ?? null,
+          role: (roleRow?.role as "admin" | "editor") ?? "editor",
+        });
+        setStatus("ready");
+      } catch (e) {
+        if (!active) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setErrorMsg(
+          /fetch|network/i.test(message)
+            ? "Нет связи с сервером. Проверьте интернет-соединение и попробуйте снова."
+            : `Не удалось загрузить профиль пользователя: ${message}`
+        );
+        setStatus("error");
       }
-
-      const { data: roleRow } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", session.user.id)
-        .maybeSingle();
-
-      if (!active) return;
-      setValue({
-        email: session.user.email ?? null,
-        role: (roleRow?.role as "admin" | "editor") ?? "editor",
-      });
-      setStatus("ready");
     }
 
     load();
@@ -63,6 +80,23 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-paper text-muted text-sm">
         Загрузка…
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-paper px-6">
+        <div className="bg-white border border-border rounded-card p-8 max-w-sm text-center flex flex-col gap-4">
+          <div className="text-sm text-[#A34B36]">{errorMsg}</div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="bg-accent text-paper font-bold rounded-lg py-2.5 text-sm"
+          >
+            Повторить
+          </button>
+        </div>
       </div>
     );
   }

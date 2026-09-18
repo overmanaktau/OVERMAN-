@@ -1,9 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/components/AuthGate";
+
+// Only one physical point exists in the UI so far (Sidebar's point checkboxes
+// aren't wired to a selector yet) — hardcoded until multi-store switching lands.
+const STORE = "point_1";
 
 type DayRow = {
-  date: string; // "01.09"
+  id?: number;
+  entryDate: string; // "YYYY-MM-DD", used as the DB key
+  date: string; // "DD.MM", display only
   weekday: string;
   weekend: boolean;
   trafficPlan: number | "";
@@ -16,24 +24,65 @@ type DayRow = {
 };
 
 type ExpenseRow = {
-  date: string;
+  id?: number;
+  date: string; // "YYYY-MM-DD"
   category: string;
-  amount: number;
+  amount: number | "";
   comment: string;
 };
 
-const WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+const WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]; // matches Date#getDay()
+const MONTH_NAMES = [
+  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+];
 
-// September 2026 starts on a Tuesday — computed once for the demo month.
-function buildSeptemberRows(): DayRow[] {
-  const daysInMonth = 30;
-  const startWeekdayIndex = 2; // Tuesday
+const NUMERIC_FIELDS: (keyof Pick<
+  DayRow,
+  "trafficPlan" | "trafficFact" | "instagram" | "tiktok" | "instagramPublic" | "flyer" | "twoGis"
+>)[] = ["trafficPlan", "trafficFact", "instagram", "tiktok", "instagramPublic", "flyer", "twoGis"];
+
+const DB_FIELD = {
+  trafficPlan: "traffic_plan",
+  trafficFact: "traffic_fact",
+  instagram: "instagram",
+  tiktok: "tiktok",
+  instagramPublic: "instagram_public",
+  flyer: "flyer",
+  twoGis: "two_gis",
+} as const;
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function ymd(year: number, monthIndex: number, day: number) {
+  return `${year}-${pad2(monthIndex + 1)}-${pad2(day)}`;
+}
+
+function daysInMonth(year: number, monthIndex: number) {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+function friendlyError(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e);
+  if (/fetch|network|failed to fetch/i.test(message)) {
+    return "Нет связи с сервером базы данных. Проверьте интернет-соединение и попробуйте снова.";
+  }
+  if (/JWT|session|401|403/i.test(message)) {
+    return "Сессия истекла или нет доступа. Попробуйте выйти и войти снова.";
+  }
+  return `Не удалось выполнить операцию: ${message}`;
+}
+
+function buildMonthRows(year: number, monthIndex: number): DayRow[] {
+  const total = daysInMonth(year, monthIndex);
   const rows: DayRow[] = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    const weekdayIndex = (startWeekdayIndex + (d - 1)) % 7;
-    const weekday = WEEKDAYS[weekdayIndex];
+  for (let d = 1; d <= total; d++) {
+    const weekday = WEEKDAYS[new Date(year, monthIndex, d).getDay()];
     rows.push({
-      date: `${String(d).padStart(2, "0")}.09`,
+      entryDate: ymd(year, monthIndex, d),
+      date: `${pad2(d)}.${pad2(monthIndex + 1)}`,
       weekday,
       weekend: weekday === "Сб" || weekday === "Вс",
       trafficPlan: "",
@@ -48,36 +97,123 @@ function buildSeptemberRows(): DayRow[] {
   return rows;
 }
 
-const NUMERIC_FIELDS: (keyof DayRow)[] = [
-  "trafficPlan",
-  "trafficFact",
-  "instagram",
-  "tiktok",
-  "instagramPublic",
-  "flyer",
-  "twoGis",
-];
-
 export default function DataEntryPage() {
-  const [rows, setRows] = useState<DayRow[]>(buildSeptemberRows);
-  const [locked, setLocked] = useState(false);
-  const [expenses, setExpenses] = useState<ExpenseRow[]>([
-    { date: "03.09", category: "Полиграфия — вывеска у входа", amount: 45000, comment: "Обновление баннера к сезону" },
-    { date: "09.09", category: "Услуги фотографа", amount: 60000, comment: "Съёмка для соцсетей и карточек товара" },
-  ]);
+  const { role } = useAuth();
+  const canEditLocked = role === "admin";
 
-  function updateCell(index: number, field: keyof DayRow, value: string) {
-    if (locked) return;
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [monthIndex, setMonthIndex] = useState(today.getMonth());
+
+  const [rows, setRows] = useState<DayRow[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [locked, setLocked] = useState(false);
+  const [monthStatusId, setMonthStatusId] = useState<number | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const editable = !locked || canEditLocked;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const firstStr = ymd(year, monthIndex, 1);
+      const lastStr = ymd(year, monthIndex, daysInMonth(year, monthIndex));
+
+      const [entriesRes, statusRes, expensesRes] = await Promise.all([
+        supabase
+          .from("traffic_entries")
+          .select("*")
+          .eq("store", STORE)
+          .gte("entry_date", firstStr)
+          .lte("entry_date", lastStr),
+        supabase.from("month_status").select("*").eq("store", STORE).eq("month", firstStr).maybeSingle(),
+        supabase
+          .from("extra_expenses")
+          .select("*")
+          .gte("expense_date", firstStr)
+          .lte("expense_date", lastStr)
+          .order("expense_date"),
+      ]);
+
+      const firstError = entriesRes.error || statusRes.error || expensesRes.error;
+      if (firstError) throw firstError;
+
+      const byDate = new Map((entriesRes.data ?? []).map((e) => [e.entry_date, e]));
+      const merged = buildMonthRows(year, monthIndex).map((row) => {
+        const db = byDate.get(row.entryDate);
+        if (!db) return row;
+        return {
+          ...row,
+          id: db.id,
+          trafficPlan: db.traffic_plan ?? "",
+          trafficFact: db.traffic_fact ?? "",
+          instagram: db.instagram ?? "",
+          tiktok: db.tiktok ?? "",
+          instagramPublic: db.instagram_public ?? "",
+          flyer: db.flyer ?? "",
+          twoGis: db.two_gis ?? "",
+        };
+      });
+
+      setRows(merged);
+      setLocked(statusRes.data?.locked ?? false);
+      setMonthStatusId(statusRes.data?.id ?? null);
+      setExpenses(
+        (expensesRes.data ?? []).map((e) => ({
+          id: e.id,
+          date: e.expense_date,
+          category: e.category ?? "",
+          amount: e.amount ?? "",
+          comment: e.comment ?? "",
+        }))
+      );
+    } catch (e) {
+      setError(friendlyError(e));
+      setRows(buildMonthRows(year, monthIndex));
+      setExpenses([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year, monthIndex]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function shiftMonth(delta: number) {
+    const total = year * 12 + monthIndex + delta;
+    setYear(Math.floor(total / 12));
+    setMonthIndex(((total % 12) + 12) % 12);
+  }
+
+  function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], value: string) {
+    if (!editable) return;
     setRows((prev) => {
       const next = [...prev];
-      const num = value === "" ? "" : Number(value);
-      next[index] = { ...next[index], [field]: num } as DayRow;
+      next[index] = { ...next[index], [field]: value === "" ? "" : Number(value) };
+      return next;
+    });
+  }
+
+  function updateExpense(index: number, field: keyof ExpenseRow, value: string) {
+    if (!editable) return;
+    setExpenses((prev) => {
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        [field]: field === "amount" ? (value === "" ? "" : Number(value)) : value,
+      };
       return next;
     });
   }
 
   const totals = useMemo(() => {
-    const sum = (field: keyof DayRow) =>
+    const sum = (field: (typeof NUMERIC_FIELDS)[number]) =>
       rows.reduce((acc, r) => acc + (typeof r[field] === "number" ? (r[field] as number) : 0), 0);
     return {
       trafficPlan: sum("trafficPlan"),
@@ -92,13 +228,84 @@ export default function DataEntryPage() {
 
   const channelTotal =
     totals.instagram + totals.tiktok + totals.instagramPublic + totals.flyer + totals.twoGis;
-  const expensesTotal = expenses.reduce((acc, e) => acc + e.amount, 0);
+  const expensesTotal = expenses.reduce((acc, e) => acc + (typeof e.amount === "number" ? e.amount : 0), 0);
 
-  function handleSaveMonth() {
-    // TODO (этап 2): отправить rows в Supabase (upsert в traffic_entries)
-    // и поставить month_status.locked = true. Пока просто блокируем
-    // редактирование на клиенте, чтобы поведение было понятно.
-    setLocked(true);
+  async function handleSave() {
+    if (saving) return; // guards against a second click landing before the button disables
+    setSaving(true);
+    setError(null);
+    try {
+      const nextRows = [...rows];
+      for (let i = 0; i < nextRows.length; i++) {
+        const row = nextRows[i];
+        const hasData = NUMERIC_FIELDS.some((f) => row[f] !== "");
+        if (!row.id && !hasData) continue;
+
+        const payload: Record<string, unknown> = { store: STORE, entry_date: row.entryDate };
+        for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
+
+        if (row.id) {
+          const { error } = await supabase.from("traffic_entries").update(payload).eq("id", row.id);
+          if (error) throw error;
+        } else {
+          const { data, error } = await supabase
+            .from("traffic_entries")
+            .insert(payload)
+            .select("id")
+            .single();
+          if (error) throw error;
+          nextRows[i] = { ...row, id: data.id };
+        }
+      }
+
+      const nextExpenses = [...expenses];
+      for (let i = 0; i < nextExpenses.length; i++) {
+        const exp = nextExpenses[i];
+        if (!exp.id && !exp.date && !exp.category && exp.amount === "") continue;
+
+        const payload = {
+          expense_date: exp.date || null,
+          category: exp.category,
+          amount: exp.amount === "" ? 0 : exp.amount,
+          comment: exp.comment,
+        };
+
+        if (exp.id) {
+          const { error } = await supabase.from("extra_expenses").update(payload).eq("id", exp.id);
+          if (error) throw error;
+        } else {
+          const { data, error } = await supabase
+            .from("extra_expenses")
+            .insert(payload)
+            .select("id")
+            .single();
+          if (error) throw error;
+          nextExpenses[i] = { ...exp, id: data.id };
+        }
+      }
+
+      const firstStr = ymd(year, monthIndex, 1);
+      if (monthStatusId) {
+        const { error } = await supabase.from("month_status").update({ locked: true }).eq("id", monthStatusId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase
+          .from("month_status")
+          .insert({ store: STORE, month: firstStr, locked: true })
+          .select("id")
+          .single();
+        if (error) throw error;
+        setMonthStatusId(data.id);
+      }
+
+      setRows(nextRows);
+      setExpenses(nextExpenses);
+      setLocked(true);
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -117,15 +324,37 @@ export default function DataEntryPage() {
           Трафик и расходы по каналам вводятся вручную за каждый день. После сохранения месяца
           редактировать данные может только пользователь с полным доступом.
         </p>
+        {error && (
+          <div className="flex items-center gap-3 text-sm text-[#A34B36]">
+            <span>{error}</span>
+            <button type="button" onClick={load} className="font-semibold underline">
+              Повторить
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 bg-white border border-border rounded-card p-1.5">
-          <button type="button" aria-label="Предыдущий месяц" className="w-[30px] h-[30px] rounded-md text-muted">
+          <button
+            type="button"
+            aria-label="Предыдущий месяц"
+            onClick={() => shiftMonth(-1)}
+            disabled={loading}
+            className="w-[30px] h-[30px] rounded-md text-muted disabled:opacity-50"
+          >
             ‹
           </button>
-          <div className="text-[15px] font-bold min-w-[150px] text-center">Сентябрь 2026</div>
-          <button type="button" aria-label="Следующий месяц" className="w-[30px] h-[30px] rounded-md text-muted">
+          <div className="text-[15px] font-bold min-w-[150px] text-center">
+            {MONTH_NAMES[monthIndex]} {year}
+          </div>
+          <button
+            type="button"
+            aria-label="Следующий месяц"
+            onClick={() => shiftMonth(1)}
+            disabled={loading}
+            className="w-[30px] h-[30px] rounded-md text-muted disabled:opacity-50"
+          >
             ›
           </button>
         </div>
@@ -133,7 +362,9 @@ export default function DataEntryPage() {
       </div>
 
       <div className="bg-white border border-border rounded-card px-6 pt-[22px] pb-5 flex flex-col gap-3.5">
-        <div className="text-[15px] font-bold">Трафик и расходы по каналам — с 1 по 30 сентября</div>
+        <div className="text-[15px] font-bold">
+          Трафик и расходы по каналам — {MONTH_NAMES[monthIndex].toLowerCase()} {year}
+        </div>
 
         <div className="max-h-[460px] overflow-y-auto rounded-md">
           <div className="sticky top-0 z-10 bg-white grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
@@ -150,7 +381,7 @@ export default function DataEntryPage() {
 
           {rows.map((row, i) => (
             <div
-              key={row.date}
+              key={row.entryDate}
               className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-[#F6F3EC] ${
                 row.weekend ? "bg-weekendTint" : ""
               }`}
@@ -161,7 +392,7 @@ export default function DataEntryPage() {
                 <input
                   key={field}
                   type="number"
-                  disabled={locked}
+                  disabled={!editable}
                   value={row[field] === "" ? "" : (row[field] as number)}
                   onChange={(e) => updateCell(i, field, e.target.value)}
                   placeholder="0"
@@ -191,19 +422,19 @@ export default function DataEntryPage() {
           <div className="flex items-center gap-2.5">
             <button
               type="button"
-              disabled={locked}
-              onClick={() => setRows(buildSeptemberRows())}
+              disabled={!editable || saving || loading}
+              onClick={load}
               className="text-[13px] font-semibold text-muted border border-[#DDD6C8] rounded-lg px-4 py-2.5 disabled:opacity-50"
             >
               Отмена
             </button>
             <button
               type="button"
-              disabled={locked}
-              onClick={handleSaveMonth}
+              disabled={!editable || saving || loading}
+              onClick={handleSave}
               className="text-[13px] font-bold text-paper bg-accent rounded-lg px-[18px] py-2.5 disabled:opacity-50"
             >
-              {locked ? "Месяц сохранён" : "Сохранить месяц"}
+              {saving ? "Сохраняем…" : locked ? "Месяц сохранён" : "Сохранить месяц"}
             </button>
           </div>
         </div>
@@ -218,7 +449,7 @@ export default function DataEntryPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-[90px_220px_120px_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+        <div className="grid grid-cols-[130px_220px_120px_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
           <div>Дата</div>
           <div>Статья</div>
           <div>Сумма</div>
@@ -227,22 +458,50 @@ export default function DataEntryPage() {
 
         {expenses.map((e, i) => (
           <div
-            key={i}
-            className="grid grid-cols-[90px_220px_120px_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+            key={e.id ?? `new-${i}`}
+            className="grid grid-cols-[130px_220px_120px_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
           >
-            <div>{e.date}</div>
-            <div>{e.category}</div>
-            <div className="num">{e.amount.toLocaleString("ru-RU")} ₸</div>
-            <div className="text-muted">{e.comment}</div>
+            <input
+              type="date"
+              disabled={!editable}
+              value={e.date}
+              onChange={(ev) => updateExpense(i, "date", ev.target.value)}
+              className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+            />
+            <input
+              type="text"
+              disabled={!editable}
+              value={e.category}
+              onChange={(ev) => updateExpense(i, "category", ev.target.value)}
+              placeholder="Статья расхода"
+              className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+            />
+            <input
+              type="number"
+              disabled={!editable}
+              value={e.amount === "" ? "" : e.amount}
+              onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
+              placeholder="0"
+              className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+            />
+            <input
+              type="text"
+              disabled={!editable}
+              value={e.comment}
+              onChange={(ev) => updateExpense(i, "comment", ev.target.value)}
+              placeholder="Комментарий"
+              className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+            />
           </div>
         ))}
 
         <button
           type="button"
+          disabled={!editable}
           onClick={() =>
-            setExpenses((prev) => [...prev, { date: "", category: "", amount: 0, comment: "" }])
+            setExpenses((prev) => [...prev, { date: "", category: "", amount: "", comment: "" }])
           }
-          className="flex items-center gap-2 text-[13px] font-semibold text-accent py-3 text-left"
+          className="flex items-center gap-2 text-[13px] font-semibold text-accent py-3 text-left disabled:opacity-50"
         >
           + Добавить расход
         </button>
