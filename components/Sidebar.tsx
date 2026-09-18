@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/components/AuthGate";
 
-// Top-level sections. Only "Маркетинг" has real screens today —
-// the rest are placeholders so the roadmap is visible without
-// promising navigation that isn't built yet.
 const TOP_LEVEL: { label: string; soon: boolean }[] = [
   { label: "Обзор", soon: true },
   { label: "Продажа", soon: true },
@@ -21,6 +20,13 @@ const MARKETING_SUBMENU = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { email } = useAuth();
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   return (
     <div className="w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6">
@@ -88,6 +94,17 @@ export default function Sidebar() {
           <label className="flex items-center gap-2 text-[13px] text-[#C9C3B6] py-1">
             <input type="checkbox" defaultChecked className="accent-accent" /> Точка 2
           </label>
+        </div>
+        <div className="h-px bg-[#2C2820] mt-1" />
+        <div className="px-2 flex flex-col gap-1.5">
+          {email && <div className="text-[11px] text-sidebarMuted truncate">{email}</div>}
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="text-[13px] text-[#C9C3B6] text-left hover:text-sidebarText"
+          >
+            Выйти
+          </button>
         </div>
       </div>
     </div>
