@@ -1,34 +1,15 @@
-import type { Metadata } from "next";
-import { Newsreader, Manrope } from "next/font/google";
-import "./globals.css";
+import Sidebar from "@/components/Sidebar";
+import AuthGate from "@/components/AuthGate";
 
-const newsreader = Newsreader({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-newsreader",
-});
-
-const manrope = Manrope({
-  subsets: ["latin", "cyrillic"],
-  weight: ["400", "500", "600", "700", "800"],
-  variable: "--font-manrope",
-});
-
-export const metadata: Metadata = {
-  title: "Overman — портал бизнеса",
-  description: "Внутренний портал сети магазинов Overman",
-};
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru">
-      <body className={`${newsreader.variable} ${manrope.variable} font-sans text-ink`}>
-        {children}
-      </body>
-    </html>
+    <AuthGate>
+      <div className="min-h-screen flex bg-paper text-ink">
+        <Sidebar />
+        <div className="flex-1 box-border px-12 py-10 pb-14 flex flex-col gap-6 min-w-0">
+          {children}
+        </div>
+      </div>
+    </AuthGate>
   );
 }
