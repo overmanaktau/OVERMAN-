@@ -75,7 +75,7 @@ export default function AccountMenu() {
   }
 
   return (
-    <div ref={ref} className="fixed top-4 right-4 z-[100]">
+    <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

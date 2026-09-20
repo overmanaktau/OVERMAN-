@@ -1,0 +1,21 @@
+"use client";
+
+import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
+
+export default function GlobalSaveButton() {
+  const { isDirty, saving, saveNow } = useUnsavedChanges();
+
+  return (
+    <button
+      type="button"
+      disabled={!isDirty || saving}
+      onClick={saveNow}
+      title={isDirty ? "Сохранить изменения" : "Нет несохранённых изменений"}
+      className={`text-[13px] font-bold rounded-full px-4 py-2 shadow-md transition-colors ${
+        isDirty ? "bg-accent text-paper" : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+      }`}
+    >
+      {saving ? "Сохраняем…" : "Сохранить"}
+    </button>
+  );
+}
