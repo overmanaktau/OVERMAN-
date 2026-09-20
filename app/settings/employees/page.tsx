@@ -38,6 +38,28 @@ function toGrants(rows: RoleDef["role_store_access"]): StoreAccessGrant[] {
   return rows.map((r) => ({ scope: r.scope, cityId: r.city_id, storeId: r.store_id }));
 }
 
+function resolveStoreLabel(emp: Employee, roles: RoleDef[], cities: CityWithStores[]): string {
+  if (emp.role === "admin") return "Все точки";
+  if (!emp.roleId) return "—";
+  const role = roles.find((r) => r.id === emp.roleId);
+  if (!role) return "—";
+  const grants = role.role_store_access;
+  if (grants.some((g) => g.scope === "all")) return "Все точки";
+  const names: string[] = [];
+  for (const g of grants) {
+    if (g.scope === "city") {
+      const city = cities.find((c) => c.id === g.city_id);
+      if (city) names.push(`${city.name} (весь)`);
+    } else if (g.scope === "store") {
+      for (const city of cities) {
+        const store = city.stores.find((s) => s.id === g.store_id);
+        if (store) names.push(store.name);
+      }
+    }
+  }
+  return names.length ? names.join(", ") : "Нет точек";
+}
+
 function PermissionsGrid({
   value,
   onChange,
@@ -161,6 +183,8 @@ export default function EmployeesPage() {
   const [cities, setCities] = useState<CityWithStores[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resettingId, setResettingId] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
 
   const [newEmail, setNewEmail] = useState("");
   const [newFullName, setNewFullName] = useState("");
@@ -235,6 +259,32 @@ export default function EmployeesPage() {
       setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, fullName: fullName.trim() || null } : e)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось изменить имя.");
+    }
+  }
+
+  async function handleUpdateEmail(emp: Employee, email: string) {
+    if (!email.trim() || email.trim() === emp.email) return;
+    setError(null);
+    try {
+      await authFetch(`/api/employees/${emp.id}`, { method: "PATCH", body: JSON.stringify({ email: email.trim() }) });
+      setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, email: email.trim() } : e)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось изменить email.");
+    }
+  }
+
+  async function handleResetPassword(emp: Employee, password: string) {
+    if (password.length < 6) {
+      setError("Пароль должен быть не короче 6 символов.");
+      return;
+    }
+    setError(null);
+    try {
+      await authFetch(`/api/employees/${emp.id}`, { method: "PATCH", body: JSON.stringify({ password }) });
+      setResettingId(null);
+      setResetPasswordValue("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось сбросить пароль.");
     }
   }
 
@@ -436,52 +486,98 @@ export default function EmployeesPage() {
         <div className="flex flex-col gap-4">
           <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="text-[15px] font-bold">Список сотрудников</div>
-            <div className="grid grid-cols-[1fr_1fr_200px_100px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+            <div className="grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Имя</div>
               <div>Email</div>
+              <div>Точки</div>
               <div>Роль</div>
               <div></div>
             </div>
             {employees.map((emp) => (
-              <div
-                key={emp.id}
-                className="grid grid-cols-[1fr_1fr_200px_100px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
-              >
-                <input
-                  type="text"
-                  defaultValue={emp.fullName ?? ""}
-                  placeholder="Без имени"
-                  onBlur={(e) => {
-                    if (e.target.value !== (emp.fullName ?? "")) handleRenameEmployee(emp, e.target.value);
-                  }}
-                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px]"
-                />
-                <div className="truncate">
-                  {emp.email} {emp.email === myEmail && <span className="text-muted">(вы)</span>}
+              <Fragment key={emp.id}>
+                <div className="grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]">
+                  <input
+                    type="text"
+                    defaultValue={emp.fullName ?? ""}
+                    placeholder="Без имени"
+                    onBlur={(e) => {
+                      if (e.target.value !== (emp.fullName ?? "")) handleRenameEmployee(emp, e.target.value);
+                    }}
+                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px]"
+                  />
+                  <input
+                    type="email"
+                    defaultValue={emp.email}
+                    onBlur={(e) => {
+                      if (e.target.value !== emp.email) handleUpdateEmail(emp, e.target.value);
+                    }}
+                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px]"
+                  />
+                  <div className="text-muted text-[12px] truncate" title={resolveStoreLabel(emp, roles, cities)}>
+                    {resolveStoreLabel(emp, roles, cities)}
+                  </div>
+                  <select
+                    value={roleChoiceValue(emp)}
+                    onChange={(e) => handleRoleChange(emp, e.target.value)}
+                    disabled={emp.email === myEmail}
+                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
+                  >
+                    <option value="admin">Администратор</option>
+                    <option value="">Без роли</option>
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex flex-col gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResettingId(resettingId === emp.id ? null : emp.id);
+                        setResetPasswordValue("");
+                      }}
+                      className="text-[12px] text-accent font-semibold text-left"
+                    >
+                      Пароль
+                    </button>
+                    <button
+                      type="button"
+                      disabled={emp.email === myEmail}
+                      onClick={() => handleDeleteEmployee(emp)}
+                      className="text-[12px] text-[#A34B36] font-semibold disabled:opacity-40 text-left"
+                    >
+                      Удалить
+                    </button>
+                  </div>
                 </div>
-                <select
-                  value={roleChoiceValue(emp)}
-                  onChange={(e) => handleRoleChange(emp, e.target.value)}
-                  disabled={emp.email === myEmail}
-                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
-                >
-                  <option value="admin">Администратор</option>
-                  <option value="">Без роли</option>
-                  {roles.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  disabled={emp.email === myEmail}
-                  onClick={() => handleDeleteEmployee(emp)}
-                  className="text-[12.5px] text-[#A34B36] font-semibold disabled:opacity-40 text-left"
-                >
-                  Удалить
-                </button>
-              </div>
+                {resettingId === emp.id && (
+                  <div className="flex items-center gap-2 pb-2.5 border-b border-borderSoft">
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="Новый пароль (мин. 6 символов)"
+                      value={resetPasswordValue}
+                      onChange={(e) => setResetPasswordValue(e.target.value)}
+                      className="border border-border rounded-md px-2 py-1.5 text-[12.5px] max-w-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleResetPassword(emp, resetPasswordValue)}
+                      className="text-[12.5px] font-semibold text-paper bg-accent rounded-md px-3 py-1.5"
+                    >
+                      Сохранить пароль
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setResettingId(null)}
+                      className="text-[12.5px] text-muted"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                )}
+              </Fragment>
             ))}
           </div>
 
