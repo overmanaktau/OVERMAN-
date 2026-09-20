@@ -566,58 +566,60 @@ export default function PublicationsPage() {
             {entries.length === 0 ? (
               <div className="text-sm text-muted py-4">Нет публикаций за выбранный период</div>
             ) : (
-              <div className="max-h-[520px] overflow-y-auto rounded-md">
-                <div className="sticky top-0 z-10 bg-white grid grid-cols-[64px_54px_90px_60px_84px_1fr_64px_74px_58px_70px_80px_1.4fr_50px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                  <div>Дата</div>
-                  <div>Время</div>
-                  <div>День</div>
-                  <div>Тип</div>
-                  <div>Источник</div>
-                  <div>Магазин</div>
-                  <div>Охват</div>
-                  <div>Просмотры</div>
-                  <div>Лайки</div>
-                  <div>Комменты</div>
-                  <div>Переслано</div>
-                  <div>Текст</div>
-                  <div></div>
-                </div>
-                {entries.map((e) => {
-                  const jsDay = new Date(`${e.entry_date}T00:00:00`).getDay();
-                  const weekdayLabel = WEEKDAY_LABELS[WEEKDAY_JS_ORDER.indexOf(jsDay)];
-                  return (
-                    <div
-                      key={e.id}
-                      className="grid grid-cols-[64px_54px_90px_60px_84px_1fr_64px_74px_58px_70px_80px_1.4fr_50px] gap-2 items-center py-1.5 border-b border-[#F6F3EC] text-[12.5px]"
-                    >
-                      <div className="text-muted">{e.entry_date.slice(8, 10)}.{e.entry_date.slice(5, 7)}</div>
-                      <div className="text-muted">{e.entry_time ? e.entry_time.slice(0, 5) : "—"}</div>
-                      <div className="text-mutedLight truncate">{weekdayLabel}</div>
-                      <div>{POST_TYPE_LABEL[e.post_type]}</div>
-                      <div className="text-muted">{SOURCE_LABEL[e.source]}</div>
-                      <div className="truncate">{storeName(e.store)}</div>
-                      <div className="num">{e.reach.toLocaleString("ru-RU")}</div>
-                      <div className="num">{e.views.toLocaleString("ru-RU")}</div>
-                      <div className="num">{e.likes.toLocaleString("ru-RU")}</div>
-                      <div className="num">{e.comments.toLocaleString("ru-RU")}</div>
-                      <div className="num">{e.shares.toLocaleString("ru-RU")}</div>
-                      <div className="text-muted truncate" title={e.caption ?? ""}>
-                        {e.caption ?? "—"}
+              <div className="max-h-[520px] overflow-auto rounded-md">
+                <div className="min-w-[1320px]">
+                  <div className="sticky top-0 z-10 bg-white grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                    <div>Дата</div>
+                    <div>Время</div>
+                    <div>День</div>
+                    <div>Тип</div>
+                    <div>Источник</div>
+                    <div>Магазин</div>
+                    <div>Охват</div>
+                    <div>Просмотры</div>
+                    <div>Лайки</div>
+                    <div>Комменты</div>
+                    <div>Переслано</div>
+                    <div>Текст</div>
+                    <div></div>
+                  </div>
+                  {entries.map((e) => {
+                    const jsDay = new Date(`${e.entry_date}T00:00:00`).getDay();
+                    const weekdayLabel = WEEKDAY_LABELS[WEEKDAY_JS_ORDER.indexOf(jsDay)];
+                    return (
+                      <div
+                        key={e.id}
+                        className="grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 items-center py-1.5 border-b border-[#F6F3EC] text-[12.5px]"
+                      >
+                        <div className="text-muted">{e.entry_date.slice(8, 10)}.{e.entry_date.slice(5, 7)}</div>
+                        <div className="text-muted">{e.entry_time ? e.entry_time.slice(0, 5) : "—"}</div>
+                        <div className="text-mutedLight truncate">{weekdayLabel}</div>
+                        <div>{POST_TYPE_LABEL[e.post_type]}</div>
+                        <div className="text-muted">{SOURCE_LABEL[e.source]}</div>
+                        <div className="truncate">{storeName(e.store)}</div>
+                        <div className="num">{e.reach.toLocaleString("ru-RU")}</div>
+                        <div className="num">{e.views.toLocaleString("ru-RU")}</div>
+                        <div className="num">{e.likes.toLocaleString("ru-RU")}</div>
+                        <div className="num">{e.comments.toLocaleString("ru-RU")}</div>
+                        <div className="num">{e.shares.toLocaleString("ru-RU")}</div>
+                        <div className="text-muted truncate" title={e.caption ?? ""}>
+                          {e.caption ?? "—"}
+                        </div>
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(e.id)}
+                            className="text-[#A34B36] font-semibold text-left"
+                          >
+                            Удалить
+                          </button>
+                        ) : (
+                          <div />
+                        )}
                       </div>
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(e.id)}
-                          className="text-[#A34B36] font-semibold text-left"
-                        >
-                          Удалить
-                        </button>
-                      ) : (
-                        <div />
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
