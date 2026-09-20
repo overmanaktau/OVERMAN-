@@ -698,7 +698,7 @@ export default function EmployeesPage() {
     setStoreEdits({});
   }
 
-  const { setGuard } = useUnsavedChanges();
+  const { setGuard, requestNavigation } = useUnsavedChanges();
   const saveAllRef = useRef(saveAllDirty);
   saveAllRef.current = saveAllDirty;
   const discardAllRef = useRef(discardAllDirty);
@@ -709,6 +709,11 @@ export default function EmployeesPage() {
     return () => setGuard(false, null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyDirty]);
+
+  function changeTab(t: "employees" | "roles" | "stores") {
+    if (t === tab) return;
+    requestNavigation(() => setTab(t));
+  }
 
   return (
     <>
@@ -727,7 +732,7 @@ export default function EmployeesPage() {
           <button
             key={t}
             type="button"
-            onClick={() => setTab(t)}
+            onClick={() => changeTab(t)}
             className={`text-[13px] rounded-md px-3.5 py-2 ${
               tab === t ? "bg-accent text-paper font-bold" : "text-muted font-medium"
             }`}
