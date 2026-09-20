@@ -243,6 +243,10 @@ export default function PublicationsPage() {
               {p}
             </button>
           ))}
+          <div className="w-px h-5 bg-border mx-0.5" />
+          <button type="button" disabled title="Скоро" className="text-[13px] text-mutedLight font-medium px-3.5 py-2">
+            Свой период
+          </button>
         </div>
 
         <select
