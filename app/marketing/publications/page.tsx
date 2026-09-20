@@ -29,20 +29,6 @@ type PublicationEntry = {
   caption: string | null;
 };
 
-type NewEntry = {
-  entry_date: string;
-  entry_time: string;
-  post_type: "post" | "reel";
-  source: "organic" | "ads";
-  store: string;
-  reach: string;
-  views: string;
-  likes: string;
-  comments: string;
-  shares: string;
-  caption: string;
-};
-
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -73,22 +59,6 @@ function getPeriodRange(index: number, today: Date): { start: Date; end: Date } 
 function avg(nums: number[]): number {
   if (nums.length === 0) return 0;
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
-}
-
-function emptyNewEntry(store: string): NewEntry {
-  return {
-    entry_date: ymd(new Date()),
-    entry_time: "",
-    post_type: "post",
-    source: "organic",
-    store,
-    reach: "",
-    views: "",
-    likes: "",
-    comments: "",
-    shares: "",
-    caption: "",
-  };
 }
 
 export default function PublicationsPage() {
@@ -129,14 +99,6 @@ export default function PublicationsPage() {
   const [entries, setEntries] = useState<PublicationEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [adding, setAdding] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newEntry, setNewEntry] = useState<NewEntry>(() => emptyNewEntry(""));
-
-  useEffect(() => {
-    setNewEntry((prev) => (prev.store ? prev : { ...prev, store: accessibleStores[0]?.code ?? "" }));
-  }, [accessibleStores]);
 
   const load = useCallback(async () => {
     if (filterStoreCodes.length === 0) {
@@ -234,37 +196,6 @@ export default function PublicationsPage() {
     };
   });
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newEntry.store) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const payload = {
-        store: newEntry.store,
-        entry_date: newEntry.entry_date,
-        entry_time: newEntry.entry_time || null,
-        post_type: newEntry.post_type,
-        source: newEntry.source,
-        reach: newEntry.reach === "" ? 0 : Number(newEntry.reach),
-        views: newEntry.views === "" ? 0 : Number(newEntry.views),
-        likes: newEntry.likes === "" ? 0 : Number(newEntry.likes),
-        comments: newEntry.comments === "" ? 0 : Number(newEntry.comments),
-        shares: newEntry.shares === "" ? 0 : Number(newEntry.shares),
-        caption: newEntry.caption.trim() || null,
-      };
-      const { error: err } = await supabase.from("publication_entries").insert(payload);
-      if (err) throw err;
-      setNewEntry(emptyNewEntry(newEntry.store));
-      setAdding(false);
-      await load();
-    } catch (e) {
-      setError(getErrorMessage(e));
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function handleDelete(id: number) {
     if (!window.confirm("Удалить эту публикацию?")) return;
     setError(null);
@@ -283,8 +214,8 @@ export default function PublicationsPage() {
         <div className="text-xs text-mutedLight">Маркетинг</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Публикации</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Учёт вышедших публикаций в Instagram: охваты, просмотры и реакции вносятся вручную по
-          каждому посту или рилсу.
+          Учёт вышедших публикаций в Instagram: охваты, просмотры и реакции будут подтягиваться
+          автоматически по каждому посту или рилсу.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -338,124 +269,7 @@ export default function PublicationsPage() {
             </option>
           ))}
         </select>
-
-        {canEdit && (
-          <button
-            type="button"
-            onClick={() => setAdding((v) => !v)}
-            className="ml-auto text-[13px] font-bold text-paper bg-accent rounded-lg px-[18px] py-2.5"
-          >
-            {adding ? "Отмена" : "+ Добавить публикацию"}
-          </button>
-        )}
       </div>
-
-      {adding && canEdit && (
-        <form
-          onSubmit={handleCreate}
-          className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
-        >
-          <div className="text-[15px] font-bold">Новая публикация</div>
-          <div className="grid grid-cols-4 gap-3">
-            <input
-              type="date"
-              required
-              value={newEntry.entry_date}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, entry_date: e.target.value }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            />
-            <input
-              type="time"
-              value={newEntry.entry_time}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, entry_time: e.target.value }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            />
-            <select
-              value={newEntry.post_type}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, post_type: e.target.value as "post" | "reel" }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            >
-              <option value="post">Пост</option>
-              <option value="reel">Рилс</option>
-            </select>
-            <select
-              value={newEntry.source}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, source: e.target.value as "organic" | "ads" }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            >
-              <option value="organic">Органика</option>
-              <option value="ads">Реклама</option>
-            </select>
-          </div>
-          <div className="grid grid-cols-6 gap-3">
-            <select
-              value={newEntry.store}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, store: e.target.value }))}
-              className="col-span-1 border border-border rounded-lg px-3 py-2.5 text-sm"
-            >
-              {accessibleStores.map((s) => (
-                <option key={s.code} value={s.code}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min={0}
-              placeholder="Охват"
-              value={newEntry.reach}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, reach: e.target.value }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            />
-            <input
-              type="number"
-              min={0}
-              placeholder="Просмотры"
-              value={newEntry.views}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, views: e.target.value }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            />
-            <input
-              type="number"
-              min={0}
-              placeholder="Лайки"
-              value={newEntry.likes}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, likes: e.target.value }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            />
-            <input
-              type="number"
-              min={0}
-              placeholder="Комменты"
-              value={newEntry.comments}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, comments: e.target.value }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            />
-            <input
-              type="number"
-              min={0}
-              placeholder="Переслано"
-              value={newEntry.shares}
-              onChange={(e) => setNewEntry((prev) => ({ ...prev, shares: e.target.value }))}
-              className="border border-border rounded-lg px-3 py-2.5 text-sm"
-            />
-          </div>
-          <textarea
-            placeholder="Текст публикации (необязательно)"
-            value={newEntry.caption}
-            onChange={(e) => setNewEntry((prev) => ({ ...prev, caption: e.target.value }))}
-            rows={2}
-            className="border border-border rounded-lg px-3 py-2.5 text-sm resize-none"
-          />
-          <button
-            type="submit"
-            disabled={creating}
-            className="self-start text-[13px] font-bold text-paper bg-accent rounded-lg px-[18px] py-2.5 disabled:opacity-50"
-          >
-            {creating ? "Сохраняем…" : "Сохранить публикацию"}
-          </button>
-        </form>
-      )}
 
       {loading ? (
         <div className="text-sm text-muted">Загрузка…</div>
