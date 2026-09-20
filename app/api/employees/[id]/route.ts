@@ -58,10 +58,29 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: "Нельзя удалить самого себя." }, { status: 400 });
   }
 
+  const { data: roleRow } = await supabaseAdmin
+    .from("user_roles")
+    .select("role_id")
+    .eq("user_id", params.id)
+    .maybeSingle();
+
   const { error } = await supabaseAdmin.auth.admin.deleteUser(params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   await supabaseAdmin.from("user_roles").delete().eq("user_id", params.id);
+
+  if (roleRow?.role_id) {
+    // Clean up a personal (per-employee) role that's now orphaned — shared
+    // roles are left alone even if this was the last employee using them.
+    const { data: role } = await supabaseAdmin
+      .from("roles")
+      .select("is_personal")
+      .eq("id", roleRow.role_id)
+      .maybeSingle();
+    if (role?.is_personal) {
+      await supabaseAdmin.from("roles").delete().eq("id", roleRow.role_id);
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

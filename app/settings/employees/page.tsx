@@ -18,6 +18,7 @@ type StoreAccessGrant = { scope: "all" | "city" | "store"; cityId: number | null
 type RoleDef = {
   id: number;
   name: string;
+  is_personal: boolean;
   role_permissions: { section: string; can_view: boolean; can_edit: boolean }[];
   role_store_access: { scope: "all" | "city" | "store"; city_id: number | null; store_id: number | null }[];
 };
@@ -195,6 +196,67 @@ function StoreAccessEditor({
   );
 }
 
+function EmployeeAccessPanel({
+  role,
+  cities,
+  canEdit,
+  onSave,
+  onCancel,
+}: {
+  role: RoleDef | null;
+  cities: CityWithStores[];
+  canEdit: boolean;
+  onSave: (permissions: Permissions, storeAccess: StoreAccessGrant[]) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [permissions, setPermissions] = useState<Permissions>(
+    role ? toPermissions(role.role_permissions) : emptyPermissions()
+  );
+  const [storeAccess, setStoreAccess] = useState<StoreAccessGrant[]>(
+    role ? toGrants(role.role_store_access) : []
+  );
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSave(permissions, storeAccess);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="pb-4 border-b border-borderSoft flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-6">
+        <div className="flex flex-col gap-2">
+          <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Разделы портала</div>
+          <PermissionsGrid value={permissions} onChange={setPermissions} disabled={!canEdit} />
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Точки продаж</div>
+          <StoreAccessEditor cities={cities} value={storeAccess} onChange={setStoreAccess} disabled={!canEdit} />
+        </div>
+      </div>
+      {canEdit && (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="text-[12.5px] font-semibold text-paper bg-accent rounded-md px-3 py-1.5 disabled:opacity-50"
+          >
+            {saving ? "Сохраняем…" : "Сохранить"}
+          </button>
+          <button type="button" onClick={onCancel} className="text-[12.5px] text-muted">
+            Отмена
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function EmployeesPage() {
   const { email: myEmail, isAdmin, permissions } = useAuth();
   const canEdit = isAdmin || permissions["settings.employees"].canEdit;
@@ -207,6 +269,9 @@ export default function EmployeesPage() {
   const [error, setError] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
+  const [accessEditingId, setAccessEditingId] = useState<string | null>(null);
+
+  const sharedRoles = roles.filter((r) => !r.is_personal);
 
   const [newEmail, setNewEmail] = useState("");
   const [newFullName, setNewFullName] = useState("");
@@ -254,6 +319,7 @@ export default function EmployeesPage() {
 
   async function handleRoleChange(emp: Employee, value: string) {
     setError(null);
+    const prevRole = emp.roleId ? roles.find((r) => r.id === emp.roleId) ?? null : null;
     try {
       await authFetch(`/api/employees/${emp.id}`, {
         method: "PATCH",
@@ -269,8 +335,50 @@ export default function EmployeesPage() {
             : e
         )
       );
+      // The old role was a personal (per-employee) one and nobody uses it anymore — clean it up.
+      if (prevRole?.is_personal && String(prevRole.id) !== value) {
+        await authFetch(`/api/roles/${prevRole.id}`, { method: "DELETE" }).catch(() => {});
+        await loadAll();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось изменить роль.");
+    }
+  }
+
+  async function handleSaveEmployeeAccess(emp: Employee, perms: Permissions, storeAccess: StoreAccessGrant[]) {
+    setError(null);
+    const currentRole = emp.roleId ? roles.find((r) => r.id === emp.roleId) ?? null : null;
+    try {
+      if (currentRole?.is_personal) {
+        await Promise.all([
+          authFetch(`/api/roles/${currentRole.id}`, { method: "PATCH", body: JSON.stringify({ permissions: perms }) }),
+          authFetch(`/api/roles/${currentRole.id}/store-access`, {
+            method: "PATCH",
+            body: JSON.stringify({ grants: storeAccess }),
+          }),
+        ]);
+      } else {
+        const created = await authFetch("/api/roles", {
+          method: "POST",
+          body: JSON.stringify({
+            name: `personal:${emp.id}:${Date.now()}`,
+            permissions: perms,
+            isPersonal: true,
+          }),
+        });
+        await authFetch(`/api/roles/${created.id}/store-access`, {
+          method: "PATCH",
+          body: JSON.stringify({ grants: storeAccess }),
+        });
+        await authFetch(`/api/employees/${emp.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ role: "custom", roleId: created.id }),
+        });
+      }
+      setAccessEditingId(null);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось сохранить права доступа.");
     }
   }
 
@@ -548,13 +656,28 @@ export default function EmployeesPage() {
                   >
                     <option value="admin">Администратор</option>
                     <option value="">Без роли</option>
-                    {roles.map((r) => (
+                    {sharedRoles.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.name}
                       </option>
                     ))}
+                    {(() => {
+                      const current = emp.roleId ? roles.find((r) => r.id === emp.roleId) : null;
+                      return current?.is_personal ? (
+                        <option value={current.id}>Личный доступ</option>
+                      ) : null;
+                    })()}
                   </select>
                   <div className="flex flex-col gap-1">
+                    {emp.role !== "admin" && (
+                      <button
+                        type="button"
+                        onClick={() => setAccessEditingId(accessEditingId === emp.id ? null : emp.id)}
+                        className="text-[12px] text-accent font-semibold text-left"
+                      >
+                        Права
+                      </button>
+                    )}
                     {canEdit && (
                       <button
                         type="button"
@@ -577,6 +700,15 @@ export default function EmployeesPage() {
                     </button>
                   </div>
                 </div>
+                {accessEditingId === emp.id && (
+                  <EmployeeAccessPanel
+                    role={emp.roleId ? roles.find((r) => r.id === emp.roleId) ?? null : null}
+                    cities={cities}
+                    canEdit={canEdit}
+                    onSave={(perms, storeAccess) => handleSaveEmployeeAccess(emp, perms, storeAccess)}
+                    onCancel={() => setAccessEditingId(null)}
+                  />
+                )}
                 {resettingId === emp.id && canEdit && (
                   <div className="flex items-center gap-2 pb-2.5 border-b border-borderSoft">
                     <input
@@ -645,7 +777,7 @@ export default function EmployeesPage() {
               >
                 <option value="admin">Администратор</option>
                 <option value="">Без роли</option>
-                {roles.map((r) => (
+                {sharedRoles.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name}
                   </option>
@@ -664,7 +796,7 @@ export default function EmployeesPage() {
         </div>
       ) : tab === "roles" ? (
         <div className="flex flex-col gap-4">
-          {roles.map((role) => (
+          {sharedRoles.map((role) => (
             <RoleCard
               key={role.id}
               role={role}

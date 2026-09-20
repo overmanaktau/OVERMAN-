@@ -13,7 +13,9 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabaseAdmin
     .from("roles")
-    .select("id, name, role_permissions(section, can_view, can_edit), role_store_access(scope, city_id, store_id)")
+    .select(
+      "id, name, is_personal, role_permissions(section, can_view, can_edit), role_store_access(scope, city_id, store_id)"
+    )
     .order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -25,13 +27,18 @@ export async function POST(request: Request) {
   if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const body = await request.json();
-  const { name, permissions } = body as {
+  const { name, permissions, isPersonal } = body as {
     name?: string;
     permissions?: Record<string, { canView?: boolean; canEdit?: boolean }>;
+    isPersonal?: boolean;
   };
   if (!name?.trim()) return NextResponse.json({ error: "Название роли обязательно." }, { status: 400 });
 
-  const { data: role, error } = await supabaseAdmin.from("roles").insert({ name: name.trim() }).select("id").single();
+  const { data: role, error } = await supabaseAdmin
+    .from("roles")
+    .insert({ name: name.trim(), is_personal: !!isPersonal })
+    .select("id")
+    .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   const rows = Object.entries(permissions ?? {}).map(([section, p]) => ({
