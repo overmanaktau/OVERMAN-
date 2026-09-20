@@ -322,7 +322,7 @@ export default function DataEntryPage() {
 
   if (!canView) {
     return (
-      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
         <p className="text-sm text-muted">У вас нет доступа к разделу «Внесение данных».</p>
       </div>
     );
@@ -330,7 +330,7 @@ export default function DataEntryPage() {
 
   if (accessibleStores.length === 0) {
     return (
-      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
         <p className="text-sm text-muted">У вас нет доступа ни к одной точке продаж.</p>
       </div>
     );
@@ -363,7 +363,7 @@ export default function DataEntryPage() {
       </div>
 
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 bg-white border border-border rounded-card p-1.5">
+        <div className="flex items-center gap-3 bg-surface border border-border rounded-card p-1.5">
           <button
             type="button"
             aria-label="Предыдущий месяц"
@@ -390,7 +390,7 @@ export default function DataEntryPage() {
           value={store}
           onChange={(e) => setStore(e.target.value)}
           disabled={loading || accessibleStores.length <= 1}
-          className="text-[13px] font-semibold bg-white border border-border rounded-lg px-3 py-2 disabled:opacity-70"
+          className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2 disabled:opacity-70"
         >
           {accessibleStores.map((s) => (
             <option key={s.code} value={s.code}>
@@ -400,13 +400,13 @@ export default function DataEntryPage() {
         </select>
       </div>
 
-      <div className="bg-white border border-border rounded-card px-6 pt-[22px] pb-5 flex flex-col gap-3.5">
+      <div className="bg-surface border border-border rounded-card px-6 pt-[22px] pb-5 flex flex-col gap-3.5">
         <div className="text-[15px] font-bold">
           Трафик и расходы по каналам — {MONTH_NAMES[monthIndex].toLowerCase()} {year}
         </div>
 
         <div className="max-h-[460px] overflow-y-auto rounded-md">
-          <div className="sticky top-0 z-10 bg-white grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+          <div className="sticky top-0 z-10 bg-surface grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
             <div>Дата</div>
             <div>День</div>
             <div>Трафик план</div>
@@ -421,7 +421,7 @@ export default function DataEntryPage() {
           {rows.map((row, i) => (
             <div
               key={row.entryDate}
-              className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-[#F6F3EC] ${
+              className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-borderSoft ${
                 row.weekend ? "bg-weekendTint" : ""
               }`}
             >
@@ -479,7 +479,7 @@ export default function DataEntryPage() {
         </div>
       </div>
 
-      <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+      <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
         <div className="flex flex-col gap-0.5">
           <div className="text-[15px] font-bold">Дополнительные расходы на маркетинг</div>
           <div className="text-[12.5px] text-muted">

@@ -201,7 +201,7 @@ export default function StatisticsPage() {
 
   if (!canView) {
     return (
-      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
         <p className="text-sm text-muted">У вас нет доступа к разделу «Статистика».</p>
       </div>
     );
@@ -272,7 +272,7 @@ export default function StatisticsPage() {
       </div>
 
       {/* Period selector */}
-      <div className="flex items-center gap-1.5 bg-white border border-border rounded-card p-1.5 w-fit">
+      <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
         {PERIODS.map((p, i) => (
           <button
             key={p}
@@ -321,7 +321,7 @@ export default function StatisticsPage() {
 
       {/* Traffic chart + channel spend */}
       <div className="grid grid-cols-[1.35fr_1fr] gap-4 items-stretch">
-        <div className="bg-white border border-border rounded-card px-6 pt-[22px] pb-[18px] flex flex-col gap-4">
+        <div className="bg-surface border border-border rounded-card px-6 pt-[22px] pb-[18px] flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div className="text-[15px] font-bold">Трафик: план / факт</div>
             <div className="flex items-center gap-4 text-xs text-muted">
@@ -356,7 +356,7 @@ export default function StatisticsPage() {
           )}
         </div>
 
-        <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+        <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
           <div className="text-[15px] font-bold">Расходы по каналам</div>
           {channelTotal === 0 ? (
             <div className="text-sm text-muted py-4">Нет расходов за период</div>

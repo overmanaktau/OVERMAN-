@@ -151,7 +151,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (status === "error") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-paper px-6">
-        <div className="bg-white border border-border rounded-card p-8 max-w-sm text-center flex flex-col gap-4">
+        <div className="bg-surface border border-border rounded-card p-8 max-w-sm text-center flex flex-col gap-4">
           <div className="text-sm text-[#A34B36]">{errorMsg}</div>
           <button
             type="button"

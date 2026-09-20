@@ -5,22 +5,27 @@ import type { Config } from "tailwindcss";
 // identity — every new screen should pull colors/fonts from here
 // rather than hardcoding hex values again.
 const config: Config = {
+  darkMode: "class",
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        paper: "#F6F3EE",       // page background
-        ink: "#1C1A17",         // primary text
-        muted: "#5B5548",       // secondary text
-        mutedLight: "#8C8577",  // tertiary text / labels
-        border: "#E4DFD6",      // card borders, dividers
-        borderSoft: "#EFEBE2",  // row dividers inside cards
-        sidebar: "#17140F",     // sidebar background
+        // These resolve through CSS variables (see app/globals.css) so a
+        // single `.dark` class on <html> re-themes every existing usage
+        // without touching each component's classNames.
+        paper: "var(--color-paper)",           // page background
+        ink: "var(--color-ink)",               // primary text
+        muted: "var(--color-muted)",           // secondary text
+        mutedLight: "var(--color-muted-light)", // tertiary text / labels
+        border: "var(--color-border)",         // card borders, dividers
+        borderSoft: "var(--color-border-soft)", // row dividers inside cards
+        surface: "var(--color-surface)",       // card background (was bg-white)
+        sidebar: "#17140F",     // sidebar background — stays dark in both themes
         sidebarText: "#EDE8DF", // sidebar primary text
         sidebarMuted: "#8C8577",
-        accent: "#2F4A3C",      // deep green — primary action / active state
-        weekendTint: "#FBF8F1",
-        cellBorder: "#ECE7DA",
+        accent: "var(--color-accent)",         // deep green — primary action / active state
+        weekendTint: "var(--color-weekend-tint)",
+        cellBorder: "var(--color-cell-border)",
       },
       fontFamily: {
         serif: ["var(--font-newsreader)", "Georgia", "serif"],

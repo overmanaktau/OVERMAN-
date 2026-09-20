@@ -28,7 +28,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-paper">
       <form
         onSubmit={handleSubmit}
-        className="bg-white border border-border rounded-card p-8 w-full max-w-sm flex flex-col gap-4"
+        className="bg-surface border border-border rounded-card p-8 w-full max-w-sm flex flex-col gap-4"
       >
         <div className="flex flex-col gap-1 mb-2">
           <div className="font-serif text-2xl font-semibold">OVERMAN</div>
@@ -44,7 +44,7 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent"
+            className="border border-border bg-surface text-ink rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent"
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -57,7 +57,7 @@ export default function LoginPage() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent"
+            className="border border-border bg-surface text-ink rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent"
           />
         </div>
         {error && <div className="text-sm text-[#A34B36]">{error}</div>}

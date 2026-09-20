@@ -595,7 +595,7 @@ export default function EmployeesPage() {
         {error && <p className="text-sm text-[#A34B36]">{error}</p>}
       </div>
 
-      <div className="flex items-center gap-1.5 bg-white border border-border rounded-card p-1.5 w-fit">
+      <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
         {(["employees", "roles", "stores"] as const).map((t) => (
           <button
             key={t}
@@ -614,7 +614,7 @@ export default function EmployeesPage() {
         <div className="text-sm text-muted">Загрузка…</div>
       ) : tab === "employees" ? (
         <div className="flex flex-col gap-4">
-          <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+          <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="text-[15px] font-bold">Список сотрудников</div>
             <div className="grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Имя</div>
@@ -742,7 +742,7 @@ export default function EmployeesPage() {
           {canEdit && (
           <form
             onSubmit={handleCreateEmployee}
-            className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
+            className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
           >
             <div className="text-[15px] font-bold">Добавить сотрудника</div>
             <div className="grid grid-cols-4 gap-3">
@@ -810,7 +810,7 @@ export default function EmployeesPage() {
           {canEdit && (
           <form
             onSubmit={handleCreateRole}
-            className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
+            className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
           >
             <div className="text-[15px] font-bold">Создать новую роль</div>
             <input
@@ -838,7 +838,7 @@ export default function EmployeesPage() {
       ) : (
         <div className="flex flex-col gap-4">
           {cities.map((city) => (
-            <div key={city.id} className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+            <div key={city.id} className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
               <div className="flex items-center gap-3">
                 <input
                   type="text"
@@ -912,7 +912,7 @@ export default function EmployeesPage() {
           {canEdit && (
           <form
             onSubmit={handleCreateCity}
-            className="bg-white border border-border rounded-card px-6 py-[22px] flex items-center gap-3"
+            className="bg-surface border border-border rounded-card px-6 py-[22px] flex items-center gap-3"
           >
             <input
               type="text"
@@ -965,7 +965,7 @@ function RoleCard({
   }
 
   return (
-    <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-4">
+    <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-4">
       <div className="flex items-center gap-3">
         <input
           type="text"

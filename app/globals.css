@@ -2,8 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-paper: #F6F3EE;
+  --color-ink: #1C1A17;
+  --color-muted: #5B5548;
+  --color-muted-light: #8C8577;
+  --color-border: #E4DFD6;
+  --color-border-soft: #EFEBE2;
+  --color-surface: #FFFFFF;
+  --color-accent: #2F4A3C;
+  --color-weekend-tint: #FBF8F1;
+  --color-cell-border: #ECE7DA;
+}
+
+.dark {
+  --color-paper: #131211;
+  --color-ink: #EDE8DF;
+  --color-muted: #A39D8E;
+  --color-muted-light: #756F60;
+  --color-border: #322E27;
+  --color-border-soft: #211F1A;
+  --color-surface: #1C1A17;
+  --color-accent: #4C7A63;
+  --color-weekend-tint: #1A1815;
+  --color-cell-border: #2A2721;
+}
+
 body {
-  background: #F6F3EE;
+  background: var(--color-paper);
+  transition: background-color 0.15s ease;
+}
+
+/* Form controls don't pick up custom color tokens by default (browsers give
+   them their own white/black), so re-theme them globally in dark mode
+   instead of touching every input across the app. */
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark textarea,
+.dark select {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
 }
 
 /* Tabular numbers for anything money/count-like, matching the mockup */

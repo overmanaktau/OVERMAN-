@@ -6,7 +6,7 @@ export default function InstagramTargetPage() {
   const { isAdmin, permissions } = useAuth();
   if (!isAdmin && !permissions["marketing.instagram_target"].canView) {
     return (
-      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
         <p className="text-sm text-muted">У вас нет доступа к разделу «Инстаграм таргет».</p>
       </div>
     );

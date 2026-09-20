@@ -1,6 +1,19 @@
 import type { Metadata } from "next";
 import { Newsreader, Manrope } from "next/font/google";
 import "./globals.css";
+import ThemeProvider from "@/components/ThemeProvider";
+import ThemeToggle from "@/components/ThemeToggle";
+
+// Runs before hydration so the page never flashes the wrong theme on load.
+const NO_FLASH_SCRIPT = `
+(function () {
+  try {
+    var stored = window.localStorage.getItem("overman.theme");
+    var dark = stored === "dark" || (stored !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.classList.toggle("dark", dark);
+  } catch (e) {}
+})();
+`;
 
 const newsreader = Newsreader({
   subsets: ["latin"],
@@ -26,8 +39,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ru">
-      <body className={`${newsreader.variable} ${manrope.variable} font-sans text-ink`}>
-        {children}
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: NO_FLASH_SCRIPT }} />
+      </head>
+      <body className={`${newsreader.variable} ${manrope.variable} font-sans text-ink bg-paper`}>
+        <ThemeProvider>
+          {children}
+          <ThemeToggle />
+        </ThemeProvider>
       </body>
     </html>
   );

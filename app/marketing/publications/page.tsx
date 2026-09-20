@@ -134,7 +134,7 @@ export default function PublicationsPage() {
 
   if (!canView) {
     return (
-      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
         <p className="text-sm text-muted">У вас нет доступа к разделу «Публикации».</p>
       </div>
     );
@@ -142,7 +142,7 @@ export default function PublicationsPage() {
 
   if (accessibleStores.length === 0) {
     return (
-      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
         <p className="text-sm text-muted">У вас нет доступа ни к одной точке продаж.</p>
       </div>
     );
@@ -229,7 +229,7 @@ export default function PublicationsPage() {
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5 bg-white border border-border rounded-card p-1.5 w-fit">
+        <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
           {PERIODS.map((p, i) => (
             <button
               key={p}
@@ -248,7 +248,7 @@ export default function PublicationsPage() {
         <select
           value={cityFilter}
           onChange={(e) => setCityFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-          className="text-[13px] font-semibold bg-white border border-border rounded-lg px-3 py-2.5"
+          className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2.5"
         >
           <option value="all">Все города</option>
           {accessibleCities.map((c) => (
@@ -261,7 +261,7 @@ export default function PublicationsPage() {
         <select
           value={storeFilter}
           onChange={(e) => setStoreFilter(e.target.value)}
-          className="text-[13px] font-semibold bg-white border border-border rounded-lg px-3 py-2.5"
+          className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2.5"
         >
           <option value="all">Все точки</option>
           {storesForCity.map((s) => (
@@ -277,19 +277,19 @@ export default function PublicationsPage() {
       ) : (
         <>
           <div className="grid grid-cols-4 gap-3.5">
-            <div className="bg-white border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
+            <div className="bg-surface border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
               <div className="text-xs text-muted">Публикаций</div>
               <div className="font-serif text-[26px] font-semibold num">{totalCount}</div>
             </div>
-            <div className="bg-white border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
+            <div className="bg-surface border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
               <div className="text-xs text-muted">Средний охват</div>
               <div className="font-serif text-[26px] font-semibold num">{avgReach.toLocaleString("ru-RU")}</div>
             </div>
-            <div className="bg-white border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
+            <div className="bg-surface border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
               <div className="text-xs text-muted">Средние просмотры</div>
               <div className="font-serif text-[26px] font-semibold num">{avgViews.toLocaleString("ru-RU")}</div>
             </div>
-            <div className="bg-white border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
+            <div className="bg-surface border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
               <div className="text-xs text-muted">Переслано в среднем</div>
               <div className="font-serif text-[26px] font-semibold num">{avgShares.toLocaleString("ru-RU")}</div>
             </div>
@@ -444,7 +444,7 @@ export default function PublicationsPage() {
               ) : (
                 <div className="max-h-[520px] overflow-auto rounded-md">
                   <div className="min-w-[1320px]">
-                    <div className="sticky top-0 z-10 bg-white grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                    <div className="sticky top-0 z-10 bg-surface grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
                       <div>Дата</div>
                       <div>Время</div>
                       <div>День</div>
@@ -465,7 +465,7 @@ export default function PublicationsPage() {
                       return (
                         <div
                           key={e.id}
-                          className="grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 items-center py-1.5 border-b border-[#F6F3EC] text-[12.5px]"
+                          className="grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 items-center py-1.5 border-b border-borderSoft text-[12.5px]"
                         >
                           <div className="text-muted">{e.entry_date.slice(8, 10)}.{e.entry_date.slice(5, 7)}</div>
                           <div className="text-muted">{e.entry_time ? e.entry_time.slice(0, 5) : "—"}</div>

@@ -10,7 +10,7 @@ function RequireSettingsAccess({ children }: { children: React.ReactNode }) {
   if (role === null) return null; // AuthGate already showed a loading/error state
   if (!isAdmin && !permissions["settings.employees"].canView) {
     return (
-      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
         <p className="text-sm text-muted">У вас нет доступа к разделу «Настройки».</p>
       </div>
     );
