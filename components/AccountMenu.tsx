@@ -115,24 +115,26 @@ export default function AccountMenu() {
             </div>
           </div>
           <div className="h-px bg-border mx-1" />
-          <div className="px-2 py-1.5 flex flex-col gap-1">
-            <div className="text-[10.5px] uppercase tracking-wide text-mutedLight mb-0.5">Версия сайта</div>
-            <button
-              type="button"
-              disabled
-              title="Скоро"
-              className="text-[13px] text-left text-mutedLight px-1 py-1 rounded-md cursor-not-allowed"
-            >
-              Версия для ПК (скоро)
-            </button>
-            <button
-              type="button"
-              disabled
-              title="Скоро"
-              className="text-[13px] text-left text-mutedLight px-1 py-1 rounded-md cursor-not-allowed"
-            >
-              Мобильная версия (скоро)
-            </button>
+          <div className="px-2 py-1.5">
+            <div className="text-[10.5px] uppercase tracking-wide text-mutedLight mb-1.5">Версия сайта</div>
+            <div className="flex items-center gap-0.5 bg-paper rounded-md p-1">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                title="Версия для ПК"
+                className="flex-1 h-8 rounded-md text-[12.5px] font-semibold bg-accent text-paper"
+              >
+                Для ПК
+              </button>
+              <button
+                type="button"
+                disabled
+                title="Скоро"
+                className="flex-1 h-8 rounded-md text-[12.5px] text-mutedLight cursor-not-allowed"
+              >
+                Мобильная (скоро)
+              </button>
+            </div>
           </div>
           <div className="h-px bg-border mx-1" />
           <button
