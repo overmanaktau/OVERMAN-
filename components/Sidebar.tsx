@@ -144,6 +144,15 @@ export default function Sidebar() {
     (item) => isAdmin || permissions[item.section]?.canView
   );
 
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
+    marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),
+    settings: SETTINGS_SUBMENU.some((item) => pathname === item.href),
+  }));
+
+  function toggleGroup(key: string) {
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
   return (
     <div className="w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6">
       <AccountMenu />
@@ -171,27 +180,34 @@ export default function Sidebar() {
 
         {visibleMarketing.length > 0 && (
           <div className="flex flex-col gap-0.5 mt-1">
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold">
-              Маркетинг
-            </div>
-            <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
-              {visibleMarketing.map((item) => {
-                const active = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`px-3 py-2 rounded-md text-[13px] ${
-                      active
-                        ? "bg-accent text-paper font-semibold"
-                        : "text-[#A39D8E] font-medium hover:text-sidebarText"
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
+            <button
+              type="button"
+              onClick={() => toggleGroup("marketing")}
+              className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold"
+            >
+              <span>Маркетинг</span>
+              <span className="text-sidebarMuted text-[10px]">{openGroups.marketing ? "▲" : "▼"}</span>
+            </button>
+            {openGroups.marketing && (
+              <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
+                {visibleMarketing.map((item) => {
+                  const active = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`px-3 py-2 rounded-md text-[13px] ${
+                        active
+                          ? "bg-accent text-paper font-semibold"
+                          : "text-[#A39D8E] font-medium hover:text-sidebarText"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -204,27 +220,34 @@ export default function Sidebar() {
 
         {visibleSettings.length > 0 && (
           <div className="flex flex-col gap-0.5 mt-1">
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold">
-              Настройки
-            </div>
-            <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
-              {visibleSettings.map((item) => {
-                const active = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`px-3 py-2 rounded-md text-[13px] ${
-                      active
-                        ? "bg-accent text-paper font-semibold"
-                        : "text-[#A39D8E] font-medium hover:text-sidebarText"
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
+            <button
+              type="button"
+              onClick={() => toggleGroup("settings")}
+              className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold"
+            >
+              <span>Настройки</span>
+              <span className="text-sidebarMuted text-[10px]">{openGroups.settings ? "▲" : "▼"}</span>
+            </button>
+            {openGroups.settings && (
+              <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
+                {visibleSettings.map((item) => {
+                  const active = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`px-3 py-2 rounded-md text-[13px] ${
+                        active
+                          ? "bg-accent text-paper font-semibold"
+                          : "text-[#A39D8E] font-medium hover:text-sidebarText"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </nav>
