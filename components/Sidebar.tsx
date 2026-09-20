@@ -2,9 +2,10 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
+import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import AccountMenu from "@/components/AccountMenu";
 import type { SectionKey } from "@/lib/permissions";
 
@@ -24,6 +25,24 @@ const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] 
 const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "Сотрудники и доступы", href: "/settings/employees", section: "settings.employees" },
 ];
+
+function GuardedLink({ href, className, children }: { href: string; className?: string; children: React.ReactNode }) {
+  const router = useRouter();
+  const { isDirty, requestNavigation } = useUnsavedChanges();
+  return (
+    <Link
+      href={href}
+      className={className}
+      onClick={(e) => {
+        if (!isDirty) return;
+        e.preventDefault();
+        requestNavigation(() => router.push(href));
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
 
 function StorePicker() {
   const { cities, stores, accessibleStoreCodes } = useAuth();
@@ -193,7 +212,7 @@ export default function Sidebar() {
                 {visibleMarketing.map((item) => {
                   const active = pathname === item.href;
                   return (
-                    <Link
+                    <GuardedLink
                       key={item.href}
                       href={item.href}
                       className={`px-3 py-2 rounded-md text-[13px] ${
@@ -203,7 +222,7 @@ export default function Sidebar() {
                       }`}
                     >
                       {item.label}
-                    </Link>
+                    </GuardedLink>
                   );
                 })}
               </div>
@@ -233,7 +252,7 @@ export default function Sidebar() {
                 {visibleSettings.map((item) => {
                   const active = pathname === item.href;
                   return (
-                    <Link
+                    <GuardedLink
                       key={item.href}
                       href={item.href}
                       className={`px-3 py-2 rounded-md text-[13px] ${
@@ -243,7 +262,7 @@ export default function Sidebar() {
                       }`}
                     >
                       {item.label}
-                    </Link>
+                    </GuardedLink>
                   );
                 })}
               </div>

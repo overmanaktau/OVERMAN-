@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
 import { useTheme } from "@/components/ThemeProvider";
+import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 
 function IconSystem() {
   return (
@@ -50,6 +51,7 @@ export default function AccountMenu() {
   const router = useRouter();
   const { email, fullName } = useAuth();
   const { theme, setTheme } = useTheme();
+  const { requestNavigation } = useUnsavedChanges();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -62,9 +64,14 @@ export default function AccountMenu() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  async function handleLogout() {
+  async function doLogout() {
     await supabase.auth.signOut();
     router.push("/login");
+  }
+
+  function handleLogout() {
+    setOpen(false);
+    requestNavigation(doLogout);
   }
 
   return (

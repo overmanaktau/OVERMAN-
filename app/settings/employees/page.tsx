@@ -1,9 +1,10 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { authFetch } from "@/lib/apiClient";
 import { SECTIONS, emptyPermissions, type Permissions } from "@/lib/permissions";
 import { useAuth } from "@/components/AuthGate";
+import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 
 type Employee = {
   id: string;
@@ -216,6 +217,7 @@ function EmployeeAccessPanel({
     role ? toGrants(role.role_store_access) : []
   );
   const [saving, setSaving] = useState(false);
+  const initialRef = useRef({ permissions, storeAccess });
 
   async function handleSave() {
     setSaving(true);
@@ -225,6 +227,21 @@ function EmployeeAccessPanel({
       setSaving(false);
     }
   }
+
+  const dirty =
+    canEdit &&
+    (JSON.stringify(permissions) !== JSON.stringify(initialRef.current.permissions) ||
+      JSON.stringify(storeAccess) !== JSON.stringify(initialRef.current.storeAccess));
+
+  const { setGuard } = useUnsavedChanges();
+  const saveRef = useRef(handleSave);
+  saveRef.current = handleSave;
+
+  useEffect(() => {
+    setGuard(dirty, dirty ? { onSave: () => saveRef.current(), onDiscard: () => {} } : null);
+    return () => setGuard(false, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty]);
 
   return (
     <div className="pb-4 border-b border-borderSoft flex flex-col gap-3">
@@ -270,6 +287,10 @@ export default function EmployeesPage() {
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [accessEditingId, setAccessEditingId] = useState<string | null>(null);
+
+  const [employeeEdits, setEmployeeEdits] = useState<Record<string, { fullName: string; email: string }>>({});
+  const [cityEdits, setCityEdits] = useState<Record<number, string>>({});
+  const [storeEdits, setStoreEdits] = useState<Record<number, string>>({});
 
   const sharedRoles = roles.filter((r) => !r.is_personal);
 
@@ -401,6 +422,77 @@ export default function EmployeesPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось изменить email.");
     }
+  }
+
+  function getEditedFullName(emp: Employee) {
+    return employeeEdits[emp.id]?.fullName ?? emp.fullName ?? "";
+  }
+  function getEditedEmail(emp: Employee) {
+    return employeeEdits[emp.id]?.email ?? emp.email;
+  }
+  function isEmployeeDirty(emp: Employee) {
+    const edit = employeeEdits[emp.id];
+    if (!edit) return false;
+    return edit.fullName !== (emp.fullName ?? "") || edit.email !== emp.email;
+  }
+  function updateEmployeeEdit(emp: Employee, patch: Partial<{ fullName: string; email: string }>) {
+    setEmployeeEdits((prev) => ({
+      ...prev,
+      [emp.id]: {
+        fullName: patch.fullName ?? prev[emp.id]?.fullName ?? emp.fullName ?? "",
+        email: patch.email ?? prev[emp.id]?.email ?? emp.email,
+      },
+    }));
+  }
+  function discardEmployeeEdit(emp: Employee) {
+    setEmployeeEdits((prev) => {
+      const next = { ...prev };
+      delete next[emp.id];
+      return next;
+    });
+  }
+  async function handleSaveEmployeeEdit(emp: Employee) {
+    const edit = employeeEdits[emp.id];
+    if (!edit) return;
+    if (edit.fullName !== (emp.fullName ?? "")) await handleRenameEmployee(emp, edit.fullName);
+    if (edit.email !== emp.email) await handleUpdateEmail(emp, edit.email);
+    discardEmployeeEdit(emp);
+  }
+
+  function isCityDirty(city: CityWithStores) {
+    const edit = cityEdits[city.id];
+    return edit !== undefined && edit.trim() !== "" && edit !== city.name;
+  }
+  function discardCityEdit(cityId: number) {
+    setCityEdits((prev) => {
+      const next = { ...prev };
+      delete next[cityId];
+      return next;
+    });
+  }
+  async function handleSaveCityEdit(city: CityWithStores) {
+    const edit = cityEdits[city.id];
+    if (edit === undefined || edit.trim() === "" || edit === city.name) return;
+    await handleRenameCity(city.id, edit);
+    discardCityEdit(city.id);
+  }
+
+  function isStoreDirty(store: { id: number; name: string }) {
+    const edit = storeEdits[store.id];
+    return edit !== undefined && edit.trim() !== "" && edit !== store.name;
+  }
+  function discardStoreEdit(storeId: number) {
+    setStoreEdits((prev) => {
+      const next = { ...prev };
+      delete next[storeId];
+      return next;
+    });
+  }
+  async function handleSaveStoreEdit(store: { id: number; name: string }) {
+    const edit = storeEdits[store.id];
+    if (edit === undefined || edit.trim() === "" || edit === store.name) return;
+    await handleRenameStore(store.id, edit);
+    discardStoreEdit(store.id);
   }
 
   async function handleResetPassword(emp: Employee, password: string) {
@@ -583,6 +675,41 @@ export default function EmployeesPage() {
     }
   }
 
+  const anyDirty =
+    employees.some(isEmployeeDirty) ||
+    cities.some(isCityDirty) ||
+    cities.some((c) => c.stores.some(isStoreDirty));
+
+  async function saveAllDirty() {
+    for (const emp of employees) {
+      if (isEmployeeDirty(emp)) await handleSaveEmployeeEdit(emp);
+    }
+    for (const city of cities) {
+      if (isCityDirty(city)) await handleSaveCityEdit(city);
+      for (const s of city.stores) {
+        if (isStoreDirty(s)) await handleSaveStoreEdit(s);
+      }
+    }
+  }
+
+  function discardAllDirty() {
+    setEmployeeEdits({});
+    setCityEdits({});
+    setStoreEdits({});
+  }
+
+  const { setGuard } = useUnsavedChanges();
+  const saveAllRef = useRef(saveAllDirty);
+  saveAllRef.current = saveAllDirty;
+  const discardAllRef = useRef(discardAllDirty);
+  discardAllRef.current = discardAllDirty;
+
+  useEffect(() => {
+    setGuard(anyDirty, anyDirty ? { onSave: () => saveAllRef.current(), onDiscard: () => discardAllRef.current() } : null);
+    return () => setGuard(false, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyDirty]);
+
   return (
     <>
       <div className="flex flex-col gap-1">
@@ -628,21 +755,17 @@ export default function EmployeesPage() {
                 <div className="grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]">
                   <input
                     type="text"
-                    defaultValue={emp.fullName ?? ""}
+                    value={getEditedFullName(emp)}
                     placeholder="Без имени"
                     disabled={!canEdit}
-                    onBlur={(e) => {
-                      if (e.target.value !== (emp.fullName ?? "")) handleRenameEmployee(emp, e.target.value);
-                    }}
+                    onChange={(e) => updateEmployeeEdit(emp, { fullName: e.target.value })}
                     className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   />
                   <input
                     type="email"
-                    defaultValue={emp.email}
+                    value={getEditedEmail(emp)}
                     disabled={!canEdit}
-                    onBlur={(e) => {
-                      if (e.target.value !== emp.email) handleUpdateEmail(emp, e.target.value);
-                    }}
+                    onChange={(e) => updateEmployeeEdit(emp, { email: e.target.value })}
                     className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   />
                   <div className="text-muted text-[12px] truncate" title={resolveStoreLabel(emp, roles, cities)}>
@@ -669,35 +792,56 @@ export default function EmployeesPage() {
                     })()}
                   </select>
                   <div className="flex flex-col gap-1">
-                    {emp.role !== "admin" && (
-                      <button
-                        type="button"
-                        onClick={() => setAccessEditingId(accessEditingId === emp.id ? null : emp.id)}
-                        className="text-[12px] text-accent font-semibold text-left"
-                      >
-                        Права
-                      </button>
+                    {isEmployeeDirty(emp) ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEmployeeEdit(emp)}
+                          className="text-[12px] text-accent font-bold text-left"
+                        >
+                          Сохранить
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => discardEmployeeEdit(emp)}
+                          className="text-[12px] text-muted text-left"
+                        >
+                          Отмена
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {emp.role !== "admin" && (
+                          <button
+                            type="button"
+                            onClick={() => setAccessEditingId(accessEditingId === emp.id ? null : emp.id)}
+                            className="text-[12px] text-accent font-semibold text-left"
+                          >
+                            Права
+                          </button>
+                        )}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setResettingId(resettingId === emp.id ? null : emp.id);
+                              setResetPasswordValue("");
+                            }}
+                            className="text-[12px] text-accent font-semibold text-left"
+                          >
+                            Пароль
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={emp.email === myEmail || !canEdit}
+                          onClick={() => handleDeleteEmployee(emp)}
+                          className="text-[12px] text-[#A34B36] font-semibold disabled:opacity-40 text-left"
+                        >
+                          Удалить
+                        </button>
+                      </>
                     )}
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setResettingId(resettingId === emp.id ? null : emp.id);
-                          setResetPasswordValue("");
-                        }}
-                        className="text-[12px] text-accent font-semibold text-left"
-                      >
-                        Пароль
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={emp.email === myEmail || !canEdit}
-                      onClick={() => handleDeleteEmployee(emp)}
-                      className="text-[12px] text-[#A34B36] font-semibold disabled:opacity-40 text-left"
-                    >
-                      Удалить
-                    </button>
                   </div>
                 </div>
                 {accessEditingId === emp.id && (
@@ -842,17 +986,30 @@ export default function EmployeesPage() {
               <div className="flex items-center gap-3">
                 <input
                   type="text"
-                  defaultValue={city.name}
+                  value={cityEdits[city.id] ?? city.name}
                   disabled={!canEdit}
-                  onBlur={(e) => {
-                    if (e.target.value.trim() && e.target.value !== city.name) handleRenameCity(city.id, e.target.value);
-                  }}
+                  onChange={(e) => setCityEdits((prev) => ({ ...prev, [city.id]: e.target.value }))}
                   className="border border-border rounded-lg px-3 py-2 text-sm font-bold flex-1 max-w-sm disabled:opacity-50"
                 />
-                {canEdit && (
-                  <button type="button" onClick={() => handleDeleteCity(city)} className="text-[13px] text-[#A34B36] font-semibold">
-                    Удалить город
-                  </button>
+                {canEdit && isCityDirty(city) ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveCityEdit(city)}
+                      className="text-[13px] text-accent font-bold"
+                    >
+                      Сохранить
+                    </button>
+                    <button type="button" onClick={() => discardCityEdit(city.id)} className="text-[13px] text-muted">
+                      Отмена
+                    </button>
+                  </>
+                ) : (
+                  canEdit && (
+                    <button type="button" onClick={() => handleDeleteCity(city)} className="text-[13px] text-[#A34B36] font-semibold">
+                      Удалить город
+                    </button>
+                  )
                 )}
               </div>
 
@@ -865,18 +1022,31 @@ export default function EmployeesPage() {
                 <div key={s.id} className="grid grid-cols-[1fr_140px_80px] gap-3 items-center text-[13px] py-1">
                   <input
                     type="text"
-                    defaultValue={s.name}
+                    value={storeEdits[s.id] ?? s.name}
                     disabled={!canEdit}
-                    onBlur={(e) => {
-                      if (e.target.value.trim() && e.target.value !== s.name) handleRenameStore(s.id, e.target.value);
-                    }}
+                    onChange={(e) => setStoreEdits((prev) => ({ ...prev, [s.id]: e.target.value }))}
                     className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   />
                   <div className="text-muted num">{s.code}</div>
-                  {canEdit && (
-                    <button type="button" onClick={() => handleDeleteStore(s)} className="text-[12.5px] text-[#A34B36] font-semibold text-left">
-                      Удалить
-                    </button>
+                  {canEdit && isStoreDirty(s) ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveStoreEdit(s)}
+                        className="text-[12.5px] text-accent font-bold text-left"
+                      >
+                        Сохранить
+                      </button>
+                      <button type="button" onClick={() => discardStoreEdit(s.id)} className="text-[12.5px] text-muted text-left">
+                        Отмена
+                      </button>
+                    </div>
+                  ) : (
+                    canEdit && (
+                      <button type="button" onClick={() => handleDeleteStore(s)} className="text-[12.5px] text-[#A34B36] font-semibold text-left">
+                        Удалить
+                      </button>
+                    )
                   )}
                 </div>
               ))}
@@ -963,6 +1133,30 @@ function RoleCard({
       setSaving(false);
     }
   }
+
+  function discardEdits() {
+    setName(role.name);
+    setPermissions(toPermissions(role.role_permissions));
+    setStoreAccess(toGrants(role.role_store_access));
+  }
+
+  const dirty =
+    canEdit &&
+    (name !== role.name ||
+      JSON.stringify(permissions) !== JSON.stringify(toPermissions(role.role_permissions)) ||
+      JSON.stringify(storeAccess) !== JSON.stringify(toGrants(role.role_store_access)));
+
+  const { setGuard } = useUnsavedChanges();
+  const saveRef = useRef(handleSave);
+  saveRef.current = handleSave;
+  const discardRef = useRef(discardEdits);
+  discardRef.current = discardEdits;
+
+  useEffect(() => {
+    setGuard(dirty, dirty ? { onSave: () => saveRef.current(), onDiscard: () => discardRef.current() } : null);
+    return () => setGuard(false, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty]);
 
   return (
     <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-4">

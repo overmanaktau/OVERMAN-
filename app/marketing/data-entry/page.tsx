@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
+import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import { getErrorMessage } from "@/lib/errors";
 
 type DayRow = {
@@ -124,8 +125,10 @@ export default function DataEntryPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   const editable = canEditSection && (!locked || canEditLocked);
+  const { setGuard, requestNavigation } = useUnsavedChanges();
 
   const load = useCallback(async () => {
     if (!store) return;
@@ -184,10 +187,12 @@ export default function DataEntryPage() {
           comment: e.comment ?? "",
         }))
       );
+      setDirty(false);
     } catch (e) {
       setError(friendlyError(e));
       setRows(buildMonthRows(year, monthIndex));
       setExpenses([]);
+      setDirty(false);
     } finally {
       setLoading(false);
     }
@@ -198,9 +203,19 @@ export default function DataEntryPage() {
   }, [load]);
 
   function shiftMonth(delta: number) {
-    const total = year * 12 + monthIndex + delta;
-    setYear(Math.floor(total / 12));
-    setMonthIndex(((total % 12) + 12) % 12);
+    const doShift = () => {
+      const total = year * 12 + monthIndex + delta;
+      setYear(Math.floor(total / 12));
+      setMonthIndex(((total % 12) + 12) % 12);
+    };
+    if (dirty) requestNavigation(doShift);
+    else doShift();
+  }
+
+  function changeStore(nextStore: string) {
+    const doChange = () => setStore(nextStore);
+    if (dirty) requestNavigation(doChange);
+    else doChange();
   }
 
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], value: string) {
@@ -210,6 +225,7 @@ export default function DataEntryPage() {
       next[index] = { ...next[index], [field]: value === "" ? "" : Number(value) };
       return next;
     });
+    setDirty(true);
   }
 
   function updateExpense(index: number, field: keyof ExpenseRow, value: string) {
@@ -222,6 +238,7 @@ export default function DataEntryPage() {
       };
       return next;
     });
+    setDirty(true);
   }
 
   const totals = useMemo(() => {
@@ -313,12 +330,25 @@ export default function DataEntryPage() {
       setRows(nextRows);
       setExpenses(nextExpenses);
       setLocked(true);
+      setDirty(false);
     } catch (e) {
       setError(friendlyError(e));
     } finally {
       setSaving(false);
     }
   }
+
+  const saveRef = useRef(handleSave);
+  saveRef.current = handleSave;
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  useEffect(() => {
+    const active = dirty && editable;
+    setGuard(active, active ? { onSave: () => saveRef.current(), onDiscard: () => loadRef.current() } : null);
+    return () => setGuard(false, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, editable]);
 
   if (!canView) {
     return (
@@ -388,7 +418,7 @@ export default function DataEntryPage() {
         </div>
         <select
           value={store}
-          onChange={(e) => setStore(e.target.value)}
+          onChange={(e) => changeStore(e.target.value)}
           disabled={loading || accessibleStores.length <= 1}
           className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2 disabled:opacity-70"
         >
@@ -537,9 +567,10 @@ export default function DataEntryPage() {
         <button
           type="button"
           disabled={!editable}
-          onClick={() =>
-            setExpenses((prev) => [...prev, { date: "", category: "", amount: "", comment: "" }])
-          }
+          onClick={() => {
+            setExpenses((prev) => [...prev, { date: "", category: "", amount: "", comment: "" }]);
+            setDirty(true);
+          }}
           className="flex items-center gap-2 text-[13px] font-semibold text-accent py-3 text-left disabled:opacity-50"
         >
           + Добавить расход
