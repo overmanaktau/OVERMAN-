@@ -7,6 +7,7 @@ type Guard = { onSave: () => Promise<void> | void; onDiscard: () => void };
 type UnsavedChangesValue = {
   isDirty: boolean;
   saving: boolean;
+  justSaved: boolean;
   setGuard: (dirty: boolean, guard: Guard | null) => void;
   requestNavigation: (navigate: () => void) => void;
   saveNow: () => Promise<void>;
@@ -15,6 +16,7 @@ type UnsavedChangesValue = {
 const UnsavedChangesContext = createContext<UnsavedChangesValue>({
   isDirty: false,
   saving: false,
+  justSaved: false,
   setGuard: () => {},
   requestNavigation: (navigate) => navigate(),
   saveNow: async () => {},
@@ -29,10 +31,12 @@ export default function UnsavedChangesProvider({ children }: { children: React.R
   const guardRef = useRef<Guard | null>(null);
   const [pendingNav, setPendingNav] = useState<(() => void) | null>(null);
   const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
 
   const setGuard = useCallback((dirty: boolean, guard: Guard | null) => {
     setIsDirty(dirty);
     guardRef.current = dirty ? guard : null;
+    if (dirty) setJustSaved(false);
   }, []);
 
   const requestNavigation = useCallback((navigate: () => void) => {
@@ -92,13 +96,14 @@ export default function UnsavedChangesProvider({ children }: { children: React.R
       await guard.onSave();
       guardRef.current = null;
       setIsDirty(false);
+      setJustSaved(true);
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <UnsavedChangesContext.Provider value={{ isDirty, saving, setGuard, requestNavigation, saveNow }}>
+    <UnsavedChangesContext.Provider value={{ isDirty, saving, justSaved, setGuard, requestNavigation, saveNow }}>
       {children}
       {pendingNav && (
         <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-6">
