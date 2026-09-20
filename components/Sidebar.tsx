@@ -28,7 +28,7 @@ const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] =
 
 function StorePicker() {
   const { cities, stores, accessibleStoreCodes } = useAuth();
-  const { selected, toggle, isAll, setAll } = useStoreSelection();
+  const { selected, setSelected, toggle, toggleMany, isAll, setAll } = useStoreSelection();
   const [open, setOpen] = useState(false);
   const [openCities, setOpenCities] = useState<Set<number>>(() => new Set(cities.map((c) => c.id)));
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,11 +56,7 @@ function StorePicker() {
   function toggleWholeCity(cityId: number) {
     const cityStoreCodes = visibleStores.filter((s) => s.city_id === cityId).map((s) => s.code);
     const allSelected = cityStoreCodes.every((c) => selected.includes(c));
-    if (allSelected) {
-      cityStoreCodes.forEach((c) => selected.includes(c) && toggle(c));
-    } else {
-      cityStoreCodes.forEach((c) => !selected.includes(c) && toggle(c));
-    }
+    toggleMany(cityStoreCodes, !allSelected);
   }
 
   if (visibleStores.length === 0) return null;
@@ -79,7 +75,12 @@ function StorePicker() {
       {open && (
         <div className="absolute z-20 top-full left-2 right-2 mt-1 bg-[#232019] border border-[#3A362E] rounded-lg p-2 flex flex-col gap-1 shadow-lg max-h-[280px] overflow-y-auto">
           <label className="flex items-center gap-2 text-[13px] text-sidebarText py-1.5 px-1.5 rounded-md hover:bg-[#2C2820] cursor-pointer font-semibold">
-            <input type="checkbox" checked={isAll} onChange={setAll} className="accent-accent" />
+            <input
+              type="checkbox"
+              checked={isAll}
+              onChange={() => (isAll ? setSelected([]) : setAll())}
+              className="accent-accent"
+            />
             Все точки
           </label>
           <div className="h-px bg-[#3A362E] my-1" />
