@@ -213,6 +213,7 @@ export default function StatisticsPage() {
   const prevCostPerVisitor = prevTotals.fact > 0 ? prevTotalSpend / prevTotals.fact : null;
 
   const spendChange = pctChange(totalSpend, prevTotalSpend);
+  const channelSpendChange = pctChange(channelTotal, prevChannelTotal);
   const costChange =
     costPerVisitor !== null && prevCostPerVisitor !== null ? pctChange(costPerVisitor, prevCostPerVisitor) : null;
 
@@ -284,7 +285,7 @@ export default function StatisticsPage() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-3 gap-3.5">
         <KpiCard
           label="Выполнение плана по трафику"
           value={totals.plan > 0 ? `${Math.round((totals.fact / totals.plan) * 100)}%` : "—"}
@@ -295,10 +296,10 @@ export default function StatisticsPage() {
           }
         />
         <KpiCard
-          label="Общий расход на маркетинг"
-          value={money(totalSpend)}
-          note={spendChange !== null ? `${spendChange >= 0 ? "▲" : "▼"} ${Math.abs(spendChange).toFixed(0)}% к пред. периоду` : undefined}
-          noteTone={spendChange !== null ? (spendChange >= 0 ? "positive" : "negative") : "neutral"}
+          label="Расход по каналам"
+          value={money(channelTotal)}
+          note={channelSpendChange !== null ? `${channelSpendChange >= 0 ? "▲" : "▼"} ${Math.abs(channelSpendChange).toFixed(0)}% к пред. периоду` : undefined}
+          noteTone={channelSpendChange !== null ? (channelSpendChange >= 0 ? "positive" : "negative") : "neutral"}
         />
         <KpiCard
           label="Цена одного посетителя"
@@ -308,6 +309,12 @@ export default function StatisticsPage() {
         />
         <KpiCard label="Цена одного покупателя" value="Скоро" note="Нужен МойСклад (Этап 3)" />
         <KpiCard label="Маркетинг, % от среднего чека" value="Скоро" note="Нужен МойСклад (Этап 3)" />
+        <KpiCard
+          label="Общий расход на маркетинг"
+          value={money(totalSpend)}
+          note={spendChange !== null ? `${spendChange >= 0 ? "▲" : "▼"} ${Math.abs(spendChange).toFixed(0)}% к пред. периоду` : "каналы + доп. расходы"}
+          noteTone={spendChange !== null ? (spendChange >= 0 ? "positive" : "negative") : "neutral"}
+        />
       </div>
 
       {/* Traffic chart + channel spend */}
