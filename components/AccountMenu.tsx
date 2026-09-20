@@ -115,6 +115,26 @@ export default function AccountMenu() {
             </div>
           </div>
           <div className="h-px bg-border mx-1" />
+          <div className="px-2 py-1.5 flex flex-col gap-1">
+            <div className="text-[10.5px] uppercase tracking-wide text-mutedLight mb-0.5">Версия сайта</div>
+            <button
+              type="button"
+              disabled
+              title="Скоро"
+              className="text-[13px] text-left text-mutedLight px-1 py-1 rounded-md cursor-not-allowed"
+            >
+              Версия для ПК (скоро)
+            </button>
+            <button
+              type="button"
+              disabled
+              title="Скоро"
+              className="text-[13px] text-left text-mutedLight px-1 py-1 rounded-md cursor-not-allowed"
+            >
+              Мобильная версия (скоро)
+            </button>
+          </div>
+          <div className="h-px bg-border mx-1" />
           <button
             type="button"
             onClick={handleLogout}
