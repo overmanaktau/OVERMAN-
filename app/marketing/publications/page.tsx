@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
+import { DataTableCard } from "@/components/DataTableCard";
 
 const PERIODS = ["7 дней", "30 дней", "90 дней", "Этот месяц", "Всё время"];
 const DEFAULT_PERIOD = 2; // "90 дней"
@@ -295,148 +296,210 @@ export default function PublicationsPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-              <div className="text-[15px] font-bold">По дню недели</div>
-              <div className="grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                <div>День</div>
-                <div>Постов</div>
-                <div>Охват</div>
-                <div>Просмотры</div>
-                <div>Переслано</div>
-              </div>
-              {weekdayRows.map((r) => (
-                <div
-                  key={r.label}
-                  className="grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
-                >
-                  <div>{r.label}</div>
-                  <div className="num">{r.count}</div>
-                  <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
-                  <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
-                  <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-              <div className="text-[15px] font-bold">По времени публикации</div>
-              {hourRows.length === 0 ? (
-                <div className="text-sm text-muted py-4">Нет публикаций с указанным временем</div>
-              ) : (
+            <DataTableCard
+              title="По дню недели"
+              rows={weekdayRows}
+              getSearchText={(r) => r.label}
+              csvHeaders={["День", "Постов", "Охват", "Просмотры", "Переслано"]}
+              toCsvRow={(r) => [r.label, r.count, r.reach, r.views, r.shares]}
+              csvFilename="publications-by-weekday.csv"
+            >
+              {(rows) => (
                 <>
-                  <div className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                    <div>Час</div>
+                  <div className="grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                    <div>День</div>
                     <div>Постов</div>
                     <div>Охват</div>
                     <div>Просмотры</div>
                     <div>Переслано</div>
                   </div>
-                  <div className="max-h-[280px] overflow-y-auto flex flex-col">
-                    {hourRows.map((r) => (
-                      <div
-                        key={r.hour}
-                        className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
-                      >
-                        <div>{pad2(r.hour)}</div>
-                        <div className="num">{r.count}</div>
-                        <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
-                        <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
-                        <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
-                      </div>
-                    ))}
-                  </div>
+                  {rows.map((r) => (
+                    <div
+                      key={r.label}
+                      className="grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
+                    >
+                      <div>{r.label}</div>
+                      <div className="num">{r.count}</div>
+                      <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
+                      <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
+                      <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
+                    </div>
+                  ))}
                 </>
               )}
-            </div>
-          </div>
+            </DataTableCard>
 
-          <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <div className="text-[15px] font-bold">По типу</div>
-            <div className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-              <div>Тип</div>
-              <div>Постов</div>
-              <div>Охват</div>
-              <div>Просмотры</div>
-              <div>Переслано</div>
-              <div>Реакции</div>
-            </div>
-            {typeRows.map((r) => (
-              <div
-                key={r.type}
-                className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
-              >
-                <div className="font-semibold">{POST_TYPE_LABEL[r.type]}</div>
-                <div className="num">{r.count}</div>
-                <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
-                <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
-                <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
-                <div className="num text-muted">{r.reactions.toLocaleString("ru-RU")}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <div className="text-[15px] font-bold">Все публикации периода</div>
-            {entries.length === 0 ? (
-              <div className="text-sm text-muted py-4">Нет публикаций за выбранный период</div>
-            ) : (
-              <div className="max-h-[520px] overflow-auto rounded-md">
-                <div className="min-w-[1320px]">
-                  <div className="sticky top-0 z-10 bg-white grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                    <div>Дата</div>
-                    <div>Время</div>
-                    <div>День</div>
-                    <div>Тип</div>
-                    <div>Источник</div>
-                    <div>Магазин</div>
-                    <div>Охват</div>
-                    <div>Просмотры</div>
-                    <div>Лайки</div>
-                    <div>Комменты</div>
-                    <div>Переслано</div>
-                    <div>Текст</div>
-                    <div></div>
-                  </div>
-                  {entries.map((e) => {
-                    const jsDay = new Date(`${e.entry_date}T00:00:00`).getDay();
-                    const weekdayLabel = WEEKDAY_LABELS[WEEKDAY_JS_ORDER.indexOf(jsDay)];
-                    return (
-                      <div
-                        key={e.id}
-                        className="grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 items-center py-1.5 border-b border-[#F6F3EC] text-[12.5px]"
-                      >
-                        <div className="text-muted">{e.entry_date.slice(8, 10)}.{e.entry_date.slice(5, 7)}</div>
-                        <div className="text-muted">{e.entry_time ? e.entry_time.slice(0, 5) : "—"}</div>
-                        <div className="text-mutedLight truncate">{weekdayLabel}</div>
-                        <div>{POST_TYPE_LABEL[e.post_type]}</div>
-                        <div className="text-muted">{SOURCE_LABEL[e.source]}</div>
-                        <div className="truncate">{storeName(e.store)}</div>
-                        <div className="num">{e.reach.toLocaleString("ru-RU")}</div>
-                        <div className="num">{e.views.toLocaleString("ru-RU")}</div>
-                        <div className="num">{e.likes.toLocaleString("ru-RU")}</div>
-                        <div className="num">{e.comments.toLocaleString("ru-RU")}</div>
-                        <div className="num">{e.shares.toLocaleString("ru-RU")}</div>
-                        <div className="text-muted truncate" title={e.caption ?? ""}>
-                          {e.caption ?? "—"}
+            <DataTableCard
+              title="По времени публикации"
+              rows={hourRows}
+              getSearchText={(r) => pad2(r.hour)}
+              csvHeaders={["Час", "Постов", "Охват", "Просмотры", "Переслано"]}
+              toCsvRow={(r) => [pad2(r.hour), r.count, r.reach, r.views, r.shares]}
+              csvFilename="publications-by-hour.csv"
+            >
+              {(rows) =>
+                rows.length === 0 ? (
+                  <div className="text-sm text-muted py-4">Нет публикаций с указанным временем</div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                      <div>Час</div>
+                      <div>Постов</div>
+                      <div>Охват</div>
+                      <div>Просмотры</div>
+                      <div>Переслано</div>
+                    </div>
+                    <div className="max-h-[280px] overflow-y-auto flex flex-col">
+                      {rows.map((r) => (
+                        <div
+                          key={r.hour}
+                          className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
+                        >
+                          <div>{pad2(r.hour)}</div>
+                          <div className="num">{r.count}</div>
+                          <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
+                          <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
+                          <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
                         </div>
-                        {canEdit ? (
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(e.id)}
-                            className="text-[#A34B36] font-semibold text-left"
-                          >
-                            Удалить
-                          </button>
-                        ) : (
-                          <div />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+                      ))}
+                    </div>
+                  </>
+                )
+              }
+            </DataTableCard>
           </div>
+
+          <DataTableCard
+            title="По типу"
+            rows={typeRows}
+            getSearchText={(r) => POST_TYPE_LABEL[r.type]}
+            csvHeaders={["Тип", "Постов", "Охват", "Просмотры", "Переслано", "Реакции"]}
+            toCsvRow={(r) => [POST_TYPE_LABEL[r.type], r.count, r.reach, r.views, r.shares, r.reactions]}
+            csvFilename="publications-by-type.csv"
+          >
+            {(rows) => (
+              <>
+                <div className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                  <div>Тип</div>
+                  <div>Постов</div>
+                  <div>Охват</div>
+                  <div>Просмотры</div>
+                  <div>Переслано</div>
+                  <div>Реакции</div>
+                </div>
+                {rows.map((r) => (
+                  <div
+                    key={r.type}
+                    className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
+                  >
+                    <div className="font-semibold">{POST_TYPE_LABEL[r.type]}</div>
+                    <div className="num">{r.count}</div>
+                    <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
+                    <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
+                    <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
+                    <div className="num text-muted">{r.reactions.toLocaleString("ru-RU")}</div>
+                  </div>
+                ))}
+              </>
+            )}
+          </DataTableCard>
+
+          <DataTableCard
+            title="Все публикации периода"
+            rows={entries}
+            getSearchText={(e) =>
+              [
+                e.entry_date,
+                e.entry_time ?? "",
+                POST_TYPE_LABEL[e.post_type],
+                SOURCE_LABEL[e.source],
+                storeName(e.store),
+                e.caption ?? "",
+              ].join(" ")
+            }
+            csvHeaders={["Дата", "Время", "День", "Тип", "Источник", "Магазин", "Охват", "Просмотры", "Лайки", "Комменты", "Переслано", "Текст"]}
+            toCsvRow={(e) => {
+              const jsDay = new Date(`${e.entry_date}T00:00:00`).getDay();
+              const weekdayLabel = WEEKDAY_LABELS[WEEKDAY_JS_ORDER.indexOf(jsDay)];
+              return [
+                e.entry_date,
+                e.entry_time ? e.entry_time.slice(0, 5) : "",
+                weekdayLabel,
+                POST_TYPE_LABEL[e.post_type],
+                SOURCE_LABEL[e.source],
+                storeName(e.store),
+                e.reach,
+                e.views,
+                e.likes,
+                e.comments,
+                e.shares,
+                e.caption ?? "",
+              ];
+            }}
+            csvFilename="publications.csv"
+          >
+            {(rows) =>
+              rows.length === 0 ? (
+                <div className="text-sm text-muted py-4">Нет публикаций за выбранный период</div>
+              ) : (
+                <div className="max-h-[520px] overflow-auto rounded-md">
+                  <div className="min-w-[1320px]">
+                    <div className="sticky top-0 z-10 bg-white grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                      <div>Дата</div>
+                      <div>Время</div>
+                      <div>День</div>
+                      <div>Тип</div>
+                      <div>Источник</div>
+                      <div>Магазин</div>
+                      <div>Охват</div>
+                      <div>Просмотры</div>
+                      <div>Лайки</div>
+                      <div>Комменты</div>
+                      <div>Переслано</div>
+                      <div>Текст</div>
+                      <div></div>
+                    </div>
+                    {rows.map((e) => {
+                      const jsDay = new Date(`${e.entry_date}T00:00:00`).getDay();
+                      const weekdayLabel = WEEKDAY_LABELS[WEEKDAY_JS_ORDER.indexOf(jsDay)];
+                      return (
+                        <div
+                          key={e.id}
+                          className="grid grid-cols-[60px_54px_96px_56px_78px_110px_68px_80px_58px_74px_78px_1fr_56px] gap-2 items-center py-1.5 border-b border-[#F6F3EC] text-[12.5px]"
+                        >
+                          <div className="text-muted">{e.entry_date.slice(8, 10)}.{e.entry_date.slice(5, 7)}</div>
+                          <div className="text-muted">{e.entry_time ? e.entry_time.slice(0, 5) : "—"}</div>
+                          <div className="text-mutedLight truncate">{weekdayLabel}</div>
+                          <div>{POST_TYPE_LABEL[e.post_type]}</div>
+                          <div className="text-muted">{SOURCE_LABEL[e.source]}</div>
+                          <div className="truncate">{storeName(e.store)}</div>
+                          <div className="num">{e.reach.toLocaleString("ru-RU")}</div>
+                          <div className="num">{e.views.toLocaleString("ru-RU")}</div>
+                          <div className="num">{e.likes.toLocaleString("ru-RU")}</div>
+                          <div className="num">{e.comments.toLocaleString("ru-RU")}</div>
+                          <div className="num">{e.shares.toLocaleString("ru-RU")}</div>
+                          <div className="text-muted truncate" title={e.caption ?? ""}>
+                            {e.caption ?? "—"}
+                          </div>
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(e.id)}
+                              className="text-[#A34B36] font-semibold text-left"
+                            >
+                              Удалить
+                            </button>
+                          ) : (
+                            <div />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )
+            }
+          </DataTableCard>
         </>
       )}
     </>
