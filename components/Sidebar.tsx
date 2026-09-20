@@ -1,9 +1,12 @@
 "use client";
 
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
+import { useStoreSelection } from "@/components/StoreSelection";
+import { authFetch } from "@/lib/apiClient";
 import type { SectionKey } from "@/lib/permissions";
 
 const TOP_LEVEL: { label: string; soon: boolean }[] = [
@@ -19,10 +22,193 @@ const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] 
   { label: "Внесение данных", href: "/marketing/data-entry", section: "marketing.data_entry" },
 ];
 
+function StorePicker() {
+  const { cities, stores, accessibleStoreCodes } = useAuth();
+  const { selected, toggle, isAll, setAll } = useStoreSelection();
+  const [open, setOpen] = useState(false);
+  const [openCities, setOpenCities] = useState<Set<number>>(() => new Set(cities.map((c) => c.id)));
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const visibleStores = stores.filter((s) => accessibleStoreCodes.includes(s.code));
+  const visibleCities = cities.filter((c) => visibleStores.some((s) => s.city_id === c.id));
+
+  const label = isAll
+    ? "Все точки"
+    : selected.length === 0
+    ? "Нет точек"
+    : selected.length === 1
+    ? stores.find((s) => s.code === selected[0])?.name ?? selected[0]
+    : `${selected.length} точки`;
+
+  function toggleCityOpen(cityId: number) {
+    setOpenCities((prev) => {
+      const next = new Set(prev);
+      if (next.has(cityId)) next.delete(cityId);
+      else next.add(cityId);
+      return next;
+    });
+  }
+
+  function toggleWholeCity(cityId: number) {
+    const cityStoreCodes = visibleStores.filter((s) => s.city_id === cityId).map((s) => s.code);
+    const allSelected = cityStoreCodes.every((c) => selected.includes(c));
+    if (allSelected) {
+      cityStoreCodes.forEach((c) => selected.includes(c) && toggle(c));
+    } else {
+      cityStoreCodes.forEach((c) => !selected.includes(c) && toggle(c));
+    }
+  }
+
+  if (visibleStores.length === 0) return null;
+
+  return (
+    <div className="relative px-2" ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-2 bg-[#232019] border border-[#3A362E] rounded-lg px-3 py-2.5 text-[13px] text-sidebarText"
+      >
+        <span className="truncate">{label}</span>
+        <span className="text-sidebarMuted text-[10px]">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="absolute z-20 top-full left-2 right-2 mt-1 bg-[#232019] border border-[#3A362E] rounded-lg p-2 flex flex-col gap-1 shadow-lg max-h-[280px] overflow-y-auto">
+          <label className="flex items-center gap-2 text-[13px] text-sidebarText py-1.5 px-1.5 rounded-md hover:bg-[#2C2820] cursor-pointer font-semibold">
+            <input type="checkbox" checked={isAll} onChange={setAll} className="accent-accent" />
+            Все точки
+          </label>
+          <div className="h-px bg-[#3A362E] my-1" />
+          {visibleCities.map((city) => {
+            const cityStores = visibleStores.filter((s) => s.city_id === city.id);
+            const cityAllSelected = cityStores.every((s) => selected.includes(s.code));
+            const cityOpen = openCities.has(city.id);
+            return (
+              <div key={city.id} className="flex flex-col">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => toggleCityOpen(city.id)}
+                    className="text-sidebarMuted text-[10px] w-4 flex-none"
+                  >
+                    {cityOpen ? "▾" : "▸"}
+                  </button>
+                  <label className="flex-1 flex items-center gap-2 text-[13px] text-[#C9C3B6] py-1.5 px-1.5 rounded-md hover:bg-[#2C2820] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cityAllSelected}
+                      onChange={() => toggleWholeCity(city.id)}
+                      className="accent-accent"
+                    />
+                    {city.name}
+                  </label>
+                </div>
+                {cityOpen && (
+                  <div className="flex flex-col pl-[26px]">
+                    {cityStores.map((s) => (
+                      <label
+                        key={s.code}
+                        className="flex items-center gap-2 text-[12.5px] text-[#A39D8E] py-1 px-1.5 rounded-md hover:bg-[#2C2820] cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(s.code)}
+                          onChange={() => toggle(s.code)}
+                          className="accent-accent"
+                        />
+                        {s.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NameEditor() {
+  const { email, fullName, isAdmin, permissions, refresh } = useAuth();
+  const canRename = isAdmin || permissions["profile.rename"].canEdit;
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(fullName ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      await authFetch("/api/profile", { method: "PATCH", body: JSON.stringify({ fullName: value }) });
+      setEditing(false);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось сохранить.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Имя"
+          className="text-[12px] bg-[#232019] border border-[#3A362E] rounded-md px-2 py-1.5 text-sidebarText"
+        />
+        {error && <div className="text-[11px] text-[#C97A63]">{error}</div>}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="text-[11px] font-semibold text-accent disabled:opacity-50"
+          >
+            {saving ? "Сохраняем…" : "Сохранить"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(false);
+              setValue(fullName ?? "");
+              setError(null);
+            }}
+            className="text-[11px] text-sidebarMuted"
+          >
+            Отмена
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 min-w-0">
+      <div className="text-[11px] text-sidebarMuted truncate">{fullName || email}</div>
+      {canRename && (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-[11px] text-sidebarMuted hover:text-sidebarText flex-none"
+          title="Изменить имя"
+        >
+          ✎
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { email, isAdmin, permissions } = useAuth();
+  const { isAdmin, permissions } = useAuth();
   const visibleMarketing = MARKETING_SUBMENU.filter(
     (item) => isAdmin || permissions[item.section]?.canView
   );
@@ -38,6 +224,8 @@ export default function Sidebar() {
         <div className="font-serif text-2xl font-semibold tracking-wide">OVERMAN</div>
         <div className="text-xs text-sidebarMuted tracking-wider uppercase">Портал бизнеса</div>
       </div>
+
+      <StorePicker />
 
       <nav className="flex flex-col gap-1">
         {TOP_LEVEL.map((item) => (
@@ -103,20 +291,8 @@ export default function Sidebar() {
 
       <div className="mt-auto flex flex-col gap-2.5">
         <div className="h-px bg-[#2C2820]" />
-        <div className="text-[11px] text-sidebarMuted tracking-wider uppercase px-2">
-          Точки продаж
-        </div>
-        <div className="flex flex-col gap-0.5 px-2">
-          <label className="flex items-center gap-2 text-[13px] text-[#C9C3B6] py-1">
-            <input type="checkbox" defaultChecked className="accent-accent" /> Точка 1
-          </label>
-          <label className="flex items-center gap-2 text-[13px] text-[#C9C3B6] py-1">
-            <input type="checkbox" defaultChecked className="accent-accent" /> Точка 2
-          </label>
-        </div>
-        <div className="h-px bg-[#2C2820] mt-1" />
         <div className="px-2 flex flex-col gap-1.5">
-          {email && <div className="text-[11px] text-sidebarMuted truncate">{email}</div>}
+          <NameEditor />
           <button
             type="button"
             onClick={handleLogout}

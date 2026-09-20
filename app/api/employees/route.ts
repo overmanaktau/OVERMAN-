@@ -11,7 +11,7 @@ export async function GET(request: Request) {
 
   const { data: roleRows, error: rolesError } = await supabaseAdmin
     .from("user_roles")
-    .select("user_id, role, role_id");
+    .select("user_id, role, role_id, full_name");
   if (rolesError) return NextResponse.json({ error: rolesError.message }, { status: 500 });
 
   const roleByUser = new Map((roleRows ?? []).map((r) => [r.user_id, r]));
@@ -20,6 +20,7 @@ export async function GET(request: Request) {
     return {
       id: u.id,
       email: u.email ?? "",
+      fullName: r?.full_name ?? null,
       role: r?.role ?? null,
       roleId: r?.role_id ?? null,
       createdAt: u.created_at,
@@ -34,11 +35,12 @@ export async function POST(request: Request) {
   if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
 
   const body = await request.json();
-  const { email, password, role, roleId } = body as {
+  const { email, password, role, roleId, fullName } = body as {
     email?: string;
     password?: string;
     role?: "admin" | "custom";
     roleId?: number | null;
+    fullName?: string | null;
   };
 
   if (!email || !password) {
@@ -59,6 +61,7 @@ export async function POST(request: Request) {
     user_id: created.user.id,
     role: role === "admin" ? "admin" : "editor",
     role_id: role === "admin" ? null : roleId ?? null,
+    full_name: fullName?.trim() || null,
   });
   if (roleError) {
     // Roll back the auth user so we don't leave an account with no role row.
@@ -66,5 +69,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: roleError.message }, { status: 400 });
   }
 
-  return NextResponse.json({ id: created.user.id, email: created.user.email });
+  return NextResponse.json({ id: created.user.id, email: created.user.email, fullName: fullName?.trim() || null });
 }

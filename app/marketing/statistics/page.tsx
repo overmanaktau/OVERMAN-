@@ -3,11 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import KpiCard from "@/components/KpiCard";
 import { useAuth } from "@/components/AuthGate";
+import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
-
-// Same single-store scope as data-entry — no store switcher wired up yet.
-const STORE = "point_1";
 
 const PERIODS = ["Прошлая неделя", "Эта неделя", "С начала месяца", "30 дней", "Всё время"];
 const DEFAULT_PERIOD = 2; // "С начала месяца"
@@ -115,6 +113,7 @@ function money(n: number) {
 
 export default function StatisticsPage() {
   const { isAdmin, permissions } = useAuth();
+  const { selected: selectedStores } = useStoreSelection();
 
   const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
   const [loading, setLoading] = useState(true);
@@ -129,6 +128,15 @@ export default function StatisticsPage() {
   const canView = isAdmin || permissions["marketing.statistics"].canView;
 
   const load = useCallback(async () => {
+    if (selectedStores.length === 0) {
+      setCurrent([]);
+      setPrevious([]);
+      setExpensesTotal(0);
+      setPrevExpensesTotal(0);
+      setRange(getPeriodRange(periodIndex, new Date()));
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -139,7 +147,7 @@ export default function StatisticsPage() {
         supabase
           .from("traffic_entries")
           .select("entry_date, traffic_plan, traffic_fact, instagram, tiktok, instagram_public, flyer, two_gis")
-          .eq("store", STORE)
+          .in("store", selectedStores)
           .gte("entry_date", ymd(r.start))
           .lte("entry_date", ymd(r.end)),
         supabase.from("extra_expenses").select("amount").gte("expense_date", ymd(r.start)).lte("expense_date", ymd(r.end)),
@@ -150,7 +158,7 @@ export default function StatisticsPage() {
           supabase
             .from("traffic_entries")
             .select("entry_date, traffic_plan, traffic_fact, instagram, tiktok, instagram_public, flyer, two_gis")
-            .eq("store", STORE)
+            .in("store", selectedStores)
             .gte("entry_date", ymd(r.prevStart))
             .lte("entry_date", ymd(r.prevEnd)),
           supabase.from("extra_expenses").select("amount").gte("expense_date", ymd(r.prevStart)).lte("expense_date", ymd(r.prevEnd)),
@@ -184,7 +192,8 @@ export default function StatisticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [periodIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodIndex, selectedStores.join(",")]);
 
   useEffect(() => {
     load();

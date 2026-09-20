@@ -3,6 +3,7 @@ export const SECTIONS = [
   { key: "marketing.data_entry", label: "Внесение данных" },
   { key: "marketing.publications", label: "Публикации" },
   { key: "marketing.instagram_target", label: "Инстаграм таргет" },
+  { key: "profile.rename", label: "Смена имени сотрудника" },
 ] as const;
 
 export type SectionKey = (typeof SECTIONS)[number]["key"];

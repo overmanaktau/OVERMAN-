@@ -8,15 +8,21 @@ import { useAuth } from "@/components/AuthGate";
 type Employee = {
   id: string;
   email: string;
+  fullName: string | null;
   role: "admin" | "editor" | null;
   roleId: number | null;
 };
+
+type StoreAccessGrant = { scope: "all" | "city" | "store"; cityId: number | null; storeId: number | null };
 
 type RoleDef = {
   id: number;
   name: string;
   role_permissions: { section: string; can_view: boolean; can_edit: boolean }[];
+  role_store_access: { scope: "all" | "city" | "store"; city_id: number | null; store_id: number | null }[];
 };
+
+type CityWithStores = { id: number; name: string; stores: { id: number; name: string; code: string }[] };
 
 function toPermissions(rows: RoleDef["role_permissions"]): Permissions {
   const p = emptyPermissions();
@@ -26,6 +32,10 @@ function toPermissions(rows: RoleDef["role_permissions"]): Permissions {
     }
   }
   return p;
+}
+
+function toGrants(rows: RoleDef["role_store_access"]): StoreAccessGrant[] {
+  return rows.map((r) => ({ scope: r.scope, cityId: r.city_id, storeId: r.store_id }));
 }
 
 function PermissionsGrid({
@@ -76,16 +86,84 @@ function PermissionsGrid({
   );
 }
 
+function StoreAccessEditor({
+  cities,
+  value,
+  onChange,
+}: {
+  cities: CityWithStores[];
+  value: StoreAccessGrant[];
+  onChange: (next: StoreAccessGrant[]) => void;
+}) {
+  const isAll = value.some((g) => g.scope === "all");
+  const cityIds = new Set(value.filter((g) => g.scope === "city").map((g) => g.cityId));
+  const storeIds = new Set(value.filter((g) => g.scope === "store").map((g) => g.storeId));
+
+  function setAll(checked: boolean) {
+    onChange(checked ? [{ scope: "all", cityId: null, storeId: null }] : []);
+  }
+  function toggleCity(cityId: number, checked: boolean) {
+    const next = value.filter((g) => g.scope !== "all" && !(g.scope === "city" && g.cityId === cityId));
+    onChange(checked ? [...next, { scope: "city", cityId, storeId: null }] : next);
+  }
+  function toggleStore(storeId: number, checked: boolean) {
+    const next = value.filter((g) => g.scope !== "all" && !(g.scope === "store" && g.storeId === storeId));
+    onChange(checked ? [...next, { scope: "store", cityId: null, storeId }] : next);
+  }
+
+  return (
+    <div className="flex flex-col gap-2 text-[12.5px]">
+      <label className="flex items-center gap-2 font-semibold">
+        <input type="checkbox" checked={isAll} onChange={(e) => setAll(e.target.checked)} className="accent-accent" />
+        Все города и точки
+      </label>
+      {!isAll &&
+        cities.map((city) => {
+          const cityChecked = cityIds.has(city.id);
+          return (
+            <div key={city.id} className="flex flex-col gap-1 pl-1">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={cityChecked}
+                  onChange={(e) => toggleCity(city.id, e.target.checked)}
+                  className="accent-accent"
+                />
+                {city.name} <span className="text-mutedLight">(весь город)</span>
+              </label>
+              <div className="flex flex-col gap-1 pl-6">
+                {city.stores.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 text-muted">
+                    <input
+                      type="checkbox"
+                      checked={cityChecked || storeIds.has(s.id)}
+                      disabled={cityChecked}
+                      onChange={(e) => toggleStore(s.id, e.target.checked)}
+                      className="accent-accent disabled:opacity-50"
+                    />
+                    {s.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
 export default function EmployeesPage() {
   const { email: myEmail } = useAuth();
-  const [tab, setTab] = useState<"employees" | "roles">("employees");
+  const [tab, setTab] = useState<"employees" | "roles" | "stores">("employees");
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [roles, setRoles] = useState<RoleDef[]>([]);
+  const [cities, setCities] = useState<CityWithStores[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [newEmail, setNewEmail] = useState("");
+  const [newFullName, setNewFullName] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRoleChoice, setNewRoleChoice] = useState("admin"); // "admin" | "" | "<roleId>"
   const [creating, setCreating] = useState(false);
@@ -94,16 +172,23 @@ export default function EmployeesPage() {
   const [newRolePerms, setNewRolePerms] = useState<Permissions>(emptyPermissions());
   const [creatingRole, setCreatingRole] = useState(false);
 
+  const [newCityName, setNewCityName] = useState("");
+  const [creatingCity, setCreatingCity] = useState(false);
+  const [newStoreName, setNewStoreName] = useState<Record<number, string>>({});
+  const [newStoreCode, setNewStoreCode] = useState<Record<number, string>>({});
+
   async function loadAll() {
     setLoading(true);
     setError(null);
     try {
-      const [employeesRes, rolesRes] = await Promise.all([
+      const [employeesRes, rolesRes, citiesRes] = await Promise.all([
         authFetch("/api/employees"),
         authFetch("/api/roles"),
+        authFetch("/api/cities"),
       ]);
       setEmployees(employeesRes.employees);
       setRoles(rolesRes.roles);
+      setCities(citiesRes.cities);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось загрузить данные.");
     } finally {
@@ -143,6 +228,16 @@ export default function EmployeesPage() {
     }
   }
 
+  async function handleRenameEmployee(emp: Employee, fullName: string) {
+    setError(null);
+    try {
+      await authFetch(`/api/employees/${emp.id}`, { method: "PATCH", body: JSON.stringify({ fullName }) });
+      setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, fullName: fullName.trim() || null } : e)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось изменить имя.");
+    }
+  }
+
   async function handleDeleteEmployee(emp: Employee) {
     if (!window.confirm(`Удалить сотрудника ${emp.email}? Это действие нельзя отменить.`)) return;
     setError(null);
@@ -164,6 +259,7 @@ export default function EmployeesPage() {
         body: JSON.stringify({
           email: newEmail,
           password: newPassword,
+          fullName: newFullName,
           role: newRoleChoice === "admin" ? "admin" : "custom",
           roleId: newRoleChoice === "admin" || newRoleChoice === "" ? null : Number(newRoleChoice),
         }),
@@ -173,11 +269,13 @@ export default function EmployeesPage() {
         {
           id: created.id,
           email: created.email,
+          fullName: created.fullName,
           role: newRoleChoice === "admin" ? "admin" : "editor",
           roleId: newRoleChoice === "admin" || newRoleChoice === "" ? null : Number(newRoleChoice),
         },
       ]);
       setNewEmail("");
+      setNewFullName("");
       setNewPassword("");
       setNewRoleChoice("admin");
     } catch (e) {
@@ -187,13 +285,16 @@ export default function EmployeesPage() {
     }
   }
 
-  async function handleSaveRole(role: RoleDef, name: string, permissions: Permissions) {
+  async function handleSaveRole(role: RoleDef, name: string, permissions: Permissions, storeAccess: StoreAccessGrant[]) {
     setError(null);
     try {
-      await authFetch(`/api/roles/${role.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name, permissions }),
-      });
+      await Promise.all([
+        authFetch(`/api/roles/${role.id}`, { method: "PATCH", body: JSON.stringify({ name, permissions }) }),
+        authFetch(`/api/roles/${role.id}/store-access`, {
+          method: "PATCH",
+          body: JSON.stringify({ grants: storeAccess }),
+        }),
+      ]);
       await loadAll();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось сохранить роль.");
@@ -230,20 +331,92 @@ export default function EmployeesPage() {
     }
   }
 
+  async function handleCreateCity(e: React.FormEvent) {
+    e.preventDefault();
+    setCreatingCity(true);
+    setError(null);
+    try {
+      await authFetch("/api/cities", { method: "POST", body: JSON.stringify({ name: newCityName }) });
+      setNewCityName("");
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось создать город.");
+    } finally {
+      setCreatingCity(false);
+    }
+  }
+
+  async function handleRenameCity(cityId: number, name: string) {
+    setError(null);
+    try {
+      await authFetch(`/api/cities/${cityId}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось переименовать город.");
+    }
+  }
+
+  async function handleDeleteCity(city: CityWithStores) {
+    if (!window.confirm(`Удалить город «${city.name}» вместе со всеми его точками?`)) return;
+    setError(null);
+    try {
+      await authFetch(`/api/cities/${city.id}`, { method: "DELETE" });
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось удалить город.");
+    }
+  }
+
+  async function handleCreateStore(cityId: number) {
+    const name = newStoreName[cityId]?.trim();
+    const code = newStoreCode[cityId]?.trim();
+    if (!name || !code) return;
+    setError(null);
+    try {
+      await authFetch("/api/stores", { method: "POST", body: JSON.stringify({ cityId, name, code }) });
+      setNewStoreName((prev) => ({ ...prev, [cityId]: "" }));
+      setNewStoreCode((prev) => ({ ...prev, [cityId]: "" }));
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось создать точку.");
+    }
+  }
+
+  async function handleRenameStore(storeId: number, name: string) {
+    setError(null);
+    try {
+      await authFetch(`/api/stores/${storeId}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось переименовать точку.");
+    }
+  }
+
+  async function handleDeleteStore(store: { id: number; name: string }) {
+    if (!window.confirm(`Удалить точку «${store.name}»? Уже сохранённые данные за прошлые дни останутся в базе.`)) return;
+    setError(null);
+    try {
+      await authFetch(`/api/stores/${store.id}`, { method: "DELETE" });
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось удалить точку.");
+    }
+  }
+
   return (
     <>
       <div className="flex flex-col gap-1">
         <div className="text-xs text-mutedLight">Настройки</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Сотрудники и доступы</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Создавайте сотрудников и роли с гибким доступом: для каждого раздела портала можно
-          отдельно разрешить просмотр и редактирование.
+          Создавайте сотрудников и роли с гибким доступом: для каждого раздела портала и точки
+          продаж можно отдельно разрешить просмотр и редактирование.
         </p>
         {error && <p className="text-sm text-[#A34B36]">{error}</p>}
       </div>
 
       <div className="flex items-center gap-1.5 bg-white border border-border rounded-card p-1.5 w-fit">
-        {(["employees", "roles"] as const).map((t) => (
+        {(["employees", "roles", "stores"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -252,7 +425,7 @@ export default function EmployeesPage() {
               tab === t ? "bg-accent text-paper font-bold" : "text-muted font-medium"
             }`}
           >
-            {t === "employees" ? "Сотрудники" : "Роли доступа"}
+            {t === "employees" ? "Сотрудники" : t === "roles" ? "Роли доступа" : "Города и точки"}
           </button>
         ))}
       </div>
@@ -263,7 +436,8 @@ export default function EmployeesPage() {
         <div className="flex flex-col gap-4">
           <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="text-[15px] font-bold">Список сотрудников</div>
-            <div className="grid grid-cols-[1fr_200px_100px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+            <div className="grid grid-cols-[1fr_1fr_200px_100px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+              <div>Имя</div>
               <div>Email</div>
               <div>Роль</div>
               <div></div>
@@ -271,9 +445,18 @@ export default function EmployeesPage() {
             {employees.map((emp) => (
               <div
                 key={emp.id}
-                className="grid grid-cols-[1fr_200px_100px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                className="grid grid-cols-[1fr_1fr_200px_100px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
               >
-                <div>
+                <input
+                  type="text"
+                  defaultValue={emp.fullName ?? ""}
+                  placeholder="Без имени"
+                  onBlur={(e) => {
+                    if (e.target.value !== (emp.fullName ?? "")) handleRenameEmployee(emp, e.target.value);
+                  }}
+                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px]"
+                />
+                <div className="truncate">
                   {emp.email} {emp.email === myEmail && <span className="text-muted">(вы)</span>}
                 </div>
                 <select
@@ -307,7 +490,14 @@ export default function EmployeesPage() {
             className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
           >
             <div className="text-[15px] font-bold">Добавить сотрудника</div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
+              <input
+                type="text"
+                placeholder="Имя (необязательно)"
+                value={newFullName}
+                onChange={(e) => setNewFullName(e.target.value)}
+                className="border border-border rounded-lg px-3 py-2.5 text-sm"
+              />
               <input
                 type="email"
                 required
@@ -348,10 +538,10 @@ export default function EmployeesPage() {
             </button>
           </form>
         </div>
-      ) : (
+      ) : tab === "roles" ? (
         <div className="flex flex-col gap-4">
           {roles.map((role) => (
-            <RoleCard key={role.id} role={role} onSave={handleSaveRole} onDelete={handleDeleteRole} />
+            <RoleCard key={role.id} role={role} cities={cities} onSave={handleSaveRole} onDelete={handleDeleteRole} />
           ))}
 
           <form
@@ -368,12 +558,102 @@ export default function EmployeesPage() {
               className="border border-border rounded-lg px-3 py-2.5 text-sm max-w-sm"
             />
             <PermissionsGrid value={newRolePerms} onChange={setNewRolePerms} />
+            <p className="text-[12px] text-muted">
+              Доступ по точкам продаж настраивается после создания роли — откройте её карточку ниже.
+            </p>
             <button
               type="submit"
               disabled={creatingRole}
               className="self-start text-[13px] font-bold text-paper bg-accent rounded-lg px-[18px] py-2.5 disabled:opacity-50"
             >
               {creatingRole ? "Создаём…" : "Создать роль"}
+            </button>
+          </form>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {cities.map((city) => (
+            <div key={city.id} className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+              <div className="flex items-center gap-3">
+                <input
+                  type="text"
+                  defaultValue={city.name}
+                  onBlur={(e) => {
+                    if (e.target.value.trim() && e.target.value !== city.name) handleRenameCity(city.id, e.target.value);
+                  }}
+                  className="border border-border rounded-lg px-3 py-2 text-sm font-bold flex-1 max-w-sm"
+                />
+                <button type="button" onClick={() => handleDeleteCity(city)} className="text-[13px] text-[#A34B36] font-semibold">
+                  Удалить город
+                </button>
+              </div>
+
+              <div className="grid grid-cols-[1fr_140px_80px] gap-3 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border pb-2">
+                <div>Точка</div>
+                <div>Код (store)</div>
+                <div></div>
+              </div>
+              {city.stores.map((s) => (
+                <div key={s.id} className="grid grid-cols-[1fr_140px_80px] gap-3 items-center text-[13px] py-1">
+                  <input
+                    type="text"
+                    defaultValue={s.name}
+                    onBlur={(e) => {
+                      if (e.target.value.trim() && e.target.value !== s.name) handleRenameStore(s.id, e.target.value);
+                    }}
+                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px]"
+                  />
+                  <div className="text-muted num">{s.code}</div>
+                  <button type="button" onClick={() => handleDeleteStore(s)} className="text-[12.5px] text-[#A34B36] font-semibold text-left">
+                    Удалить
+                  </button>
+                </div>
+              ))}
+
+              <div className="flex items-center gap-2 pt-2 border-t border-borderSoft">
+                <input
+                  type="text"
+                  placeholder="Название новой точки"
+                  value={newStoreName[city.id] ?? ""}
+                  onChange={(e) => setNewStoreName((prev) => ({ ...prev, [city.id]: e.target.value }))}
+                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px] flex-1"
+                />
+                <input
+                  type="text"
+                  placeholder="код (напр. point_3)"
+                  value={newStoreCode[city.id] ?? ""}
+                  onChange={(e) => setNewStoreCode((prev) => ({ ...prev, [city.id]: e.target.value }))}
+                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px] w-[140px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCreateStore(city.id)}
+                  className="text-[12.5px] font-semibold text-accent"
+                >
+                  + Добавить точку
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <form
+            onSubmit={handleCreateCity}
+            className="bg-white border border-border rounded-card px-6 py-[22px] flex items-center gap-3"
+          >
+            <input
+              type="text"
+              required
+              placeholder="Название нового города"
+              value={newCityName}
+              onChange={(e) => setNewCityName(e.target.value)}
+              className="border border-border rounded-lg px-3 py-2.5 text-sm flex-1 max-w-sm"
+            />
+            <button
+              type="submit"
+              disabled={creatingCity}
+              className="text-[13px] font-bold text-paper bg-accent rounded-lg px-[18px] py-2.5 disabled:opacity-50"
+            >
+              {creatingCity ? "Создаём…" : "Добавить город"}
             </button>
           </form>
         </div>
@@ -384,28 +664,31 @@ export default function EmployeesPage() {
 
 function RoleCard({
   role,
+  cities,
   onSave,
   onDelete,
 }: {
   role: RoleDef;
-  onSave: (role: RoleDef, name: string, permissions: Permissions) => Promise<void>;
+  cities: CityWithStores[];
+  onSave: (role: RoleDef, name: string, permissions: Permissions, storeAccess: StoreAccessGrant[]) => Promise<void>;
   onDelete: (role: RoleDef) => Promise<void>;
 }) {
   const [name, setName] = useState(role.name);
   const [permissions, setPermissions] = useState<Permissions>(toPermissions(role.role_permissions));
+  const [storeAccess, setStoreAccess] = useState<StoreAccessGrant[]>(toGrants(role.role_store_access));
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
     setSaving(true);
     try {
-      await onSave(role, name, permissions);
+      await onSave(role, name, permissions, storeAccess);
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+    <div className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-4">
       <div className="flex items-center gap-3">
         <input
           type="text"
@@ -429,7 +712,16 @@ function RoleCard({
           Удалить
         </button>
       </div>
-      <PermissionsGrid value={permissions} onChange={setPermissions} />
+      <div className="grid grid-cols-2 gap-6">
+        <div className="flex flex-col gap-2">
+          <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Разделы портала</div>
+          <PermissionsGrid value={permissions} onChange={setPermissions} />
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Точки продаж</div>
+          <StoreAccessEditor cities={cities} value={storeAccess} onChange={setStoreAccess} />
+        </div>
+      </div>
     </div>
   );
 }

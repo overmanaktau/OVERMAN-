@@ -8,7 +8,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabaseAdmin
     .from("roles")
-    .select("id, name, role_permissions(section, can_view, can_edit)")
+    .select("id, name, role_permissions(section, can_view, can_edit), role_store_access(scope, city_id, store_id)")
     .order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

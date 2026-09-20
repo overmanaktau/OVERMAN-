@@ -1,24 +1,37 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { emptyPermissions, fullPermissions, type Permissions } from "@/lib/permissions";
 import { getErrorMessage } from "@/lib/errors";
+import { resolveAccessibleStoreCodes, type City, type Store, type StoreAccessGrant } from "@/lib/stores";
 
 type AuthContextValue = {
   email: string | null;
+  fullName: string | null;
   role: "admin" | "editor" | null;
   isAdmin: boolean;
   permissions: Permissions;
+  cities: City[];
+  stores: Store[];
+  accessibleStoreCodes: string[];
+  refresh: () => void;
 };
 
-const AuthContext = createContext<AuthContextValue>({
+const DEFAULT_VALUE: AuthContextValue = {
   email: null,
+  fullName: null,
   role: null,
   isAdmin: false,
   permissions: emptyPermissions(),
-});
+  cities: [],
+  stores: [],
+  accessibleStoreCodes: [],
+  refresh: () => {},
+};
+
+const AuthContext = createContext<AuthContextValue>(DEFAULT_VALUE);
 
 export function useAuth() {
   return useContext(AuthContext);
@@ -28,12 +41,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [value, setValue] = useState<AuthContextValue>({
-    email: null,
-    role: null,
-    isAdmin: false,
-    permissions: emptyPermissions(),
-  });
+  const [value, setValue] = useState<AuthContextValue>(DEFAULT_VALUE);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -53,25 +62,33 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const { data: roleRow, error: roleError } = await supabase
-          .from("user_roles")
-          .select("role, role_id")
-          .eq("user_id", session.user.id)
-          .maybeSingle();
+        const [{ data: roleRow, error: roleError }, { data: cities, error: citiesError }, { data: stores, error: storesError }] =
+          await Promise.all([
+            supabase.from("user_roles").select("role, role_id, full_name").eq("user_id", session.user.id).maybeSingle(),
+            supabase.from("cities").select("id, name").order("name"),
+            supabase.from("stores").select("id, city_id, name, code").order("name"),
+          ]);
         if (roleError) throw roleError;
+        if (citiesError) throw citiesError;
+        if (storesError) throw storesError;
 
         const role = (roleRow?.role as "admin" | "editor") ?? "editor";
         const isAdmin = role === "admin";
 
         let permissions = emptyPermissions();
+        let accessibleStoreCodes: string[] = [];
+
         if (isAdmin) {
           permissions = fullPermissions();
+          accessibleStoreCodes = (stores ?? []).map((s) => s.code);
         } else if (roleRow?.role_id) {
-          const { data: permRows, error: permError } = await supabase
-            .from("role_permissions")
-            .select("section, can_view, can_edit")
-            .eq("role_id", roleRow.role_id);
+          const [{ data: permRows, error: permError }, { data: grantRows, error: grantError }] = await Promise.all([
+            supabase.from("role_permissions").select("section, can_view, can_edit").eq("role_id", roleRow.role_id),
+            supabase.from("role_store_access").select("scope, city_id, store_id").eq("role_id", roleRow.role_id),
+          ]);
           if (permError) throw permError;
+          if (grantError) throw grantError;
+
           for (const row of permRows ?? []) {
             if (row.section in permissions) {
               permissions[row.section as keyof Permissions] = {
@@ -80,14 +97,23 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               };
             }
           }
+          accessibleStoreCodes = resolveAccessibleStoreCodes(
+            (stores ?? []) as Store[],
+            (grantRows ?? []) as StoreAccessGrant[]
+          );
         }
 
         if (!active) return;
         setValue({
           email: session.user.email ?? null,
+          fullName: roleRow?.full_name ?? null,
           role,
           isAdmin,
           permissions,
+          cities: (cities ?? []) as City[],
+          stores: (stores ?? []) as Store[],
+          accessibleStoreCodes,
+          refresh: () => setReloadTick((t) => t + 1),
         });
         setStatus("ready");
       } catch (e) {
@@ -112,7 +138,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       active = false;
       listener.subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, reloadTick]);
 
   if (status === "loading") {
     return (

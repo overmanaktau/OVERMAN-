@@ -7,22 +7,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
 
   const body = await request.json();
-  const { role, roleId, fullName } = body as {
-    role?: "admin" | "custom";
-    roleId?: number | null;
-    fullName?: string | null;
-  };
+  const { name } = body as { name?: string };
+  if (!name?.trim()) return NextResponse.json({ error: "Название города обязательно." }, { status: 400 });
 
-  const payload: Record<string, unknown> = { user_id: params.id };
-  if (role !== undefined) {
-    payload.role = role === "admin" ? "admin" : "editor";
-    payload.role_id = role === "admin" ? null : roleId ?? null;
-  }
-  if (fullName !== undefined) {
-    payload.full_name = fullName?.trim() || null;
-  }
-
-  const { error } = await supabaseAdmin.from("user_roles").upsert(payload);
+  const { error } = await supabaseAdmin.from("cities").update({ name: name.trim() }).eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   return NextResponse.json({ ok: true });
@@ -32,14 +20,9 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const admin = await requireAdmin(request);
   if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
 
-  if (params.id === admin.id) {
-    return NextResponse.json({ error: "Нельзя удалить самого себя." }, { status: 400 });
-  }
-
-  const { error } = await supabaseAdmin.auth.admin.deleteUser(params.id);
+  // Deleting a city cascades onto its stores and any role access grants pointing at them.
+  const { error } = await supabaseAdmin.from("cities").delete().eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-
-  await supabaseAdmin.from("user_roles").delete().eq("user_id", params.id);
 
   return NextResponse.json({ ok: true });
 }

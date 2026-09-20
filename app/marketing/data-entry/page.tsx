@@ -5,10 +5,6 @@ import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
 import { getErrorMessage } from "@/lib/errors";
 
-// Only one physical point exists in the UI so far (Sidebar's point checkboxes
-// aren't wired to a selector yet) — hardcoded until multi-store switching lands.
-const STORE = "point_1";
-
 type DayRow = {
   id?: number;
   entryDate: string; // "YYYY-MM-DD", used as the DB key
@@ -99,12 +95,22 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
 }
 
 export default function DataEntryPage() {
-  const { isAdmin, permissions } = useAuth();
+  const { isAdmin, permissions, stores, accessibleStoreCodes } = useAuth();
   const canView = isAdmin || permissions["marketing.data_entry"].canView;
   const canEditSection = isAdmin || permissions["marketing.data_entry"].canEdit;
   // Locking/unlocking the month follows the same edit permission as the data
   // itself — no separate admin-only gate; restrict a role via its edit checkbox instead.
   const canEditLocked = canEditSection;
+
+  const accessibleStores = stores.filter((s) => accessibleStoreCodes.includes(s.code));
+  const [store, setStore] = useState<string>("");
+  useEffect(() => {
+    if (!store && accessibleStores.length > 0) setStore(accessibleStores[0].code);
+    else if (store && !accessibleStoreCodes.includes(store) && accessibleStores.length > 0) {
+      setStore(accessibleStores[0].code);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessibleStoreCodes.join(",")]);
 
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -122,6 +128,7 @@ export default function DataEntryPage() {
   const editable = canEditSection && (!locked || canEditLocked);
 
   const load = useCallback(async () => {
+    if (!store) return;
     setLoading(true);
     setError(null);
 
@@ -133,10 +140,10 @@ export default function DataEntryPage() {
         supabase
           .from("traffic_entries")
           .select("*")
-          .eq("store", STORE)
+          .eq("store", store)
           .gte("entry_date", firstStr)
           .lte("entry_date", lastStr),
-        supabase.from("month_status").select("*").eq("store", STORE).eq("month", firstStr).maybeSingle(),
+        supabase.from("month_status").select("*").eq("store", store).eq("month", firstStr).maybeSingle(),
         supabase
           .from("extra_expenses")
           .select("*")
@@ -184,7 +191,7 @@ export default function DataEntryPage() {
     } finally {
       setLoading(false);
     }
-  }, [year, monthIndex]);
+  }, [year, monthIndex, store]);
 
   useEffect(() => {
     load();
@@ -246,7 +253,7 @@ export default function DataEntryPage() {
         const hasData = NUMERIC_FIELDS.some((f) => row[f] !== "");
         if (!row.id && !hasData) continue;
 
-        const payload: Record<string, unknown> = { store: STORE, entry_date: row.entryDate };
+        const payload: Record<string, unknown> = { store, entry_date: row.entryDate };
         for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
 
         if (row.id) {
@@ -296,7 +303,7 @@ export default function DataEntryPage() {
       } else {
         const { data, error } = await supabase
           .from("month_status")
-          .insert({ store: STORE, month: firstStr, locked: true })
+          .insert({ store, month: firstStr, locked: true })
           .select("id")
           .single();
         if (error) throw error;
@@ -317,6 +324,14 @@ export default function DataEntryPage() {
     return (
       <div className="bg-white border border-border rounded-card p-8 max-w-md">
         <p className="text-sm text-muted">У вас нет доступа к разделу «Внесение данных».</p>
+      </div>
+    );
+  }
+
+  if (accessibleStores.length === 0) {
+    return (
+      <div className="bg-white border border-border rounded-card p-8 max-w-md">
+        <p className="text-sm text-muted">У вас нет доступа ни к одной точке продаж.</p>
       </div>
     );
   }
@@ -371,7 +386,18 @@ export default function DataEntryPage() {
             ›
           </button>
         </div>
-        <div className="text-xs text-[#6B6455]">Точка 1</div>
+        <select
+          value={store}
+          onChange={(e) => setStore(e.target.value)}
+          disabled={loading || accessibleStores.length <= 1}
+          className="text-[13px] font-semibold bg-white border border-border rounded-lg px-3 py-2 disabled:opacity-70"
+        >
+          {accessibleStores.map((s) => (
+            <option key={s.code} value={s.code}>
+              {s.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="bg-white border border-border rounded-card px-6 pt-[22px] pb-5 flex flex-col gap-3.5">
