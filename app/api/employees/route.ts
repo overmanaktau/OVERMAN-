@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/requireAdmin";
+import { requireSettingsAccess } from "@/lib/requireAdmin";
 
 export async function GET(request: Request) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "view");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const { data: authUsers, error: usersError } = await supabaseAdmin.auth.admin.listUsers();
   if (usersError) return NextResponse.json({ error: usersError.message }, { status: 500 });
@@ -31,8 +31,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "edit");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const body = await request.json();
   const { email, password, role, roleId, fullName } = body as {
@@ -48,6 +48,9 @@ export async function POST(request: Request) {
   }
   if (password.length < 6) {
     return NextResponse.json({ error: "Пароль должен быть не короче 6 символов." }, { status: 400 });
+  }
+  if (role === "admin" && !caller.isAdmin) {
+    return NextResponse.json({ error: "Назначать роль администратора может только администратор." }, { status: 403 });
   }
 
   const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({

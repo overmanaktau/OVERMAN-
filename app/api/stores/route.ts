@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/requireAdmin";
+import { requireSettingsAccess } from "@/lib/requireAdmin";
 
 export async function POST(request: Request) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "edit");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const body = await request.json();
   const { cityId, name, code } = body as { cityId?: number; name?: string; code?: string };

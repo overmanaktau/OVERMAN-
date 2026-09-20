@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/requireAdmin";
+import { requireSettingsAccess } from "@/lib/requireAdmin";
+
+// See app/api/roles/route.ts — a delegated (non-admin) settings manager can't
+// touch these two sections on any role, to prevent granting admin-equivalent
+// power to themselves or anyone else.
+const ADMIN_ONLY_SECTIONS = ["settings.employees", "profile.rename"];
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "edit");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const roleId = Number(params.id);
   const body = await request.json();
@@ -19,7 +24,24 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   }
 
   if (permissions) {
-    const rows = Object.entries(permissions).map(([section, p]) => ({
+    let effective = permissions;
+    if (!caller.isAdmin) {
+      // Keep whatever these two sections were already set to — a delegated
+      // manager's save must not be able to change them either way.
+      const { data: existing } = await supabaseAdmin
+        .from("role_permissions")
+        .select("section, can_view, can_edit")
+        .eq("role_id", roleId)
+        .in("section", ADMIN_ONLY_SECTIONS);
+      const existingBySection = new Map((existing ?? []).map((r) => [r.section, r]));
+      effective = { ...permissions };
+      for (const section of ADMIN_ONLY_SECTIONS) {
+        const prev = existingBySection.get(section);
+        effective[section] = { canView: prev?.can_view ?? false, canEdit: prev?.can_edit ?? false };
+      }
+    }
+
+    const rows = Object.entries(effective).map(([section, p]) => ({
       role_id: roleId,
       section,
       can_view: !!p.canView,
@@ -35,8 +57,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 }
 
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "edit");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const roleId = Number(params.id);
   const { count, error: countError } = await supabaseAdmin

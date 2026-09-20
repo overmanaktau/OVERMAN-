@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/requireAdmin";
+import { requireSettingsAccess } from "@/lib/requireAdmin";
+
+// A delegated (non-admin) settings manager can grant any section except these
+// two — otherwise they could hand any role, including their own, admin-equivalent
+// power over employees or the ability to rename anyone.
+const ADMIN_ONLY_SECTIONS = ["settings.employees", "profile.rename"];
 
 export async function GET(request: Request) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "view");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const { data, error } = await supabaseAdmin
     .from("roles")
@@ -16,8 +21,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "edit");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const body = await request.json();
   const { name, permissions } = body as {
@@ -32,8 +37,8 @@ export async function POST(request: Request) {
   const rows = Object.entries(permissions ?? {}).map(([section, p]) => ({
     role_id: role.id,
     section,
-    can_view: !!p.canView,
-    can_edit: !!p.canEdit,
+    can_view: caller.isAdmin || !ADMIN_ONLY_SECTIONS.includes(section) ? !!p.canView : false,
+    can_edit: caller.isAdmin || !ADMIN_ONLY_SECTIONS.includes(section) ? !!p.canEdit : false,
   }));
   if (rows.length) {
     const { error: permError } = await supabaseAdmin.from("role_permissions").insert(rows);

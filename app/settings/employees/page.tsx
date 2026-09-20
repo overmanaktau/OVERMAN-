@@ -63,9 +63,11 @@ function resolveStoreLabel(emp: Employee, roles: RoleDef[], cities: CityWithStor
 function PermissionsGrid({
   value,
   onChange,
+  disabled = false,
 }: {
   value: Permissions;
   onChange: (next: Permissions) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="grid grid-cols-[1fr_80px_80px] gap-2 text-[12.5px]">
@@ -79,6 +81,7 @@ function PermissionsGrid({
             <input
               type="checkbox"
               checked={value[s.key].canView}
+              disabled={disabled}
               onChange={(e) =>
                 onChange({
                   ...value,
@@ -88,14 +91,14 @@ function PermissionsGrid({
                   },
                 })
               }
-              className="accent-accent"
+              className="accent-accent disabled:opacity-40"
             />
           </div>
           <div className="py-1.5 border-t border-borderSoft text-center">
             <input
               type="checkbox"
               checked={value[s.key].canEdit}
-              disabled={!value[s.key].canView}
+              disabled={disabled || !value[s.key].canView}
               onChange={(e) =>
                 onChange({ ...value, [s.key]: { ...value[s.key], canEdit: e.target.checked } })
               }
@@ -112,10 +115,12 @@ function StoreAccessEditor({
   cities,
   value,
   onChange,
+  disabled = false,
 }: {
   cities: CityWithStores[];
   value: StoreAccessGrant[];
   onChange: (next: StoreAccessGrant[]) => void;
+  disabled?: boolean;
 }) {
   const isAll = value.some((g) => g.scope === "all");
   const cityIds = new Set(value.filter((g) => g.scope === "city").map((g) => g.cityId));
@@ -125,7 +130,16 @@ function StoreAccessEditor({
     onChange(checked ? [{ scope: "all", cityId: null, storeId: null }] : []);
   }
   function toggleCity(cityId: number, checked: boolean) {
-    const next = value.filter((g) => g.scope !== "all" && !(g.scope === "city" && g.cityId === cityId));
+    // Also drop any individual store grants for this city's stores — otherwise a
+    // leftover per-store entry keeps that checkbox checked even after the city
+    // box is unchecked (or stays redundantly checked once the city box is checked).
+    const cityStoreIds = new Set(cities.find((c) => c.id === cityId)?.stores.map((s) => s.id) ?? []);
+    const next = value.filter(
+      (g) =>
+        g.scope !== "all" &&
+        !(g.scope === "city" && g.cityId === cityId) &&
+        !(g.scope === "store" && cityStoreIds.has(g.storeId as number))
+    );
     onChange(checked ? [...next, { scope: "city", cityId, storeId: null }] : next);
   }
   function toggleStore(storeId: number, checked: boolean) {
@@ -136,7 +150,13 @@ function StoreAccessEditor({
   return (
     <div className="flex flex-col gap-2 text-[12.5px]">
       <label className="flex items-center gap-2 font-semibold">
-        <input type="checkbox" checked={isAll} onChange={(e) => setAll(e.target.checked)} className="accent-accent" />
+        <input
+          type="checkbox"
+          checked={isAll}
+          disabled={disabled}
+          onChange={(e) => setAll(e.target.checked)}
+          className="accent-accent disabled:opacity-40"
+        />
         Все города и точки
       </label>
       {!isAll &&
@@ -148,8 +168,9 @@ function StoreAccessEditor({
                 <input
                   type="checkbox"
                   checked={cityChecked}
+                  disabled={disabled}
                   onChange={(e) => toggleCity(city.id, e.target.checked)}
-                  className="accent-accent"
+                  className="accent-accent disabled:opacity-40"
                 />
                 {city.name} <span className="text-mutedLight">(весь город)</span>
               </label>
@@ -159,7 +180,7 @@ function StoreAccessEditor({
                     <input
                       type="checkbox"
                       checked={cityChecked || storeIds.has(s.id)}
-                      disabled={cityChecked}
+                      disabled={disabled || cityChecked}
                       onChange={(e) => toggleStore(s.id, e.target.checked)}
                       className="accent-accent disabled:opacity-50"
                     />
@@ -175,7 +196,8 @@ function StoreAccessEditor({
 }
 
 export default function EmployeesPage() {
-  const { email: myEmail } = useAuth();
+  const { email: myEmail, isAdmin, permissions } = useAuth();
+  const canEdit = isAdmin || permissions["settings.employees"].canEdit;
   const [tab, setTab] = useState<"employees" | "roles" | "stores">("employees");
 
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -500,18 +522,20 @@ export default function EmployeesPage() {
                     type="text"
                     defaultValue={emp.fullName ?? ""}
                     placeholder="Без имени"
+                    disabled={!canEdit}
                     onBlur={(e) => {
                       if (e.target.value !== (emp.fullName ?? "")) handleRenameEmployee(emp, e.target.value);
                     }}
-                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px]"
+                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   />
                   <input
                     type="email"
                     defaultValue={emp.email}
+                    disabled={!canEdit}
                     onBlur={(e) => {
                       if (e.target.value !== emp.email) handleUpdateEmail(emp, e.target.value);
                     }}
-                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px]"
+                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   />
                   <div className="text-muted text-[12px] truncate" title={resolveStoreLabel(emp, roles, cities)}>
                     {resolveStoreLabel(emp, roles, cities)}
@@ -519,7 +543,7 @@ export default function EmployeesPage() {
                   <select
                     value={roleChoiceValue(emp)}
                     onChange={(e) => handleRoleChange(emp, e.target.value)}
-                    disabled={emp.email === myEmail}
+                    disabled={emp.email === myEmail || !canEdit}
                     className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   >
                     <option value="admin">Администратор</option>
@@ -531,19 +555,21 @@ export default function EmployeesPage() {
                     ))}
                   </select>
                   <div className="flex flex-col gap-1">
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResettingId(resettingId === emp.id ? null : emp.id);
+                          setResetPasswordValue("");
+                        }}
+                        className="text-[12px] text-accent font-semibold text-left"
+                      >
+                        Пароль
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => {
-                        setResettingId(resettingId === emp.id ? null : emp.id);
-                        setResetPasswordValue("");
-                      }}
-                      className="text-[12px] text-accent font-semibold text-left"
-                    >
-                      Пароль
-                    </button>
-                    <button
-                      type="button"
-                      disabled={emp.email === myEmail}
+                      disabled={emp.email === myEmail || !canEdit}
                       onClick={() => handleDeleteEmployee(emp)}
                       className="text-[12px] text-[#A34B36] font-semibold disabled:opacity-40 text-left"
                     >
@@ -551,7 +577,7 @@ export default function EmployeesPage() {
                     </button>
                   </div>
                 </div>
-                {resettingId === emp.id && (
+                {resettingId === emp.id && canEdit && (
                   <div className="flex items-center gap-2 pb-2.5 border-b border-borderSoft">
                     <input
                       type="text"
@@ -581,6 +607,7 @@ export default function EmployeesPage() {
             ))}
           </div>
 
+          {canEdit && (
           <form
             onSubmit={handleCreateEmployee}
             className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
@@ -633,13 +660,22 @@ export default function EmployeesPage() {
               {creating ? "Создаём…" : "Создать сотрудника"}
             </button>
           </form>
+          )}
         </div>
       ) : tab === "roles" ? (
         <div className="flex flex-col gap-4">
           {roles.map((role) => (
-            <RoleCard key={role.id} role={role} cities={cities} onSave={handleSaveRole} onDelete={handleDeleteRole} />
+            <RoleCard
+              key={role.id}
+              role={role}
+              cities={cities}
+              onSave={handleSaveRole}
+              onDelete={handleDeleteRole}
+              canEdit={canEdit}
+            />
           ))}
 
+          {canEdit && (
           <form
             onSubmit={handleCreateRole}
             className="bg-white border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
@@ -665,6 +701,7 @@ export default function EmployeesPage() {
               {creatingRole ? "Создаём…" : "Создать роль"}
             </button>
           </form>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-4">
@@ -674,14 +711,17 @@ export default function EmployeesPage() {
                 <input
                   type="text"
                   defaultValue={city.name}
+                  disabled={!canEdit}
                   onBlur={(e) => {
                     if (e.target.value.trim() && e.target.value !== city.name) handleRenameCity(city.id, e.target.value);
                   }}
-                  className="border border-border rounded-lg px-3 py-2 text-sm font-bold flex-1 max-w-sm"
+                  className="border border-border rounded-lg px-3 py-2 text-sm font-bold flex-1 max-w-sm disabled:opacity-50"
                 />
-                <button type="button" onClick={() => handleDeleteCity(city)} className="text-[13px] text-[#A34B36] font-semibold">
-                  Удалить город
-                </button>
+                {canEdit && (
+                  <button type="button" onClick={() => handleDeleteCity(city)} className="text-[13px] text-[#A34B36] font-semibold">
+                    Удалить город
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-[1fr_140px_80px] gap-3 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border pb-2">
@@ -694,18 +734,22 @@ export default function EmployeesPage() {
                   <input
                     type="text"
                     defaultValue={s.name}
+                    disabled={!canEdit}
                     onBlur={(e) => {
                       if (e.target.value.trim() && e.target.value !== s.name) handleRenameStore(s.id, e.target.value);
                     }}
-                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px]"
+                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   />
                   <div className="text-muted num">{s.code}</div>
-                  <button type="button" onClick={() => handleDeleteStore(s)} className="text-[12.5px] text-[#A34B36] font-semibold text-left">
-                    Удалить
-                  </button>
+                  {canEdit && (
+                    <button type="button" onClick={() => handleDeleteStore(s)} className="text-[12.5px] text-[#A34B36] font-semibold text-left">
+                      Удалить
+                    </button>
+                  )}
                 </div>
               ))}
 
+              {canEdit && (
               <div className="flex items-center gap-2 pt-2 border-t border-borderSoft">
                 <input
                   type="text"
@@ -729,9 +773,11 @@ export default function EmployeesPage() {
                   + Добавить точку
                 </button>
               </div>
+              )}
             </div>
           ))}
 
+          {canEdit && (
           <form
             onSubmit={handleCreateCity}
             className="bg-white border border-border rounded-card px-6 py-[22px] flex items-center gap-3"
@@ -752,6 +798,7 @@ export default function EmployeesPage() {
               {creatingCity ? "Создаём…" : "Добавить город"}
             </button>
           </form>
+          )}
         </div>
       )}
     </>
@@ -763,11 +810,13 @@ function RoleCard({
   cities,
   onSave,
   onDelete,
+  canEdit,
 }: {
   role: RoleDef;
   cities: CityWithStores[];
   onSave: (role: RoleDef, name: string, permissions: Permissions, storeAccess: StoreAccessGrant[]) => Promise<void>;
   onDelete: (role: RoleDef) => Promise<void>;
+  canEdit: boolean;
 }) {
   const [name, setName] = useState(role.name);
   const [permissions, setPermissions] = useState<Permissions>(toPermissions(role.role_permissions));
@@ -789,33 +838,38 @@ function RoleCard({
         <input
           type="text"
           value={name}
+          disabled={!canEdit}
           onChange={(e) => setName(e.target.value)}
-          className="border border-border rounded-lg px-3 py-2 text-sm font-bold flex-1 max-w-sm"
+          className="border border-border rounded-lg px-3 py-2 text-sm font-bold flex-1 max-w-sm disabled:opacity-50"
         />
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="text-[13px] font-bold text-paper bg-accent rounded-lg px-4 py-2 disabled:opacity-50"
-        >
-          {saving ? "Сохраняем…" : "Сохранить"}
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(role)}
-          className="text-[13px] text-[#A34B36] font-semibold"
-        >
-          Удалить
-        </button>
+        {canEdit && (
+          <>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="text-[13px] font-bold text-paper bg-accent rounded-lg px-4 py-2 disabled:opacity-50"
+            >
+              {saving ? "Сохраняем…" : "Сохранить"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(role)}
+              className="text-[13px] text-[#A34B36] font-semibold"
+            >
+              Удалить
+            </button>
+          </>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-6">
         <div className="flex flex-col gap-2">
           <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Разделы портала</div>
-          <PermissionsGrid value={permissions} onChange={setPermissions} />
+          <PermissionsGrid value={permissions} onChange={setPermissions} disabled={!canEdit} />
         </div>
         <div className="flex flex-col gap-2">
           <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Точки продаж</div>
-          <StoreAccessEditor cities={cities} value={storeAccess} onChange={setStoreAccess} />
+          <StoreAccessEditor cities={cities} value={storeAccess} onChange={setStoreAccess} disabled={!canEdit} />
         </div>
       </div>
     </div>

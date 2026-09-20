@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/requireAdmin";
+import { requireSettingsAccess } from "@/lib/requireAdmin";
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "view");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const { data, error } = await supabaseAdmin
     .from("role_store_access")
@@ -18,8 +18,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
 type Grant = { scope: "all" | "city" | "store"; cityId?: number | null; storeId?: number | null };
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Доступ только для администратора." }, { status: 403 });
+  const caller = await requireSettingsAccess(request, "edit");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
   const body = await request.json();
   const { grants } = body as { grants?: Grant[] };

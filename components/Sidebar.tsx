@@ -22,6 +22,10 @@ const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] 
   { label: "Внесение данных", href: "/marketing/data-entry", section: "marketing.data_entry" },
 ];
 
+const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
+  { label: "Сотрудники и доступы", href: "/settings/employees", section: "settings.employees" },
+];
+
 function StorePicker() {
   const { cities, stores, accessibleStoreCodes } = useAuth();
   const { selected, toggle, isAll, setAll } = useStoreSelection();
@@ -212,6 +216,9 @@ export default function Sidebar() {
   const visibleMarketing = MARKETING_SUBMENU.filter(
     (item) => isAdmin || permissions[item.section]?.canView
   );
+  const visibleSettings = SETTINGS_SUBMENU.filter(
+    (item) => isAdmin || permissions[item.section]?.canView
+  );
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -275,17 +282,30 @@ export default function Sidebar() {
           </span>
         </div>
 
-        {isAdmin && (
-          <Link
-            href="/settings/employees"
-            className={`px-3 py-2.5 rounded-lg text-sm font-medium mt-1 ${
-              pathname.startsWith("/settings")
-                ? "bg-accent text-paper font-semibold"
-                : "text-[#6B6455] hover:text-sidebarText"
-            }`}
-          >
-            Настройки
-          </Link>
+        {visibleSettings.length > 0 && (
+          <div className="flex flex-col gap-0.5 mt-1">
+            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold">
+              Настройки
+            </div>
+            <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
+              {visibleSettings.map((item) => {
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`px-3 py-2 rounded-md text-[13px] ${
+                      active
+                        ? "bg-accent text-paper font-semibold"
+                        : "text-[#A39D8E] font-medium hover:text-sidebarText"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
         )}
       </nav>
 
