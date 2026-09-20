@@ -96,7 +96,7 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
 }
 
 export default function DataEntryPage() {
-  const { isAdmin, permissions, stores, accessibleStoreCodes } = useAuth();
+  const { isAdmin, permissions, cities, stores, accessibleStoreCodes } = useAuth();
   const canView = isAdmin || permissions["marketing.data_entry"].canView;
   const canEditSection = isAdmin || permissions["marketing.data_entry"].canEdit;
   // Locking/unlocking the month follows the same edit permission as the data
@@ -104,7 +104,15 @@ export default function DataEntryPage() {
   const canEditLocked = canEditSection;
 
   const accessibleStores = stores.filter((s) => accessibleStoreCodes.includes(s.code));
+  const accessibleCities = useMemo(
+    () => cities.filter((c) => accessibleStores.some((s) => s.city_id === c.id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cities, accessibleStores.map((s) => s.code).join(",")]
+  );
+
   const [store, setStore] = useState<string>("");
+  const [cityId, setCityId] = useState<number | "">("");
+
   useEffect(() => {
     if (!store && accessibleStores.length > 0) setStore(accessibleStores[0].code);
     else if (store && !accessibleStoreCodes.includes(store) && accessibleStores.length > 0) {
@@ -112,6 +120,20 @@ export default function DataEntryPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessibleStoreCodes.join(",")]);
+
+  // The city dropdown always reflects whichever store is actually active —
+  // it's a navigation aid for narrowing the store list, not separate state.
+  useEffect(() => {
+    const current = accessibleStores.find((s) => s.code === store);
+    if (current && current.city_id !== cityId) setCityId(current.city_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store, accessibleStores.map((s) => s.code).join(",")]);
+
+  const storesForCity = useMemo(
+    () => accessibleStores.filter((s) => s.city_id === cityId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [accessibleStores.map((s) => s.code).join(","), cityId]
+  );
 
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -214,6 +236,17 @@ export default function DataEntryPage() {
 
   function changeStore(nextStore: string) {
     const doChange = () => setStore(nextStore);
+    if (dirty) requestNavigation(doChange);
+    else doChange();
+  }
+
+  function changeCity(nextCityId: number) {
+    const firstStore = accessibleStores.find((s) => s.city_id === nextCityId);
+    if (!firstStore) return;
+    const doChange = () => {
+      setCityId(nextCityId);
+      setStore(firstStore.code);
+    };
     if (dirty) requestNavigation(doChange);
     else doChange();
   }
@@ -416,18 +449,32 @@ export default function DataEntryPage() {
             ›
           </button>
         </div>
-        <select
-          value={store}
-          onChange={(e) => changeStore(e.target.value)}
-          disabled={loading || accessibleStores.length <= 1}
-          className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2 disabled:opacity-70"
-        >
-          {accessibleStores.map((s) => (
-            <option key={s.code} value={s.code}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={cityId}
+            onChange={(e) => changeCity(Number(e.target.value))}
+            disabled={loading || accessibleCities.length <= 1}
+            className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2 disabled:opacity-70"
+          >
+            {accessibleCities.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={store}
+            onChange={(e) => changeStore(e.target.value)}
+            disabled={loading || storesForCity.length <= 1}
+            className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2 disabled:opacity-70"
+          >
+            {storesForCity.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 pt-[22px] pb-5 flex flex-col gap-3.5">
