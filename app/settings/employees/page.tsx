@@ -288,7 +288,9 @@ export default function EmployeesPage() {
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [accessEditingId, setAccessEditingId] = useState<string | null>(null);
 
-  const [employeeEdits, setEmployeeEdits] = useState<Record<string, { fullName: string; email: string }>>({});
+  const [employeeEdits, setEmployeeEdits] = useState<
+    Record<string, { fullName: string; email: string; roleChoice: string }>
+  >({});
   const [cityEdits, setCityEdits] = useState<Record<number, string>>({});
   const [storeEdits, setStoreEdits] = useState<Record<number, string>>({});
 
@@ -430,17 +432,28 @@ export default function EmployeesPage() {
   function getEditedEmail(emp: Employee) {
     return employeeEdits[emp.id]?.email ?? emp.email;
   }
+  function getEditedRoleChoice(emp: Employee) {
+    return employeeEdits[emp.id]?.roleChoice ?? roleChoiceValue(emp);
+  }
   function isEmployeeDirty(emp: Employee) {
     const edit = employeeEdits[emp.id];
     if (!edit) return false;
-    return edit.fullName !== (emp.fullName ?? "") || edit.email !== emp.email;
+    return (
+      edit.fullName !== (emp.fullName ?? "") ||
+      edit.email !== emp.email ||
+      edit.roleChoice !== roleChoiceValue(emp)
+    );
   }
-  function updateEmployeeEdit(emp: Employee, patch: Partial<{ fullName: string; email: string }>) {
+  function updateEmployeeEdit(
+    emp: Employee,
+    patch: Partial<{ fullName: string; email: string; roleChoice: string }>
+  ) {
     setEmployeeEdits((prev) => ({
       ...prev,
       [emp.id]: {
         fullName: patch.fullName ?? prev[emp.id]?.fullName ?? emp.fullName ?? "",
         email: patch.email ?? prev[emp.id]?.email ?? emp.email,
+        roleChoice: patch.roleChoice ?? prev[emp.id]?.roleChoice ?? roleChoiceValue(emp),
       },
     }));
   }
@@ -456,6 +469,7 @@ export default function EmployeesPage() {
     if (!edit) return;
     if (edit.fullName !== (emp.fullName ?? "")) await handleRenameEmployee(emp, edit.fullName);
     if (edit.email !== emp.email) await handleUpdateEmail(emp, edit.email);
+    if (edit.roleChoice !== roleChoiceValue(emp)) await handleRoleChange(emp, edit.roleChoice);
     discardEmployeeEdit(emp);
   }
 
@@ -777,8 +791,8 @@ export default function EmployeesPage() {
                     {resolveStoreLabel(emp, roles, cities)}
                   </div>
                   <select
-                    value={roleChoiceValue(emp)}
-                    onChange={(e) => handleRoleChange(emp, e.target.value)}
+                    value={getEditedRoleChoice(emp)}
+                    onChange={(e) => updateEmployeeEdit(emp, { roleChoice: e.target.value })}
                     disabled={emp.email === myEmail || !canEdit}
                     className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   >
