@@ -6,8 +6,8 @@ import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { DataTableCard } from "@/components/DataTableCard";
 
-const PERIODS = ["7 дней", "30 дней", "90 дней", "Этот месяц", "Всё время"];
-const DEFAULT_PERIOD = 2; // "90 дней"
+const PERIODS = ["Прошлая неделя", "Эта неделя", "С начала месяца", "30 дней", "Всё время"];
+const DEFAULT_PERIOD = 2; // "С начала месяца"
 
 const WEEKDAY_LABELS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
 const WEEKDAY_JS_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Date#getDay(): 0 = Sunday
@@ -49,12 +49,30 @@ function stripTime(d: Date) {
 }
 
 function getPeriodRange(index: number, today: Date): { start: Date; end: Date } {
-  const end = stripTime(today);
-  if (index === 0) return { start: addDays(end, -6), end };
-  if (index === 1) return { start: addDays(end, -29), end };
-  if (index === 2) return { start: addDays(end, -89), end };
-  if (index === 3) return { start: new Date(end.getFullYear(), end.getMonth(), 1), end };
-  return { start: new Date(2000, 0, 1), end };
+  const d = stripTime(today);
+  const dow = d.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  const thisMonday = addDays(d, mondayOffset);
+  const thisSunday = addDays(thisMonday, 6);
+
+  if (index === 0) {
+    // Прошлая неделя
+    return { start: addDays(thisMonday, -7), end: addDays(thisSunday, -7) };
+  }
+  if (index === 1) {
+    // Эта неделя
+    return { start: thisMonday, end: thisSunday };
+  }
+  if (index === 2) {
+    // С начала месяца
+    return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: d };
+  }
+  if (index === 3) {
+    // 30 дней
+    return { start: addDays(d, -29), end: d };
+  }
+  // Всё время
+  return { start: new Date(2000, 0, 1), end: d };
 }
 
 function avg(nums: number[]): number {
