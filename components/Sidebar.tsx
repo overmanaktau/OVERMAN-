@@ -2,11 +2,10 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
-import { authFetch } from "@/lib/apiClient";
+import AccountMenu from "@/components/AccountMenu";
 import type { SectionKey } from "@/lib/permissions";
 
 const TOP_LEVEL: { label: string; soon: boolean }[] = [
@@ -135,84 +134,8 @@ function StorePicker() {
   );
 }
 
-function NameEditor() {
-  const { email, fullName, isAdmin, permissions, refresh } = useAuth();
-  const canRename = isAdmin || permissions["profile.rename"].canEdit;
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(fullName ?? "");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    try {
-      await authFetch("/api/profile", { method: "PATCH", body: JSON.stringify({ fullName: value }) });
-      setEditing(false);
-      refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось сохранить.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (editing) {
-    return (
-      <div className="flex flex-col gap-1.5">
-        <input
-          autoFocus
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Имя"
-          className="text-[12px] bg-[#232019] border border-[#3A362E] rounded-md px-2 py-1.5 text-sidebarText"
-        />
-        {error && <div className="text-[11px] text-[#C97A63]">{error}</div>}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="text-[11px] font-semibold text-accent disabled:opacity-50"
-          >
-            {saving ? "Сохраняем…" : "Сохранить"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setEditing(false);
-              setValue(fullName ?? "");
-              setError(null);
-            }}
-            className="text-[11px] text-sidebarMuted"
-          >
-            Отмена
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-1.5 min-w-0">
-      <div className="text-[11px] text-sidebarMuted truncate">{fullName || email}</div>
-      {canRename && (
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="text-[11px] text-sidebarMuted hover:text-sidebarText flex-none"
-          title="Изменить имя"
-        >
-          ✎
-        </button>
-      )}
-    </div>
-  );
-}
-
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const { isAdmin, permissions } = useAuth();
   const visibleMarketing = MARKETING_SUBMENU.filter(
     (item) => isAdmin || permissions[item.section]?.canView
@@ -221,13 +144,9 @@ export default function Sidebar() {
     (item) => isAdmin || permissions[item.section]?.canView
   );
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/login");
-  }
-
   return (
     <div className="w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6">
+      <AccountMenu />
       <div className="flex flex-col gap-0.5 px-2">
         <div className="font-serif text-2xl font-semibold tracking-wide">OVERMAN</div>
         <div className="text-xs text-sidebarMuted tracking-wider uppercase">Портал бизнеса</div>
@@ -309,20 +228,6 @@ export default function Sidebar() {
           </div>
         )}
       </nav>
-
-      <div className="mt-auto flex flex-col gap-2.5">
-        <div className="h-px bg-[#2C2820]" />
-        <div className="px-2 flex flex-col gap-1.5">
-          <NameEditor />
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="text-[13px] text-[#C9C3B6] text-left hover:text-sidebarText"
-          >
-            Выйти
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
