@@ -48,36 +48,20 @@ function GuardedLink({ href, className, children }: { href: string; className?: 
 
 function StorePicker() {
   const { cities, stores, accessibleStoreCodes } = useAuth();
-  const { selected, setSelected, toggle, toggleMany, isAll, setAll } = useStoreSelection();
+  const { selected, setSelected, toggle, isAll, setAll } = useStoreSelection();
   const [open, setOpen] = useState(false);
-  const [openCities, setOpenCities] = useState<Set<number>>(() => new Set(cities.map((c) => c.id)));
   const containerRef = useRef<HTMLDivElement>(null);
 
   const visibleStores = stores.filter((s) => accessibleStoreCodes.includes(s.code));
   const visibleCities = cities.filter((c) => visibleStores.some((s) => s.city_id === c.id));
 
   const label = isAll
-    ? "Все точки"
+    ? "Все города"
     : selected.length === 0
-    ? "Нет точек"
+    ? "Нет городов"
     : selected.length === 1
     ? stores.find((s) => s.code === selected[0])?.name ?? selected[0]
-    : `${selected.length} точки`;
-
-  function toggleCityOpen(cityId: number) {
-    setOpenCities((prev) => {
-      const next = new Set(prev);
-      if (next.has(cityId)) next.delete(cityId);
-      else next.add(cityId);
-      return next;
-    });
-  }
-
-  function toggleWholeCity(cityId: number) {
-    const cityStoreCodes = visibleStores.filter((s) => s.city_id === cityId).map((s) => s.code);
-    const allSelected = cityStoreCodes.every((c) => selected.includes(c));
-    toggleMany(cityStoreCodes, !allSelected);
-  }
+    : `${selected.length} города`;
 
   if (visibleStores.length === 0) return null;
 
@@ -101,52 +85,25 @@ function StorePicker() {
               onChange={() => (isAll ? setSelected([]) : setAll())}
               className="accent-accent"
             />
-            Все точки
+            Все города
           </label>
           <div className="h-px bg-[#3A362E] my-1" />
           {visibleCities.map((city) => {
-            const cityStores = visibleStores.filter((s) => s.city_id === city.id);
-            const cityAllSelected = cityStores.every((s) => selected.includes(s.code));
-            const cityOpen = openCities.has(city.id);
+            const store = visibleStores.find((s) => s.city_id === city.id);
+            if (!store) return null;
             return (
-              <div key={city.id} className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => toggleCityOpen(city.id)}
-                    className="text-sidebarMuted text-[10px] w-4 flex-none"
-                  >
-                    {cityOpen ? "▾" : "▸"}
-                  </button>
-                  <label className="flex-1 flex items-center gap-2 text-[13px] text-[#C9C3B6] py-1.5 px-1.5 rounded-md hover:bg-[#2C2820] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={cityAllSelected}
-                      onChange={() => toggleWholeCity(city.id)}
-                      className="accent-accent"
-                    />
-                    {city.name}
-                  </label>
-                </div>
-                {cityOpen && (
-                  <div className="flex flex-col pl-[26px]">
-                    {cityStores.map((s) => (
-                      <label
-                        key={s.code}
-                        className="flex items-center gap-2 text-[12.5px] text-[#A39D8E] py-1 px-1.5 rounded-md hover:bg-[#2C2820] cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(s.code)}
-                          onChange={() => toggle(s.code)}
-                          className="accent-accent"
-                        />
-                        {s.name}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <label
+                key={city.id}
+                className="flex items-center gap-2 text-[13px] text-[#C9C3B6] py-1.5 px-1.5 rounded-md hover:bg-[#2C2820] cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(store.code)}
+                  onChange={() => toggle(store.code)}
+                  className="accent-accent"
+                />
+                {city.name}
+              </label>
             );
           })}
         </div>

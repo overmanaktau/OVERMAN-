@@ -9,7 +9,6 @@ type StoreSelectionValue = {
   selected: string[];
   setSelected: (codes: string[]) => void;
   toggle: (code: string) => void;
-  toggleMany: (codes: string[], select: boolean) => void;
   isAll: boolean;
   setAll: () => void;
 };
@@ -18,7 +17,6 @@ const StoreSelectionContext = createContext<StoreSelectionValue>({
   selected: [],
   setSelected: () => {},
   toggle: () => {},
-  toggleMany: () => {},
   isAll: true,
   setAll: () => {},
 });
@@ -58,15 +56,6 @@ export function StoreSelectionProvider({ children }: { children: React.ReactNode
     persist(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code]);
   }
 
-  function toggleMany(codes: string[], select: boolean) {
-    const codeSet = new Set(codes);
-    persist(
-      select
-        ? [...selected.filter((c) => !codeSet.has(c)), ...codes]
-        : selected.filter((c) => !codeSet.has(c))
-    );
-  }
-
   const isAll = accessibleStoreCodes.length > 0 && selected.length === accessibleStoreCodes.length;
 
   return (
@@ -75,7 +64,6 @@ export function StoreSelectionProvider({ children }: { children: React.ReactNode
         selected,
         setSelected: persist,
         toggle,
-        toggleMany,
         isAll,
         setAll: () => persist(accessibleStoreCodes),
       }}

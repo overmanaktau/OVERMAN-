@@ -70,17 +70,17 @@ function toGrants(rows: RoleDef["role_store_access"]): StoreAccessGrant[] {
 }
 
 function resolveStoreLabel(emp: Employee, roles: RoleDef[], cities: CityWithStores[]): string {
-  if (emp.role === "admin" || emp.role === "owner") return "Все точки";
+  if (emp.role === "admin" || emp.role === "owner") return "Все города";
   if (!emp.roleId) return "—";
   const role = roles.find((r) => r.id === emp.roleId);
   if (!role) return "—";
   const grants = role.role_store_access;
-  if (grants.some((g) => g.scope === "all")) return "Все точки";
+  if (grants.some((g) => g.scope === "all")) return "Все города";
   const names: string[] = [];
   for (const g of grants) {
     if (g.scope === "city") {
       const city = cities.find((c) => c.id === g.city_id);
-      if (city) names.push(`${city.name} (весь)`);
+      if (city) names.push(city.name);
     } else if (g.scope === "store") {
       for (const city of cities) {
         const store = city.stores.find((s) => s.id === g.store_id);
@@ -88,7 +88,7 @@ function resolveStoreLabel(emp: Employee, roles: RoleDef[], cities: CityWithStor
       }
     }
   }
-  return names.length ? names.join(", ") : "Нет точек";
+  return names.length ? names.join(", ") : "Нет городов";
 }
 
 function PermissionsGrid({
@@ -155,27 +155,13 @@ function StoreAccessEditor({
 }) {
   const isAll = value.some((g) => g.scope === "all");
   const cityIds = new Set(value.filter((g) => g.scope === "city").map((g) => g.cityId));
-  const storeIds = new Set(value.filter((g) => g.scope === "store").map((g) => g.storeId));
 
   function setAll(checked: boolean) {
     onChange(checked ? [{ scope: "all", cityId: null, storeId: null }] : []);
   }
   function toggleCity(cityId: number, checked: boolean) {
-    // Also drop any individual store grants for this city's stores — otherwise a
-    // leftover per-store entry keeps that checkbox checked even after the city
-    // box is unchecked (or stays redundantly checked once the city box is checked).
-    const cityStoreIds = new Set(cities.find((c) => c.id === cityId)?.stores.map((s) => s.id) ?? []);
-    const next = value.filter(
-      (g) =>
-        g.scope !== "all" &&
-        !(g.scope === "city" && g.cityId === cityId) &&
-        !(g.scope === "store" && cityStoreIds.has(g.storeId as number))
-    );
+    const next = value.filter((g) => g.scope !== "all" && !(g.scope === "city" && g.cityId === cityId));
     onChange(checked ? [...next, { scope: "city", cityId, storeId: null }] : next);
-  }
-  function toggleStore(storeId: number, checked: boolean) {
-    const next = value.filter((g) => g.scope !== "all" && !(g.scope === "store" && g.storeId === storeId));
-    onChange(checked ? [...next, { scope: "store", cityId: null, storeId }] : next);
   }
 
   return (
@@ -188,40 +174,21 @@ function StoreAccessEditor({
           onChange={(e) => setAll(e.target.checked)}
           className="accent-accent disabled:opacity-40"
         />
-        Все города и точки
+        Все города
       </label>
       {!isAll &&
-        cities.map((city) => {
-          const cityChecked = cityIds.has(city.id);
-          return (
-            <div key={city.id} className="flex flex-col gap-1 pl-1">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={cityChecked}
-                  disabled={disabled}
-                  onChange={(e) => toggleCity(city.id, e.target.checked)}
-                  className="accent-accent disabled:opacity-40"
-                />
-                {city.name} <span className="text-mutedLight">(весь город)</span>
-              </label>
-              <div className="flex flex-col gap-1 pl-6">
-                {city.stores.map((s) => (
-                  <label key={s.id} className="flex items-center gap-2 text-muted">
-                    <input
-                      type="checkbox"
-                      checked={cityChecked || storeIds.has(s.id)}
-                      disabled={disabled || cityChecked}
-                      onChange={(e) => toggleStore(s.id, e.target.checked)}
-                      className="accent-accent disabled:opacity-50"
-                    />
-                    {s.name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+        cities.map((city) => (
+          <label key={city.id} className="flex items-center gap-2 pl-1">
+            <input
+              type="checkbox"
+              checked={cityIds.has(city.id)}
+              disabled={disabled}
+              onChange={(e) => toggleCity(city.id, e.target.checked)}
+              className="accent-accent disabled:opacity-40"
+            />
+            {city.name}
+          </label>
+        ))}
     </div>
   );
 }
@@ -280,7 +247,7 @@ function EmployeeAccessPanel({
           <PermissionsGrid value={permissions} onChange={setPermissions} disabled={!canEdit} />
         </div>
         <div className="flex flex-col gap-2">
-          <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Точки продаж</div>
+          <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Города</div>
           <StoreAccessEditor cities={cities} value={storeAccess} onChange={setStoreAccess} disabled={!canEdit} />
         </div>
       </div>
@@ -325,7 +292,6 @@ export default function EmployeesPage() {
     Record<string, { fullName: string; email: string; roleChoice: string }>
   >({});
   const [cityEdits, setCityEdits] = useState<Record<number, string>>({});
-  const [storeEdits, setStoreEdits] = useState<Record<number, string>>({});
 
   const sharedRoles = roles.filter((r) => !r.is_personal);
 
@@ -341,8 +307,6 @@ export default function EmployeesPage() {
 
   const [newCityName, setNewCityName] = useState("");
   const [creatingCity, setCreatingCity] = useState(false);
-  const [newStoreName, setNewStoreName] = useState<Record<number, string>>({});
-  const [newStoreCode, setNewStoreCode] = useState<Record<number, string>>({});
 
   async function loadAll() {
     setLoading(true);
@@ -558,24 +522,6 @@ export default function EmployeesPage() {
     discardCityEdit(city.id);
   }
 
-  function isStoreDirty(store: { id: number; name: string }) {
-    const edit = storeEdits[store.id];
-    return edit !== undefined && edit.trim() !== "" && edit !== store.name;
-  }
-  function discardStoreEdit(storeId: number) {
-    setStoreEdits((prev) => {
-      const next = { ...prev };
-      delete next[storeId];
-      return next;
-    });
-  }
-  async function handleSaveStoreEdit(store: { id: number; name: string }) {
-    const edit = storeEdits[store.id];
-    if (edit === undefined || edit.trim() === "" || edit === store.name) return;
-    await handleRenameStore(store.id, edit);
-    discardStoreEdit(store.id);
-  }
-
   async function handleResetPassword(emp: Employee, password: string) {
     if (password.length < 6) {
       setError("Пароль должен быть не короче 6 символов.");
@@ -710,7 +656,7 @@ export default function EmployeesPage() {
   }
 
   async function handleDeleteCity(city: CityWithStores) {
-    if (!window.confirm(`Удалить город «${city.name}» вместе со всеми его точками?`)) return;
+    if (!window.confirm(`Удалить город «${city.name}»? Уже сохранённые данные за прошлые дни останутся в базе.`)) return;
     setError(null);
     try {
       await authFetch(`/api/cities/${city.id}`, { method: "DELETE" });
@@ -720,46 +666,7 @@ export default function EmployeesPage() {
     }
   }
 
-  async function handleCreateStore(cityId: number) {
-    const name = newStoreName[cityId]?.trim();
-    const code = newStoreCode[cityId]?.trim();
-    if (!name || !code) return;
-    setError(null);
-    try {
-      await authFetch("/api/stores", { method: "POST", body: JSON.stringify({ cityId, name, code }) });
-      setNewStoreName((prev) => ({ ...prev, [cityId]: "" }));
-      setNewStoreCode((prev) => ({ ...prev, [cityId]: "" }));
-      await loadAll();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось создать точку.");
-    }
-  }
-
-  async function handleRenameStore(storeId: number, name: string) {
-    setError(null);
-    try {
-      await authFetch(`/api/stores/${storeId}`, { method: "PATCH", body: JSON.stringify({ name }) });
-      await loadAll();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось переименовать точку.");
-    }
-  }
-
-  async function handleDeleteStore(store: { id: number; name: string }) {
-    if (!window.confirm(`Удалить точку «${store.name}»? Уже сохранённые данные за прошлые дни останутся в базе.`)) return;
-    setError(null);
-    try {
-      await authFetch(`/api/stores/${store.id}`, { method: "DELETE" });
-      await loadAll();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось удалить точку.");
-    }
-  }
-
-  const anyDirty =
-    employees.some(isEmployeeDirty) ||
-    cities.some(isCityDirty) ||
-    cities.some((c) => c.stores.some(isStoreDirty));
+  const anyDirty = employees.some(isEmployeeDirty) || cities.some(isCityDirty);
 
   async function saveAllDirty() {
     for (const emp of employees) {
@@ -767,16 +674,12 @@ export default function EmployeesPage() {
     }
     for (const city of cities) {
       if (isCityDirty(city)) await handleSaveCityEdit(city);
-      for (const s of city.stores) {
-        if (isStoreDirty(s)) await handleSaveStoreEdit(s);
-      }
     }
   }
 
   function discardAllDirty() {
     setEmployeeEdits({});
     setCityEdits({});
-    setStoreEdits({});
   }
 
   const { setGuard, requestNavigation } = useUnsavedChanges();
@@ -818,7 +721,7 @@ export default function EmployeesPage() {
               tab === t ? "bg-accent text-paper font-bold" : "text-muted font-medium"
             }`}
           >
-            {t === "employees" ? "Сотрудники" : t === "roles" ? "Роли доступа" : "Города и точки"}
+            {t === "employees" ? "Сотрудники" : t === "roles" ? "Роли доступа" : "Города"}
           </button>
         ))}
       </div>
@@ -832,7 +735,7 @@ export default function EmployeesPage() {
             <div className="grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Имя</div>
               <div>Email</div>
-              <div>Точки</div>
+              <div>Города</div>
               <div>Роль</div>
               <div></div>
             </div>
@@ -1087,7 +990,7 @@ export default function EmployeesPage() {
             />
             <PermissionsGrid value={newRolePerms} onChange={setNewRolePerms} />
             <p className="text-[12px] text-muted">
-              Доступ по точкам продаж настраивается после создания роли — откройте её карточку ниже.
+              Доступ по городам настраивается после создания роли — откройте её карточку ниже.
             </p>
             <button
               type="submit"
@@ -1132,70 +1035,6 @@ export default function EmployeesPage() {
                   )
                 )}
               </div>
-
-              <div className="grid grid-cols-[1fr_140px_80px] gap-3 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border pb-2">
-                <div>Точка</div>
-                <div>Код (store)</div>
-                <div></div>
-              </div>
-              {city.stores.map((s) => (
-                <div key={s.id} className="grid grid-cols-[1fr_140px_80px] gap-3 items-center text-[13px] py-1">
-                  <input
-                    type="text"
-                    value={storeEdits[s.id] ?? s.name}
-                    disabled={!canEdit}
-                    onChange={(e) => setStoreEdits((prev) => ({ ...prev, [s.id]: e.target.value }))}
-                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
-                  />
-                  <div className="text-muted num">{s.code}</div>
-                  {canEdit && isStoreDirty(s) ? (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleSaveStoreEdit(s)}
-                        className="text-[12.5px] text-accent font-bold text-left"
-                      >
-                        Сохранить
-                      </button>
-                      <button type="button" onClick={() => discardStoreEdit(s.id)} className="text-[12.5px] text-muted text-left">
-                        Отмена
-                      </button>
-                    </div>
-                  ) : (
-                    canEdit && (
-                      <button type="button" onClick={() => handleDeleteStore(s)} className="text-[12.5px] text-[#A34B36] font-semibold text-left">
-                        Удалить
-                      </button>
-                    )
-                  )}
-                </div>
-              ))}
-
-              {canEdit && (
-              <div className="flex items-center gap-2 pt-2 border-t border-borderSoft">
-                <input
-                  type="text"
-                  placeholder="Название новой точки"
-                  value={newStoreName[city.id] ?? ""}
-                  onChange={(e) => setNewStoreName((prev) => ({ ...prev, [city.id]: e.target.value }))}
-                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px] flex-1"
-                />
-                <input
-                  type="text"
-                  placeholder="код (напр. point_3)"
-                  value={newStoreCode[city.id] ?? ""}
-                  onChange={(e) => setNewStoreCode((prev) => ({ ...prev, [city.id]: e.target.value }))}
-                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px] w-[140px]"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleCreateStore(city.id)}
-                  className="text-[12.5px] font-semibold text-accent"
-                >
-                  + Добавить точку
-                </button>
-              </div>
-              )}
             </div>
           ))}
 
@@ -1314,7 +1153,7 @@ function RoleCard({
           <PermissionsGrid value={permissions} onChange={setPermissions} disabled={!canEdit} />
         </div>
         <div className="flex flex-col gap-2">
-          <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Точки продаж</div>
+          <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Города</div>
           <StoreAccessEditor cities={cities} value={storeAccess} onChange={setStoreAccess} disabled={!canEdit} />
         </div>
       </div>

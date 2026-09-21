@@ -13,6 +13,13 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const { error } = await supabaseAdmin.from("cities").update({ name: name.trim() }).eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
+  // Keep the city's one store in sync — the store name is never edited on its own.
+  const { error: storeError } = await supabaseAdmin
+    .from("stores")
+    .update({ name: name.trim() })
+    .eq("city_id", params.id);
+  if (storeError) return NextResponse.json({ error: storeError.message }, { status: 400 });
+
   return NextResponse.json({ ok: true });
 }
 

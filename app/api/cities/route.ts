@@ -26,5 +26,14 @@ export async function POST(request: Request) {
   const { data, error } = await supabaseAdmin.from("cities").insert({ name: name.trim() }).select("id").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
+  // A city IS its one point of sale — no separate store management anymore.
+  const { error: storeError } = await supabaseAdmin
+    .from("stores")
+    .insert({ city_id: data.id, name: name.trim(), code: `city_${data.id}` });
+  if (storeError) {
+    await supabaseAdmin.from("cities").delete().eq("id", data.id);
+    return NextResponse.json({ error: storeError.message }, { status: 400 });
+  }
+
   return NextResponse.json({ id: data.id });
 }

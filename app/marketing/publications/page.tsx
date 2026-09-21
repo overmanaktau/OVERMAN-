@@ -96,23 +96,13 @@ export default function PublicationsPage() {
 
   const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
   const [cityFilter, setCityFilter] = useState<number | "all">("all");
-  const [storeFilter, setStoreFilter] = useState<string | "all">("all");
-
-  const storesForCity = useMemo(
-    () => (cityFilter === "all" ? accessibleStores : accessibleStores.filter((s) => s.city_id === cityFilter)),
-    [accessibleStores, cityFilter]
-  );
-
-  useEffect(() => {
-    if (storeFilter !== "all" && !storesForCity.some((s) => s.code === storeFilter)) {
-      setStoreFilter("all");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storesForCity.map((s) => s.code).join(",")]);
 
   const filterStoreCodes = useMemo(
-    () => (storeFilter === "all" ? storesForCity.map((s) => s.code) : [storeFilter]),
-    [storeFilter, storesForCity]
+    () =>
+      (cityFilter === "all" ? accessibleStores : accessibleStores.filter((s) => s.city_id === cityFilter)).map(
+        (s) => s.code
+      ),
+    [accessibleStores, cityFilter]
   );
 
   const [entries, setEntries] = useState<PublicationEntry[]>([]);
@@ -276,19 +266,6 @@ export default function PublicationsPage() {
           {accessibleCities.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={storeFilter}
-          onChange={(e) => setStoreFilter(e.target.value)}
-          className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2.5"
-        >
-          <option value="all">Все точки</option>
-          {storesForCity.map((s) => (
-            <option key={s.code} value={s.code}>
-              {s.name}
             </option>
           ))}
         </select>
