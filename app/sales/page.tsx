@@ -165,6 +165,21 @@ export default function SalesPage() {
   const totalReceipts = registerSales.reduce((acc, r) => acc + r.receipts, 0);
   const totalItems = registerSales.reduce((acc, r) => acc + r.items, 0);
 
+  // A missing cost anywhere in the set makes the whole sum's gross profit
+  // unknown, rather than silently treating it as zero.
+  function sumCost(rows: RegisterSalesRow[]): number | null {
+    let sum = 0;
+    for (const r of rows) {
+      if (r.cost === null) return null;
+      sum += r.cost;
+    }
+    return sum;
+  }
+  function grossProfit(revenue: number, cost: number | null): string {
+    return cost !== null ? money(revenue - cost) : "—";
+  }
+  const totalCost = sumCost(registerSales);
+
   function storeLabel(code: string | null) {
     if (!code) return "—";
     return stores.find((s) => s.code === code)?.name ?? code;
@@ -216,6 +231,10 @@ export default function SalesPage() {
             {p}
           </button>
         ))}
+        <div className="w-px h-5 bg-border mx-0.5" />
+        <button type="button" disabled title="Скоро" className="text-[13px] text-mutedLight font-medium px-3.5 py-2">
+          Свой период
+        </button>
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
@@ -234,18 +253,18 @@ export default function SalesPage() {
               <div>Средний чек</div>
               <div>Кол-во товара</div>
               <div>Глубина чека</div>
-              <div>Маржа %</div>
+              <div>Валовая прибыль</div>
             </div>
             {visibleGroups.map((group) => {
               const groupRevenue = group.rows.reduce((acc, r) => acc + r.revenue, 0);
               const groupReceipts = group.rows.reduce((acc, r) => acc + r.receipts, 0);
               const groupItems = group.rows.reduce((acc, r) => acc + r.items, 0);
+              const groupCost = sumCost(group.rows);
               return (
                 <div key={group.store ?? "none"}>
                   {group.rows.map((r) => {
                     const avgCheck = r.receipts > 0 ? r.revenue / r.receipts : 0;
                     const checkDepth = r.receipts > 0 ? r.items / r.receipts : 0;
-                    const marginPct = r.cost !== null && r.revenue > 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : null;
                     return (
                       <div
                         key={r.registerId}
@@ -257,8 +276,8 @@ export default function SalesPage() {
                         <div className="num">{r.receipts}</div>
                         <div className="num">{money(avgCheck)}</div>
                         <div className="num">{r.items.toLocaleString("ru-RU")}</div>
-                        <div className="num">{checkDepth.toFixed(1)}</div>
-                        <div className="num">{marginPct !== null ? `${marginPct.toFixed(0)}%` : "—"}</div>
+                        <div className="num">{checkDepth.toFixed(3)}</div>
+                        <div className="num">{grossProfit(r.revenue, r.cost)}</div>
                       </div>
                     );
                   })}
@@ -269,8 +288,8 @@ export default function SalesPage() {
                       <div className="num">{groupReceipts}</div>
                       <div className="num">{groupReceipts > 0 ? money(groupRevenue / groupReceipts) : "—"}</div>
                       <div className="num">{groupItems.toLocaleString("ru-RU")}</div>
-                      <div className="num">{groupReceipts > 0 ? (groupItems / groupReceipts).toFixed(1) : "—"}</div>
-                      <div />
+                      <div className="num">{groupReceipts > 0 ? (groupItems / groupReceipts).toFixed(3) : "—"}</div>
+                      <div className="num">{grossProfit(groupRevenue, groupCost)}</div>
                     </div>
                   )}
                 </div>
@@ -282,8 +301,8 @@ export default function SalesPage() {
               <div className="num">{totalReceipts}</div>
               <div className="num">{totalReceipts > 0 ? money(totalRevenue / totalReceipts) : "—"}</div>
               <div className="num">{totalItems.toLocaleString("ru-RU")}</div>
-              <div className="num">{totalReceipts > 0 ? (totalItems / totalReceipts).toFixed(1) : "—"}</div>
-              <div />
+              <div className="num">{totalReceipts > 0 ? (totalItems / totalReceipts).toFixed(3) : "—"}</div>
+              <div className="num">{grossProfit(totalRevenue, totalCost)}</div>
             </div>
           </>
         )}
