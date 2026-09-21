@@ -3,6 +3,7 @@ import { Newsreader, Manrope } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 import UnsavedChangesProvider from "@/components/UnsavedChangesContext";
+import NumberInputWheelGuard from "@/components/NumberInputWheelGuard";
 
 // Runs before hydration so the page never flashes the wrong theme on load.
 const NO_FLASH_SCRIPT = `
@@ -44,7 +45,10 @@ export default function RootLayout({
       </head>
       <body className={`${newsreader.variable} ${manrope.variable} font-sans text-ink bg-paper`}>
         <ThemeProvider>
-          <UnsavedChangesProvider>{children}</UnsavedChangesProvider>
+          <UnsavedChangesProvider>
+            <NumberInputWheelGuard />
+            {children}
+          </UnsavedChangesProvider>
         </ThemeProvider>
       </body>
     </html>
