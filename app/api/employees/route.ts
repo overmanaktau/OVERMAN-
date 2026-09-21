@@ -1,33 +1,19 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSettingsAccess } from "@/lib/requireAdmin";
+import { listEmployees } from "@/lib/employees";
+import { getErrorMessage } from "@/lib/errors";
 
 export async function GET(request: Request) {
   const caller = await requireSettingsAccess(request, "view");
   if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Сотрудники и доступы»." }, { status: 403 });
 
-  const { data: authUsers, error: usersError } = await supabaseAdmin.auth.admin.listUsers();
-  if (usersError) return NextResponse.json({ error: usersError.message }, { status: 500 });
-
-  const { data: roleRows, error: rolesError } = await supabaseAdmin
-    .from("user_roles")
-    .select("user_id, role, role_id, full_name");
-  if (rolesError) return NextResponse.json({ error: rolesError.message }, { status: 500 });
-
-  const roleByUser = new Map((roleRows ?? []).map((r) => [r.user_id, r]));
-  const employees = authUsers.users.map((u) => {
-    const r = roleByUser.get(u.id);
-    return {
-      id: u.id,
-      email: u.email ?? "",
-      fullName: r?.full_name ?? null,
-      role: r?.role ?? null,
-      roleId: r?.role_id ?? null,
-      createdAt: u.created_at,
-    };
-  });
-
-  return NextResponse.json({ employees });
+  try {
+    const employees = await listEmployees();
+    return NextResponse.json({ employees });
+  } catch (e) {
+    return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {

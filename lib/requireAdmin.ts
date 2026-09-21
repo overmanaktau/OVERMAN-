@@ -61,3 +61,7 @@ export function requireSettingsAccess(request: Request, need: "view" | "edit") {
 export function requireRequestsAccess(request: Request, need: "view" | "edit") {
   return requireSectionAccess(request, "requests", need);
 }
+
+export function requireAccountsAccess(request: Request, need: "view" | "edit") {
+  return requireSectionAccess(request, "accounts", need);
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSettingsAccess } from "@/lib/requireAdmin";
+import { deleteEmployeeAccount } from "@/lib/employees";
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
   const caller = await requireSettingsAccess(request, "edit");
@@ -58,29 +59,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: "Нельзя удалить самого себя." }, { status: 400 });
   }
 
-  const { data: roleRow } = await supabaseAdmin
-    .from("user_roles")
-    .select("role_id")
-    .eq("user_id", params.id)
-    .maybeSingle();
-
-  const { error } = await supabaseAdmin.auth.admin.deleteUser(params.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-
-  await supabaseAdmin.from("user_roles").delete().eq("user_id", params.id);
-
-  if (roleRow?.role_id) {
-    // Clean up a personal (per-employee) role that's now orphaned — shared
-    // roles are left alone even if this was the last employee using them.
-    const { data: role } = await supabaseAdmin
-      .from("roles")
-      .select("is_personal")
-      .eq("id", roleRow.role_id)
-      .maybeSingle();
-    if (role?.is_personal) {
-      await supabaseAdmin.from("roles").delete().eq("id", roleRow.role_id);
-    }
-  }
+  const result = await deleteEmployeeAccount(params.id);
+  if (result.error) return NextResponse.json({ error: result.error }, { status: 400 });
 
   return NextResponse.json({ ok: true });
 }
