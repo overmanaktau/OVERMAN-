@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import KpiCard from "@/components/KpiCard";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
@@ -77,6 +77,20 @@ function getPeriodRange(index: number, today: Date): Range {
   return { start: new Date(2000, 0, 1), end: d, prevStart: d, prevEnd: d, hasPrev: false };
 }
 
+function parseYmd(s: string): Date {
+  const [y, m, day] = s.split("-").map(Number);
+  return new Date(y, m - 1, day);
+}
+
+function getCustomRange(startStr: string, endStr: string): Range {
+  const start = parseYmd(startStr);
+  const end = parseYmd(endStr);
+  const days = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  const prevEnd = addDays(start, -1);
+  const prevStart = addDays(prevEnd, -(days - 1));
+  return { start, end, prevStart, prevEnd, hasPrev: true };
+}
+
 type TrafficRow = {
   entry_date: string;
   traffic_plan: number | null;
@@ -116,6 +130,11 @@ export default function StatisticsPage() {
   const { selected: selectedStores } = useStoreSelection();
 
   const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
+  const [activeCustom, setActiveCustom] = useState<{ start: string; end: string } | null>(null);
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const customPickerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,14 +156,14 @@ export default function StatisticsPage() {
       setPrevExpensesTotal(0);
       setSalesTotals({ revenue: 0, receipts: 0 });
       setPrevSalesTotals({ revenue: 0, receipts: 0 });
-      setRange(getPeriodRange(periodIndex, new Date()));
+      setRange(activeCustom ? getCustomRange(activeCustom.start, activeCustom.end) : getPeriodRange(periodIndex, new Date()));
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const r = getPeriodRange(periodIndex, new Date());
+      const r = activeCustom ? getCustomRange(activeCustom.start, activeCustom.end) : getPeriodRange(periodIndex, new Date());
       setRange(r);
 
       const { data: registers, error: registersError } = await supabase
@@ -229,11 +248,26 @@ export default function StatisticsPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodIndex, selectedStores.join(",")]);
+  }, [periodIndex, activeCustom?.start, activeCustom?.end, selectedStores.join(",")]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!showCustomPicker) return;
+    function onClick(e: MouseEvent) {
+      if (customPickerRef.current && !customPickerRef.current.contains(e.target as Node)) setShowCustomPicker(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showCustomPicker]);
+
+  function applyCustomRange() {
+    if (!customStart || !customEnd || customStart > customEnd) return;
+    setActiveCustom({ start: customStart, end: customEnd });
+    setShowCustomPicker(false);
+  }
 
   if (!canView) {
     return (
@@ -325,24 +359,83 @@ export default function StatisticsPage() {
       </div>
 
       {/* Period selector */}
-      <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+      <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit relative">
         {PERIODS.map((p, i) => (
           <button
             key={p}
             type="button"
-            onClick={() => setPeriodIndex(i)}
+            onClick={() => {
+              setPeriodIndex(i);
+              setActiveCustom(null);
+            }}
             disabled={loading}
             className={`font-sans text-[13px] rounded-md px-3.5 py-2 disabled:opacity-60 ${
-              i === periodIndex ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+              i === periodIndex && !activeCustom ? "bg-accent text-paper font-bold" : "text-muted font-medium"
             }`}
           >
             {p}
           </button>
         ))}
         <div className="w-px h-5 bg-border mx-0.5" />
-        <button type="button" disabled title="Скоро" className="text-[13px] text-mutedLight font-medium px-3.5 py-2">
-          Свой период
-        </button>
+        <div ref={customPickerRef} className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              if (!showCustomPicker) {
+                setCustomStart(activeCustom?.start ?? ymd(addDays(new Date(), -6)));
+                setCustomEnd(activeCustom?.end ?? ymd(new Date()));
+              }
+              setShowCustomPicker((v) => !v);
+            }}
+            disabled={loading}
+            className={`text-[13px] rounded-md px-3.5 py-2 disabled:opacity-60 ${
+              activeCustom ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+            }`}
+          >
+            {activeCustom ? `${activeCustom.start} — ${activeCustom.end}` : "Свой период"}
+          </button>
+          {showCustomPicker && (
+            <div className="absolute right-0 top-full mt-2 z-50 bg-surface border border-border rounded-lg shadow-lg p-3.5 flex flex-col gap-2.5 w-[230px]">
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                С
+                <input
+                  type="date"
+                  value={customStart}
+                  max={customEnd || undefined}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                По
+                <input
+                  type="date"
+                  value={customEnd}
+                  min={customStart || undefined}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                />
+              </label>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowCustomPicker(false)}
+                  className="text-[12.5px] font-semibold text-muted px-2.5 py-1.5 rounded-md hover:bg-paper"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={applyCustomRange}
+                  disabled={!customStart || !customEnd || customStart > customEnd}
+                  className="text-[12.5px] font-bold text-paper bg-accent rounded-md px-3 py-1.5 disabled:opacity-50"
+                >
+                  Применить
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* KPI row */}
