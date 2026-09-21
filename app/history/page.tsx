@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { authFetch } from "@/lib/apiClient";
 import PeriodFilterBar, { type PeriodMode } from "@/components/PeriodFilterBar";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -42,6 +43,7 @@ export default function HistoryPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState<string>("all");
+  const [rosterNames, setRosterNames] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,9 +66,22 @@ export default function HistoryPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    authFetch("/api/history-employees")
+      .then((data) => setRosterNames((data.names ?? []) as string[]))
+      .catch(() => {
+        // non-fatal — the filter just falls back to names already present in the loaded history
+      });
+  }, []);
+
+  // Every current employee shows up here, even with zero history yet, plus
+  // anyone who only appears in the history because they've since been deleted.
   const employees = useMemo(
-    () => Array.from(new Set(rows.map((r) => r.changed_by_name))).sort((a, b) => a.localeCompare(b, "ru")),
-    [rows]
+    () =>
+      Array.from(new Set([...rosterNames, ...rows.map((r) => r.changed_by_name)])).sort((a, b) =>
+        a.localeCompare(b, "ru")
+      ),
+    [rows, rosterNames]
   );
 
   const visibleRows = useMemo(() => {

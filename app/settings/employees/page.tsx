@@ -831,7 +831,7 @@ export default function EmployeesPage() {
                       </>
                     ) : (
                       <>
-                        {emp.role !== "admin" && emp.role !== "owner" && (
+                        {emp.role !== "owner" && (
                           <button
                             type="button"
                             onClick={() => setAccessEditingId(accessEditingId === emp.id ? null : emp.id)}
