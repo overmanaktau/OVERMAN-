@@ -170,6 +170,18 @@ export default function SalesPage() {
     return stores.find((s) => s.code === code)?.name ?? code;
   }
 
+  // Grouped by city, in the same order cities appear everywhere else in the
+  // app — Актау's points together, then Актобе's, each with its own subtotal.
+  const cityGroups: { store: string | null; label: string; rows: RegisterSalesRow[] }[] = [
+    ...stores.map((s) => ({ store: s.code, label: s.name, rows: [] as RegisterSalesRow[] })),
+    { store: null, label: "Без города", rows: [] as RegisterSalesRow[] },
+  ];
+  for (const r of registerSales) {
+    const group = cityGroups.find((g) => g.store === r.store) ?? cityGroups[cityGroups.length - 1];
+    group.rows.push(r);
+  }
+  const visibleGroups = cityGroups.filter((g) => g.rows.length > 0);
+
   return (
     <>
       <div className="flex flex-col gap-1">
@@ -223,23 +235,43 @@ export default function SalesPage() {
               <div>Глубина чека</div>
               <div>Маржа %</div>
             </div>
-            {registerSales.map((r) => {
-              const avgCheck = r.receipts > 0 ? r.revenue / r.receipts : 0;
-              const checkDepth = r.receipts > 0 ? r.items / r.receipts : 0;
-              const marginPct = r.cost !== null && r.revenue > 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : null;
+            {visibleGroups.map((group) => {
+              const groupRevenue = group.rows.reduce((acc, r) => acc + r.revenue, 0);
+              const groupReceipts = group.rows.reduce((acc, r) => acc + r.receipts, 0);
+              const groupItems = group.rows.reduce((acc, r) => acc + r.items, 0);
               return (
-                <div
-                  key={r.registerId}
-                  className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
-                >
-                  <div className="font-semibold">{r.name}</div>
-                  <div className="text-muted">{storeLabel(r.store)}</div>
-                  <div className="num">{money(r.revenue)}</div>
-                  <div className="num">{r.receipts}</div>
-                  <div className="num">{money(avgCheck)}</div>
-                  <div className="num">{r.items.toLocaleString("ru-RU")}</div>
-                  <div className="num">{checkDepth.toFixed(1)}</div>
-                  <div className="num">{marginPct !== null ? `${marginPct.toFixed(0)}%` : "—"}</div>
+                <div key={group.store ?? "none"}>
+                  {group.rows.map((r) => {
+                    const avgCheck = r.receipts > 0 ? r.revenue / r.receipts : 0;
+                    const checkDepth = r.receipts > 0 ? r.items / r.receipts : 0;
+                    const marginPct = r.cost !== null && r.revenue > 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : null;
+                    return (
+                      <div
+                        key={r.registerId}
+                        className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                      >
+                        <div className="font-semibold">{r.name}</div>
+                        <div className="text-muted">{storeLabel(r.store)}</div>
+                        <div className="num">{money(r.revenue)}</div>
+                        <div className="num">{r.receipts}</div>
+                        <div className="num">{money(avgCheck)}</div>
+                        <div className="num">{r.items.toLocaleString("ru-RU")}</div>
+                        <div className="num">{checkDepth.toFixed(1)}</div>
+                        <div className="num">{marginPct !== null ? `${marginPct.toFixed(0)}%` : "—"}</div>
+                      </div>
+                    );
+                  })}
+                  {group.rows.length > 1 && (
+                    <div className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 py-2 border-b border-borderSoft items-center text-[12.5px] font-bold bg-weekendTint">
+                      <div className="col-span-2">Итого по {group.label}</div>
+                      <div className="num">{money(groupRevenue)}</div>
+                      <div className="num">{groupReceipts}</div>
+                      <div className="num">{groupReceipts > 0 ? money(groupRevenue / groupReceipts) : "—"}</div>
+                      <div className="num">{groupItems.toLocaleString("ru-RU")}</div>
+                      <div />
+                      <div />
+                    </div>
+                  )}
                 </div>
               );
             })}
