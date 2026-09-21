@@ -1,11 +1,15 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { emptyPermissions, fullPermissions, type Permissions } from "@/lib/permissions";
 import { getErrorMessage } from "@/lib/errors";
 import { resolveAccessibleStoreCodes, type City, type Store, type StoreAccessGrant } from "@/lib/stores";
+import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
+
+const SESSION_LIMIT_MS = 30 * 60 * 1000;
+const RESUME_PATH_KEY = "overman.resumePath";
 
 type AuthContextValue = {
   email: string | null;
@@ -41,10 +45,15 @@ export function useAuth() {
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const { isDirty, saveNow } = useUnsavedChanges();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [value, setValue] = useState<AuthContextValue>(DEFAULT_VALUE);
   const [reloadTick, setReloadTick] = useState(0);
+  const [lastSignInAt, setLastSignInAt] = useState<string | null>(null);
+  const [resumePath, setResumePath] = useState<string | null>(null);
+  const resumeCheckedRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -119,6 +128,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           accessibleStoreCodes,
           refresh: () => setReloadTick((t) => t + 1),
         });
+        setLastSignInAt(session.user.last_sign_in_at ?? null);
         setStatus("ready");
       } catch (e) {
         if (!active) return;
@@ -143,6 +153,74 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       listener.subscription.unsubscribe();
     };
   }, [router, reloadTick]);
+
+  // Auto sign-out 30 minutes after login for every role except the owner,
+  // who stays signed in indefinitely. If there were unsaved changes at that
+  // moment, save whatever was already confirmed and remember the page so we
+  // can offer to jump back to it after the next login.
+  useEffect(() => {
+    if (status !== "ready" || value.role === null || value.role === "owner" || !lastSignInAt) return;
+
+    const deadline = new Date(lastSignInAt).getTime() + SESSION_LIMIT_MS;
+    const msLeft = deadline - Date.now();
+
+    async function forceLogout() {
+      try {
+        if (isDirty) {
+          await saveNow();
+          try {
+            localStorage.setItem(RESUME_PATH_KEY, pathname);
+          } catch {
+            // storage unavailable — the resume prompt just won't appear next time
+          }
+        }
+      } catch {
+        // don't let a failed save trap the user in an expired session
+      }
+      await supabase.auth.signOut();
+      router.replace("/login");
+    }
+
+    if (msLeft <= 0) {
+      forceLogout();
+      return;
+    }
+    const timer = window.setTimeout(forceLogout, msLeft);
+    return () => window.clearTimeout(timer);
+  }, [status, value.role, lastSignInAt, isDirty, saveNow, pathname, router]);
+
+  // Right after a successful login, offer to jump back to whatever page the
+  // auto sign-out interrupted.
+  useEffect(() => {
+    if (status !== "ready" || resumeCheckedRef.current) return;
+    resumeCheckedRef.current = true;
+    try {
+      const saved = localStorage.getItem(RESUME_PATH_KEY);
+      if (saved) setResumePath(saved);
+    } catch {
+      // storage unavailable — nothing to resume
+    }
+  }, [status]);
+
+  function handleResumeYes() {
+    const path = resumePath;
+    setResumePath(null);
+    try {
+      localStorage.removeItem(RESUME_PATH_KEY);
+    } catch {
+      // ignore
+    }
+    if (path) router.push(path);
+  }
+
+  function handleResumeNo() {
+    setResumePath(null);
+    try {
+      localStorage.removeItem(RESUME_PATH_KEY);
+    } catch {
+      // ignore
+    }
+  }
 
   if (status === "loading") {
     return (
@@ -169,5 +247,36 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      {resumePath && (
+        <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-6">
+          <div className="bg-surface border border-border rounded-card p-6 max-w-sm w-full flex flex-col gap-4">
+            <div className="text-[15px] font-bold text-ink">Продолжить с того места?</div>
+            <p className="text-sm text-muted">
+              В прошлый раз вы вносили изменения, когда произошёл автоматический выход из аккаунта.
+              Вернуться туда и продолжить?
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleResumeNo}
+                className="text-[13px] font-semibold text-muted px-3.5 py-2 rounded-lg hover:bg-paper"
+              >
+                Нет
+              </button>
+              <button
+                type="button"
+                onClick={handleResumeYes}
+                className="text-[13px] font-bold text-paper bg-accent rounded-lg px-4 py-2"
+              >
+                Да
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </AuthContext.Provider>
+  );
 }

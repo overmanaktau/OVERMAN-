@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { authFetch } from "@/lib/apiClient";
 import { useAuth } from "@/components/AuthGate";
+import PeriodFilterBar, { type PeriodMode } from "@/components/PeriodFilterBar";
 import { getErrorMessage } from "@/lib/errors";
 
 type EditRequest = {
@@ -50,7 +51,7 @@ export default function RequestsPage() {
   const [actioning, setActioning] = useState<Record<number, boolean>>({});
 
   const [showHistory, setShowHistory] = useState(false);
-  const [periodMode, setPeriodMode] = useState<"all" | "custom">("all");
+  const [periodMode, setPeriodMode] = useState<PeriodMode>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -130,43 +131,14 @@ export default function RequestsPage() {
       </div>
 
       {showHistory && (
-        <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit flex-wrap">
-          <button
-            type="button"
-            onClick={() => setPeriodMode("all")}
-            className={`text-[13px] rounded-md px-3.5 py-2 ${
-              periodMode === "all" ? "bg-accent text-paper font-bold" : "text-muted font-medium"
-            }`}
-          >
-            Всё время
-          </button>
-          <button
-            type="button"
-            onClick={() => setPeriodMode("custom")}
-            className={`text-[13px] rounded-md px-3.5 py-2 ${
-              periodMode === "custom" ? "bg-accent text-paper font-bold" : "text-muted font-medium"
-            }`}
-          >
-            Свой период
-          </button>
-          {periodMode === "custom" && (
-            <div className="flex items-center gap-1.5 pl-2 ml-1 border-l border-border">
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="text-[13px] bg-paper border border-border rounded-md px-2 py-1.5"
-              />
-              <span className="text-muted text-xs">—</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="text-[13px] bg-paper border border-border rounded-md px-2 py-1.5"
-              />
-            </div>
-          )}
-        </div>
+        <PeriodFilterBar
+          mode={periodMode}
+          onModeChange={setPeriodMode}
+          dateFrom={dateFrom}
+          onDateFromChange={setDateFrom}
+          dateTo={dateTo}
+          onDateToChange={setDateTo}
+        />
       )}
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">

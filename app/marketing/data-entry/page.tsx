@@ -54,6 +54,35 @@ const DB_FIELD = {
   twoGis: "two_gis",
 } as const;
 
+const FIELD_LABEL: Record<(typeof NUMERIC_FIELDS)[number], string> = {
+  trafficPlan: "Трафик план",
+  trafficFact: "Трафик факт",
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  instagramPublic: "Insta паблик",
+  flyer: "Флаер",
+  twoGis: "2ГИС",
+};
+
+function diffDayRow(original: DayRow, updated: DayRow): string {
+  const changes: string[] = [];
+  for (const f of NUMERIC_FIELDS) {
+    if (original[f] !== updated[f]) {
+      changes.push(`${FIELD_LABEL[f]}: ${original[f] === "" ? "—" : original[f]} → ${updated[f] === "" ? "—" : updated[f]}`);
+    }
+  }
+  return changes.join("; ");
+}
+
+function diffExpense(original: ExpenseRow, updated: ExpenseRow): string {
+  const changes: string[] = [];
+  if (original.date !== updated.date) changes.push(`Дата: ${original.date || "—"} → ${updated.date || "—"}`);
+  if (original.category !== updated.category) changes.push(`Статья: «${original.category || "—"}» → «${updated.category || "—"}»`);
+  if (original.amount !== updated.amount) changes.push(`Сумма: ${original.amount === "" ? "—" : original.amount} → ${updated.amount === "" ? "—" : updated.amount}`);
+  if (original.comment !== updated.comment) changes.push(`Комментарий: «${original.comment || "—"}» → «${updated.comment || "—"}»`);
+  return changes.join("; ");
+}
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -437,6 +466,22 @@ export default function DataEntryPage() {
         if (row.id) {
           const { error } = await supabase.from("traffic_entries").update(payload).eq("id", row.id);
           if (error) throw error;
+
+          // This row already existed — it was unlocked via an approved
+          // request, so this save is a "secondary" edit worth logging.
+          const original = originalRows.find((o) => o.entryDate === row.entryDate);
+          const changeDescription = original ? diffDayRow(original, row) : "";
+          if (changeDescription) {
+            const { data: userData } = await supabase.auth.getUser();
+            await supabase.from("edit_history").insert({
+              table_name: "traffic_entries",
+              row_id: row.id,
+              store,
+              summary: `Точка «${storeName}», трафик и каналы за ${row.date}.${year}: ${changeDescription}`,
+              changed_by: userData.user?.id ?? null,
+              changed_by_name: requesterLabel,
+            });
+          }
         } else {
           const { error } = await supabase.from("traffic_entries").insert(payload);
           if (error) throw error;
@@ -459,6 +504,20 @@ export default function DataEntryPage() {
         if (exp.id) {
           const { error } = await supabase.from("extra_expenses").update(payload).eq("id", exp.id);
           if (error) throw error;
+
+          const original = originalExpenses[i];
+          const changeDescription = original ? diffExpense(original, exp) : "";
+          if (changeDescription) {
+            const { data: userData } = await supabase.auth.getUser();
+            await supabase.from("edit_history").insert({
+              table_name: "extra_expenses",
+              row_id: exp.id,
+              store: null,
+              summary: `Доп. расход «${exp.category || "без статьи"}» от ${exp.date || "—"}: ${changeDescription}`,
+              changed_by: userData.user?.id ?? null,
+              changed_by_name: requesterLabel,
+            });
+          }
         } else {
           const { error } = await supabase.from("extra_expenses").insert(payload);
           if (error) throw error;
