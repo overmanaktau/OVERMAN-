@@ -124,6 +124,8 @@ export default function StatisticsPage() {
   const [expensesTotal, setExpensesTotal] = useState(0);
   const [prevExpensesTotal, setPrevExpensesTotal] = useState(0);
   const [range, setRange] = useState<Range | null>(null);
+  const [salesTotals, setSalesTotals] = useState({ revenue: 0, receipts: 0 });
+  const [prevSalesTotals, setPrevSalesTotals] = useState({ revenue: 0, receipts: 0 });
 
   const canView = isAdmin || permissions["marketing.statistics"].canView;
 
@@ -133,6 +135,8 @@ export default function StatisticsPage() {
       setPrevious([]);
       setExpensesTotal(0);
       setPrevExpensesTotal(0);
+      setSalesTotals({ revenue: 0, receipts: 0 });
+      setPrevSalesTotals({ revenue: 0, receipts: 0 });
       setRange(getPeriodRange(periodIndex, new Date()));
       setLoading(false);
       return;
@@ -143,6 +147,32 @@ export default function StatisticsPage() {
       const r = getPeriodRange(periodIndex, new Date());
       setRange(r);
 
+      const { data: registers, error: registersError } = await supabase
+        .from("moysklad_registers")
+        .select("id, store");
+      if (registersError) throw registersError;
+      const registerIds = (registers ?? [])
+        .filter((reg) => selectedStores.includes(reg.store))
+        .map((reg) => reg.id);
+
+      function salesQuery(from: string, to: string) {
+        return registerIds.length > 0
+          ? supabase
+              .from("moysklad_sales_daily")
+              .select("revenue, receipts_count")
+              .in("register_id", registerIds)
+              .gte("sale_date", from)
+              .lte("sale_date", to)
+          : Promise.resolve({ data: [], error: null });
+      }
+
+      function sumSales(rows: { revenue: number; receipts_count: number }[]) {
+        return rows.reduce(
+          (acc, row) => ({ revenue: acc.revenue + row.revenue, receipts: acc.receipts + row.receipts_count }),
+          { revenue: 0, receipts: 0 }
+        );
+      }
+
       const queries = [
         supabase
           .from("traffic_entries")
@@ -151,6 +181,7 @@ export default function StatisticsPage() {
           .gte("entry_date", ymd(r.start))
           .lte("entry_date", ymd(r.end)),
         supabase.from("extra_expenses").select("amount").gte("expense_date", ymd(r.start)).lte("expense_date", ymd(r.end)),
+        salesQuery(ymd(r.start), ymd(r.end)),
       ] as const;
 
       if (r.hasPrev) {
@@ -162,30 +193,35 @@ export default function StatisticsPage() {
             .gte("entry_date", ymd(r.prevStart))
             .lte("entry_date", ymd(r.prevEnd)),
           supabase.from("extra_expenses").select("amount").gte("expense_date", ymd(r.prevStart)).lte("expense_date", ymd(r.prevEnd)),
+          salesQuery(ymd(r.prevStart), ymd(r.prevEnd)),
         ] as const;
 
-        const [entriesRes, expensesRes, prevEntriesRes, prevExpensesRes] = await Promise.all([
+        const [entriesRes, expensesRes, salesRes, prevEntriesRes, prevExpensesRes, prevSalesRes] = await Promise.all([
           ...queries,
           ...prevQueries,
         ]);
 
         const firstError =
-          entriesRes.error || expensesRes.error || prevEntriesRes.error || prevExpensesRes.error;
+          entriesRes.error || expensesRes.error || salesRes.error || prevEntriesRes.error || prevExpensesRes.error || prevSalesRes.error;
         if (firstError) throw firstError;
 
         setCurrent(entriesRes.data ?? []);
         setExpensesTotal((expensesRes.data ?? []).reduce((acc, e) => acc + (e.amount ?? 0), 0));
+        setSalesTotals(sumSales(salesRes.data ?? []));
         setPrevious(prevEntriesRes.data ?? []);
         setPrevExpensesTotal((prevExpensesRes.data ?? []).reduce((acc, e) => acc + (e.amount ?? 0), 0));
+        setPrevSalesTotals(sumSales(prevSalesRes.data ?? []));
       } else {
-        const [entriesRes, expensesRes] = await Promise.all(queries);
-        const firstError = entriesRes.error || expensesRes.error;
+        const [entriesRes, expensesRes, salesRes] = await Promise.all(queries);
+        const firstError = entriesRes.error || expensesRes.error || salesRes.error;
         if (firstError) throw firstError;
 
         setCurrent(entriesRes.data ?? []);
         setExpensesTotal((expensesRes.data ?? []).reduce((acc, e) => acc + (e.amount ?? 0), 0));
+        setSalesTotals(sumSales(salesRes.data ?? []));
         setPrevious([]);
         setPrevExpensesTotal(0);
+        setPrevSalesTotals({ revenue: 0, receipts: 0 });
       }
     } catch (e) {
       setError(getErrorMessage(e));
@@ -225,6 +261,22 @@ export default function StatisticsPage() {
   const costChange =
     costPerVisitor !== null && prevCostPerVisitor !== null ? pctChange(costPerVisitor, prevCostPerVisitor) : null;
   const expensesChange = pctChange(expensesTotal, prevExpensesTotal);
+
+  // "Покупатель" = чек в МойСклад (receipts_count), в отличие от "посетителя"
+  // (traffic_fact) — не каждый посетитель делает покупку.
+  const avgCheck = salesTotals.receipts > 0 ? salesTotals.revenue / salesTotals.receipts : null;
+  const prevAvgCheck = prevSalesTotals.receipts > 0 ? prevSalesTotals.revenue / prevSalesTotals.receipts : null;
+
+  const costPerBuyer = salesTotals.receipts > 0 ? totalSpend / salesTotals.receipts : null;
+  const prevCostPerBuyer = prevSalesTotals.receipts > 0 ? prevTotalSpend / prevSalesTotals.receipts : null;
+  const costPerBuyerChange =
+    costPerBuyer !== null && prevCostPerBuyer !== null ? pctChange(costPerBuyer, prevCostPerBuyer) : null;
+
+  const spendVsCheckPct = costPerBuyer !== null && avgCheck !== null && avgCheck > 0 ? (costPerBuyer / avgCheck) * 100 : null;
+  const prevSpendVsCheckPct =
+    prevCostPerBuyer !== null && prevAvgCheck !== null && prevAvgCheck > 0 ? (prevCostPerBuyer / prevAvgCheck) * 100 : null;
+  const spendVsCheckChange =
+    spendVsCheckPct !== null && prevSpendVsCheckPct !== null ? pctChange(spendVsCheckPct, prevSpendVsCheckPct) : null;
 
   const channels = CHANNEL_DEFS.map((c) => ({ ...c, amount: totals[c.key] }))
     .sort((a, b) => b.amount - a.amount)
@@ -322,8 +374,26 @@ export default function StatisticsPage() {
           note={costChange !== null ? `${costChange >= 0 ? "▲" : "▼"} ${Math.abs(costChange).toFixed(0)}% к пред. периоду` : undefined}
           noteTone={costChange !== null ? (costChange >= 0 ? "positive" : "negative") : "neutral"}
         />
-        <KpiCard label="Цена одного покупателя" value="Скоро" note="Нужен МойСклад (Этап 3)" />
-        <KpiCard label="Маркетинг, % от среднего чека" value="Скоро" note="Нужен МойСклад (Этап 3)" />
+        <KpiCard
+          label="Цена одного покупателя"
+          value={costPerBuyer !== null ? money(costPerBuyer) : "—"}
+          note={
+            costPerBuyerChange !== null
+              ? `${costPerBuyerChange >= 0 ? "▲" : "▼"} ${Math.abs(costPerBuyerChange).toFixed(0)}% к пред. периоду`
+              : "нет данных МойСклад за период"
+          }
+          noteTone={costPerBuyerChange !== null ? (costPerBuyerChange >= 0 ? "positive" : "negative") : "neutral"}
+        />
+        <KpiCard
+          label="Маркетинг, % от среднего чека"
+          value={spendVsCheckPct !== null ? `${spendVsCheckPct.toFixed(1)}%` : "—"}
+          note={
+            spendVsCheckChange !== null
+              ? `${spendVsCheckChange >= 0 ? "▲" : "▼"} ${Math.abs(spendVsCheckChange).toFixed(0)}% к пред. периоду`
+              : "нет данных МойСклад за период"
+          }
+          noteTone={spendVsCheckChange !== null ? (spendVsCheckChange >= 0 ? "positive" : "negative") : "neutral"}
+        />
       </div>
 
       {/* Traffic chart + channel spend */}
