@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { recordLoginEvent } from "@/lib/loginEvents";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,11 +16,14 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (error) {
       setError("Неверный email или пароль.");
       return;
+    }
+    if (data.session) {
+      recordLoginEvent(data.session.user.id, data.session.user.email ?? null);
     }
     router.push("/marketing/statistics");
   }

@@ -17,6 +17,7 @@ type EditRequest = {
   status: "pending" | "approved" | "denied";
   created_at: string;
   reviewed_at: string | null;
+  reviewed_by_name: string | null;
 };
 
 const TABLE_LABEL: Record<EditRequest["table_name"], string> = {
@@ -181,6 +182,12 @@ export default function RequestsPage() {
                   >
                     {STATUS_LABEL[r.status]}
                   </span>
+                  {r.status !== "pending" && r.reviewed_by_name && (
+                    <div className="text-[10.5px] text-mutedLight mt-1">
+                      {r.reviewed_by_name}
+                      {r.reviewed_at ? `, ${formatDateTime(r.reviewed_at)}` : ""}
+                    </div>
+                  )}
                 </div>
                 {canAct && (
                   <div className="flex items-center gap-2">

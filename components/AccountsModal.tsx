@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
+import { recordLoginEvent } from "@/lib/loginEvents";
 import { getErrorMessage } from "@/lib/errors";
 
 // Accounts the user has manually signed into from this switcher, kept in
@@ -140,6 +141,7 @@ export default function AccountsModal({ onClose }: { onClose: () => void }) {
           refreshToken: data.session.refresh_token,
         })
       );
+      await recordLoginEvent(data.session.user.id, data.session.user.email ?? null);
       window.location.reload();
     } catch {
       setError(`Не удалось войти в ${account.email}. Возможно, сессия истекла — уберите аккаунт и добавьте его заново.`);
@@ -169,6 +171,7 @@ export default function AccountsModal({ onClose }: { onClose: () => void }) {
           refreshToken: data.session.refresh_token,
         })
       );
+      await recordLoginEvent(data.session.user.id, data.session.user.email ?? null);
       window.location.reload();
     } catch (e) {
       setAddError(friendlyError(e));

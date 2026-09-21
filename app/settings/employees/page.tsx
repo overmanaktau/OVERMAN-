@@ -2,9 +2,38 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { authFetch } from "@/lib/apiClient";
+import { supabase } from "@/lib/supabaseClient";
 import { SECTIONS, emptyPermissions, type Permissions } from "@/lib/permissions";
 import { useAuth } from "@/components/AuthGate";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
+
+const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+
+type LoginEvent = { logged_in_at: string; user_agent: string | null };
+
+function parseUserAgent(ua: string | null): string {
+  if (!ua) return "Неизвестное устройство";
+
+  let os = "Неизвестная ОС";
+  if (/Windows/i.test(ua)) os = "Windows";
+  else if (/Mac OS X/i.test(ua)) os = "macOS";
+  else if (/Android/i.test(ua)) os = "Android";
+  else if (/iPhone|iPad|iOS/i.test(ua)) os = "iOS";
+  else if (/Linux/i.test(ua)) os = "Linux";
+
+  let browser = "Неизвестный браузер";
+  if (/Edg\//i.test(ua)) browser = "Edge";
+  else if (/OPR\//i.test(ua)) browser = "Opera";
+  else if (/Chrome\//i.test(ua) && !/Chromium/i.test(ua)) browser = "Chrome";
+  else if (/Firefox\//i.test(ua)) browser = "Firefox";
+  else if (/Safari\//i.test(ua) && !/Chrome/i.test(ua)) browser = "Safari";
+
+  return `${browser}, ${os}`;
+}
+
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 type Employee = {
   id: string;
@@ -287,6 +316,10 @@ export default function EmployeesPage() {
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [accessEditingId, setAccessEditingId] = useState<string | null>(null);
+  const [presence, setPresence] = useState<Record<string, string>>({});
+  const [loginHistoryId, setLoginHistoryId] = useState<string | null>(null);
+  const [loginEvents, setLoginEvents] = useState<Record<string, LoginEvent[]>>({});
+  const [loginEventsLoading, setLoginEventsLoading] = useState(false);
 
   const [employeeEdits, setEmployeeEdits] = useState<
     Record<string, { fullName: string; email: string; roleChoice: string }>
@@ -315,14 +348,18 @@ export default function EmployeesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [employeesRes, rolesRes, citiesRes] = await Promise.all([
+      const [employeesRes, rolesRes, citiesRes, presenceRes] = await Promise.all([
         authFetch("/api/employees"),
         authFetch("/api/roles"),
         authFetch("/api/cities"),
+        supabase.from("user_presence").select("user_id, last_seen_at"),
       ]);
       setEmployees(employeesRes.employees);
       setRoles(rolesRes.roles);
       setCities(citiesRes.cities);
+      const presenceMap: Record<string, string> = {};
+      for (const row of presenceRes.data ?? []) presenceMap[row.user_id] = row.last_seen_at;
+      setPresence(presenceMap);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось загрузить данные.");
     } finally {
@@ -333,6 +370,36 @@ export default function EmployeesPage() {
   useEffect(() => {
     loadAll();
   }, []);
+
+  function isOnline(emp: Employee) {
+    const lastSeen = presence[emp.id];
+    if (!lastSeen) return false;
+    return Date.now() - new Date(lastSeen).getTime() < ONLINE_THRESHOLD_MS;
+  }
+
+  async function toggleLoginHistory(emp: Employee) {
+    if (loginHistoryId === emp.id) {
+      setLoginHistoryId(null);
+      return;
+    }
+    setLoginHistoryId(emp.id);
+    if (loginEvents[emp.id]) return;
+    setLoginEventsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("user_login_events")
+        .select("logged_in_at, user_agent")
+        .eq("user_id", emp.id)
+        .order("logged_in_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      setLoginEvents((prev) => ({ ...prev, [emp.id]: (data ?? []) as LoginEvent[] }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось загрузить историю входа.");
+    } finally {
+      setLoginEventsLoading(false);
+    }
+  }
 
   function roleChoiceValue(emp: Employee) {
     if (emp.role === "owner") return "owner";
@@ -772,14 +839,20 @@ export default function EmployeesPage() {
             {employees.map((emp) => (
               <Fragment key={emp.id}>
                 <div className="grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]">
-                  <input
-                    type="text"
-                    value={getEditedFullName(emp)}
-                    placeholder="Без имени"
-                    disabled={!canEdit}
-                    onChange={(e) => updateEmployeeEdit(emp, { fullName: e.target.value })}
-                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
-                  />
+                  <div className="flex flex-col gap-1">
+                    <input
+                      type="text"
+                      value={getEditedFullName(emp)}
+                      placeholder="Без имени"
+                      disabled={!canEdit}
+                      onChange={(e) => updateEmployeeEdit(emp, { fullName: e.target.value })}
+                      className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
+                    />
+                    <div className="flex items-center gap-1.5 text-[10.5px] text-mutedLight pl-0.5">
+                      <span className={`w-1.5 h-1.5 rounded-full ${isOnline(emp) ? "bg-[#3E6B44]" : "bg-mutedLight"}`} />
+                      {isOnline(emp) ? "Онлайн" : "Оффлайн"}
+                    </div>
+                  </div>
                   <input
                     type="email"
                     value={getEditedEmail(emp)}
@@ -854,6 +927,13 @@ export default function EmployeesPage() {
                         )}
                         <button
                           type="button"
+                          onClick={() => toggleLoginHistory(emp)}
+                          className="text-[12px] text-accent font-semibold text-left"
+                        >
+                          История входа
+                        </button>
+                        <button
+                          type="button"
                           disabled={emp.email === myEmail || emp.role === "owner" || !canEdit}
                           onClick={() => handleDeleteEmployee(emp)}
                           title={emp.role === "owner" ? "Владельца нельзя удалить" : undefined}
@@ -865,6 +945,25 @@ export default function EmployeesPage() {
                     )}
                   </div>
                 </div>
+                {loginHistoryId === emp.id && (
+                  <div className="pb-3 border-b border-borderSoft flex flex-col gap-1.5">
+                    <div className="text-[11px] uppercase tracking-wide text-mutedLight">История входа</div>
+                    {loginEventsLoading && !loginEvents[emp.id] ? (
+                      <div className="text-[12.5px] text-muted">Загрузка…</div>
+                    ) : (loginEvents[emp.id] ?? []).length === 0 ? (
+                      <div className="text-[12.5px] text-muted">Входов пока не зафиксировано.</div>
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        {(loginEvents[emp.id] ?? []).map((ev, i) => (
+                          <div key={i} className="flex items-center gap-3 text-[12.5px]">
+                            <span className="text-ink font-medium">{formatDateTime(ev.logged_in_at)}</span>
+                            <span className="text-muted">{parseUserAgent(ev.user_agent)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {accessEditingId === emp.id && (
                   <EmployeeAccessPanel
                     role={emp.roleId ? roles.find((r) => r.id === emp.roleId) ?? null : null}

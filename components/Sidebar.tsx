@@ -25,6 +25,7 @@ const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] 
 
 const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "Сотрудники и доступы", href: "/settings/employees", section: "settings.employees" },
+  { label: "История", href: "/history", section: "history" },
 ];
 
 function GuardedLink({ href, className, children }: { href: string; className?: string; children: React.ReactNode }) {
@@ -164,7 +165,6 @@ export default function Sidebar() {
     (item) => isAdmin || permissions[item.section]?.canView
   );
   const canSeeRequests = isAdmin || permissions["requests"].canView || permissions["requests"].canEdit;
-  const canSeeHistory = isAdmin || permissions["history"].canView || permissions["history"].canEdit;
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
     marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),
@@ -246,19 +246,6 @@ export default function Sidebar() {
             }`}
           >
             Запросы
-          </GuardedLink>
-        )}
-
-        {canSeeHistory && (
-          <GuardedLink
-            href="/history"
-            className={`px-3 py-2.5 rounded-lg text-sm mt-1 ${
-              pathname === "/history"
-                ? "bg-accent text-paper font-semibold"
-                : "text-sidebarText font-semibold hover:text-sidebarText"
-            }`}
-          >
-            История
           </GuardedLink>
         )}
 

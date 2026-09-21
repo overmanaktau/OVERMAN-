@@ -157,6 +157,30 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     };
   }, [router, reloadTick]);
 
+  // Presence heartbeat: while this session is open, keep last_seen_at fresh
+  // so the employees list can infer who's currently online.
+  useEffect(() => {
+    if (status !== "ready") return;
+    let active = true;
+
+    async function ping() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session || !active) return;
+      await supabase
+        .from("user_presence")
+        .upsert({ user_id: session.user.id, last_seen_at: new Date().toISOString() });
+    }
+
+    ping();
+    const interval = window.setInterval(ping, 60 * 1000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [status]);
+
   // Sets the first deadline once we know when this session actually began —
   // every role except the owner, who is never subject to this at all.
   useEffect(() => {

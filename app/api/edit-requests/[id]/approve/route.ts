@@ -21,9 +21,20 @@ export async function POST(request: Request, { params }: { params: { id: string 
     .eq("id", req.row_id);
   if (unlockError) return NextResponse.json({ error: unlockError.message }, { status: 400 });
 
+  const { data: reviewerRole } = await supabaseAdmin
+    .from("user_roles")
+    .select("full_name")
+    .eq("user_id", caller.user.id)
+    .maybeSingle();
+
   const { error: statusError } = await supabaseAdmin
     .from("edit_requests")
-    .update({ status: "approved", reviewed_at: new Date().toISOString() })
+    .update({
+      status: "approved",
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: caller.user.id,
+      reviewed_by_name: reviewerRole?.full_name || caller.user.email,
+    })
     .eq("id", req.id);
   if (statusError) return NextResponse.json({ error: statusError.message }, { status: 400 });
 
