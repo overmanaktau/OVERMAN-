@@ -734,14 +734,6 @@ export default function DataEntryPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={!dirty || savingDays || savingExpenses || loading}
-              onClick={load}
-              className="text-[13px] font-semibold text-muted border border-[#DDD6C8] rounded-lg px-4 py-2.5 disabled:opacity-50"
-            >
-              Отменить несохранённое
-            </button>
-            <button
-              type="button"
               disabled={!canEditSection || dirtyDayCount === 0 || savingDays}
               onClick={handleSaveDayRows}
               className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
