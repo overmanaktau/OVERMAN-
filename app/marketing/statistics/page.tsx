@@ -484,6 +484,7 @@ export default function StatisticsPage() {
         <KpiCard
           label="Маркетинг, % от среднего чека"
           value={spendVsCheckPct !== null ? `${spendVsCheckPct.toFixed(1)}%` : "—"}
+          valueSuffix={avgCheck !== null ? `(${money(avgCheck)})` : undefined}
           note={
             spendVsCheckChange !== null
               ? `${spendVsCheckChange >= 0 ? "▲" : "▼"} ${Math.abs(spendVsCheckChange).toFixed(0)}% к пред. периоду`
