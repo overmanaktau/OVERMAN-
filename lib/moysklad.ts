@@ -35,7 +35,7 @@ async function fetchAllPages<T>(path: string, filter: string): Promise<T[]> {
       filter,
       limit: String(limit),
       offset: String(offset),
-      expand: "store,positions",
+      expand: "retailStore,positions",
     });
     const rows: T[] = page.rows ?? [];
     all.push(...rows);
@@ -48,7 +48,10 @@ async function fetchAllPages<T>(path: string, filter: string): Promise<T[]> {
 export type RetailDemand = {
   moment: string; // "2026-09-21 14:32:00.000"
   sum: number; // total in kopecks
-  store?: { name?: string; id?: string } | null;
+  // "retailStore" (точка продаж / касса) is what the business actually uses
+  // to tell registers apart — "store" (склад) is just the warehouse stock
+  // gets deducted from, and doesn't carry the city in its name.
+  retailStore?: { name?: string; id?: string } | null;
   positions?: { rows?: { quantity?: number }[]; meta?: { size?: number } };
 };
 

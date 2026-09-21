@@ -3,14 +3,15 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { fetchRetailDemandsForDate } from "@/lib/moysklad";
 
-// Confirmed with the business owner: these are the only live registers.
-// Everything else in МойСклад's warehouse list (Кайнар, both "заморозка"
-// snapshots) is inactive or unrelated to retail sales and gets skipped.
+// Confirmed with the business owner: these are the only live registers
+// (МойСклад entity/retailstore, "точки продаж" — not "склад", which
+// doesn't carry the city in its name). "Онлайн продажи Overman" and
+// "Ак Кала" are inactive retailstore entries and get skipped.
 const REGISTER_STORE: Record<string, string> = {
-  "109ed308-b012-11f0-0a80-110900247319": "point_1", // Overman — Актау
-  "fe3b03d3-4da1-11f0-0a80-18910004c37d": "point_1", // Saya Park — Актау
-  "bb935bd2-93e9-11f1-0a80-1f560022775d": "point_3", // Aktobe OVERMAN — Актобе
-  "2ca9443b-a440-11f1-0a80-03ac00324d3c": "point_3", // Актобе скидка — Актобе
+  "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Overman Актау
+  "d3f209de-4da2-11f0-0a80-027a0003cde2": "point_1", // Saya Park
+  "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Overman Актобе
+  "111827a0-a440-11f1-0a80-0dcb003111ce": "point_3", // Актобе скидка
 };
 
 function yesterdayInAlmaty(): string {
@@ -32,8 +33,8 @@ async function runSync(date: string) {
 
   const byRegister = new Map<string, { name: string; revenue: number; receipts: number; items: number }>();
   for (const d of demands) {
-    const id = d.store?.id;
-    const name = d.store?.name;
+    const id = d.retailStore?.id;
+    const name = d.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue; // not a live retail register
     const agg = byRegister.get(id) ?? { name, revenue: 0, receipts: 0, items: 0 };
     agg.revenue += (d.sum ?? 0) / 100;
