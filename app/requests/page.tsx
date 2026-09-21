@@ -25,8 +25,8 @@ const TABLE_LABEL: Record<EditRequest["table_name"], string> = {
 
 const STATUS_LABEL: Record<EditRequest["status"], string> = {
   pending: "Ожидает",
-  approved: "Подтверждено",
-  denied: "Отклонено",
+  approved: "Одобрено",
+  denied: "Отказано",
 };
 
 function friendlyError(e: unknown): string {
@@ -42,7 +42,8 @@ function formatDateTime(iso: string) {
 }
 
 export default function RequestsPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, permissions } = useAuth();
+  const canAct = isAdmin || permissions["requests"].canEdit;
   const [requests, setRequests] = useState<EditRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,8 +89,8 @@ export default function RequestsPage() {
         <div className="text-xs text-mutedLight">Общее</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Запросы</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          {isAdmin
-            ? "Здесь появляются запросы на повторное изменение уже сохранённой строки. Подтвердите или отклоните каждый запрос."
+          {canAct
+            ? "Здесь появляются запросы на повторное изменение уже сохранённой строки. Одобрите или отклоните каждый запрос."
             : "Здесь отображаются ваши запросы на повторное изменение уже сохранённой строки и их статус."}
         </p>
         {error && (
@@ -111,20 +112,20 @@ export default function RequestsPage() {
           <div className="flex flex-col">
             <div
               className={`grid ${
-                isAdmin ? "grid-cols-[130px_150px_1fr_120px_170px]" : "grid-cols-[130px_150px_1fr_120px]"
+                canAct ? "grid-cols-[130px_150px_1fr_120px_170px]" : "grid-cols-[130px_150px_1fr_120px]"
               } gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border`}
             >
               <div>Дата запроса</div>
               <div>Раздел</div>
               <div>Строка</div>
               <div>Статус</div>
-              {isAdmin && <div>Действия</div>}
+              {canAct && <div>Действия</div>}
             </div>
             {requests.map((r) => (
               <div
                 key={r.id}
                 className={`grid ${
-                  isAdmin ? "grid-cols-[130px_150px_1fr_120px_170px]" : "grid-cols-[130px_150px_1fr_120px]"
+                  canAct ? "grid-cols-[130px_150px_1fr_120px_170px]" : "grid-cols-[130px_150px_1fr_120px]"
                 } gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]`}
               >
                 <div className="text-muted">{formatDateTime(r.created_at)}</div>
@@ -143,7 +144,7 @@ export default function RequestsPage() {
                     {STATUS_LABEL[r.status]}
                   </span>
                 </div>
-                {isAdmin && (
+                {canAct && (
                   <div className="flex items-center gap-2">
                     {r.status === "pending" ? (
                       <>
@@ -153,7 +154,7 @@ export default function RequestsPage() {
                           onClick={() => act(r.id, "approve")}
                           className="text-[12.5px] font-bold text-paper bg-accent rounded-lg px-3 py-1.5 disabled:opacity-50"
                         >
-                          Подтвердить
+                          Одобрить
                         </button>
                         <button
                           type="button"

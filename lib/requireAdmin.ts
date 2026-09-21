@@ -24,13 +24,14 @@ export async function requireAdmin(request: Request) {
   return caller.user;
 }
 
-// Admins, or anyone whose role was explicitly granted the "settings.employees"
+// Admins, or anyone whose role was explicitly granted the given section's
 // permission (view lets them browse; edit lets them create/change/delete).
 // `isAdmin` on the result tells the caller whether this was the real admin
 // role or a delegated permission — routes use it to block privilege escalation
 // (e.g. a delegated manager promoting someone, including themselves, to admin).
-export async function requireSettingsAccess(
+export async function requireSectionAccess(
   request: Request,
+  section: string,
   need: "view" | "edit"
 ): Promise<{ user: NonNullable<Awaited<ReturnType<typeof getCallerRole>>>["user"]; isAdmin: boolean } | null> {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -46,9 +47,17 @@ export async function requireSettingsAccess(
     .from("role_permissions")
     .select("can_view, can_edit")
     .eq("role_id", caller.roleId)
-    .eq("section", "settings.employees")
+    .eq("section", section)
     .maybeSingle();
 
   const allowed = need === "view" ? !!permRow?.can_view : !!permRow?.can_edit;
   return allowed ? { user: caller.user, isAdmin: false } : null;
+}
+
+export function requireSettingsAccess(request: Request, need: "view" | "edit") {
+  return requireSectionAccess(request, "settings.employees", need);
+}
+
+export function requireRequestsAccess(request: Request, need: "view" | "edit") {
+  return requireSectionAccess(request, "requests", need);
 }

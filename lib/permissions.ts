@@ -3,6 +3,7 @@ export const SECTIONS = [
   { key: "marketing.data_entry", label: "Внесение данных" },
   { key: "marketing.publications", label: "Публикации" },
   { key: "marketing.instagram_target", label: "Инстаграм таргет" },
+  { key: "requests", label: "Запросы" },
   { key: "profile.rename", label: "Смена имени сотрудника" },
   { key: "settings.employees", label: "Сотрудники и доступы" },
 ] as const;

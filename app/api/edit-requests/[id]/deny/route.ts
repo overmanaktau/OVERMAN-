@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/requireAdmin";
+import { requireRequestsAccess } from "@/lib/requireAdmin";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
-  const admin = await requireAdmin(request);
-  if (!admin) return NextResponse.json({ error: "Только администратор может отклонять запросы." }, { status: 403 });
+  const caller = await requireRequestsAccess(request, "edit");
+  if (!caller) return NextResponse.json({ error: "Нет доступа к разделу «Запросы»." }, { status: 403 });
 
   const { data: req, error: fetchError } = await supabaseAdmin
     .from("edit_requests")
