@@ -224,6 +224,7 @@ export default function StatisticsPage() {
   const spendChange = pctChange(totalSpend, prevTotalSpend);
   const costChange =
     costPerVisitor !== null && prevCostPerVisitor !== null ? pctChange(costPerVisitor, prevCostPerVisitor) : null;
+  const expensesChange = pctChange(expensesTotal, prevExpensesTotal);
 
   const channels = CHANNEL_DEFS.map((c) => ({ ...c, amount: totals[c.key] }))
     .sort((a, b) => b.amount - a.amount)
@@ -293,7 +294,7 @@ export default function StatisticsPage() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-3 gap-3.5">
         <KpiCard
           label="Выполнение плана по трафику"
           value={totals.plan > 0 ? `${Math.round((totals.fact / totals.plan) * 100)}%` : "—"}
@@ -308,6 +309,12 @@ export default function StatisticsPage() {
           value={money(totalSpend)}
           note={spendChange !== null ? `${spendChange >= 0 ? "▲" : "▼"} ${Math.abs(spendChange).toFixed(0)}% к пред. периоду` : undefined}
           noteTone={spendChange !== null ? (spendChange >= 0 ? "positive" : "negative") : "neutral"}
+        />
+        <KpiCard
+          label="Доп. расходы"
+          value={money(expensesTotal)}
+          note={expensesChange !== null ? `${expensesChange >= 0 ? "▲" : "▼"} ${Math.abs(expensesChange).toFixed(0)}% к пред. периоду` : undefined}
+          noteTone={expensesChange !== null ? (expensesChange >= 0 ? "positive" : "negative") : "neutral"}
         />
         <KpiCard
           label="Цена одного посетителя"
