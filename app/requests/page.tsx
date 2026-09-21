@@ -10,7 +10,7 @@ import { getErrorMessage } from "@/lib/errors";
 type EditRequest = {
   id: number;
   table_name: "traffic_entries" | "extra_expenses";
-  row_id: number;
+  row_id: number | null;
   store: string | null;
   context: string | null;
   requested_by: string;
