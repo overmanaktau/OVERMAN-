@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { authFetch } from "@/lib/apiClient";
 import { useAuth } from "@/components/AuthGate";
@@ -49,6 +49,11 @@ export default function RequestsPage() {
   const [error, setError] = useState<string | null>(null);
   const [actioning, setActioning] = useState<Record<number, boolean>>({});
 
+  const [showHistory, setShowHistory] = useState(false);
+  const [periodMode, setPeriodMode] = useState<"all" | "custom">("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -70,6 +75,16 @@ export default function RequestsPage() {
     load();
   }, [load]);
 
+  const visibleRequests = useMemo(() => {
+    if (!showHistory || periodMode === "all") return requests;
+    return requests.filter((r) => {
+      const d = r.created_at.slice(0, 10);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+      return true;
+    });
+  }, [requests, showHistory, periodMode, dateFrom, dateTo]);
+
   async function act(id: number, action: "approve" | "deny") {
     setActioning((prev) => ({ ...prev, [id]: true }));
     setError(null);
@@ -87,7 +102,18 @@ export default function RequestsPage() {
     <>
       <div className="flex flex-col gap-1">
         <div className="text-xs text-mutedLight">Общее</div>
-        <h1 className="font-serif text-[28px] font-semibold m-0">Запросы</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="font-serif text-[28px] font-semibold m-0">Запросы</h1>
+          <button
+            type="button"
+            onClick={() => setShowHistory((v) => !v)}
+            className={`text-[13px] font-semibold rounded-lg px-3.5 py-2 ${
+              showHistory ? "bg-accent text-paper" : "bg-surface border border-border text-muted"
+            }`}
+          >
+            История запросов
+          </button>
+        </div>
         <p className="text-sm text-muted max-w-xl mt-1">
           {canAct
             ? "Здесь появляются запросы на повторное изменение уже сохранённой строки. Одобрите или отклоните каждый запрос."
@@ -103,11 +129,51 @@ export default function RequestsPage() {
         )}
       </div>
 
+      {showHistory && (
+        <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit flex-wrap">
+          <button
+            type="button"
+            onClick={() => setPeriodMode("all")}
+            className={`text-[13px] rounded-md px-3.5 py-2 ${
+              periodMode === "all" ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+            }`}
+          >
+            Всё время
+          </button>
+          <button
+            type="button"
+            onClick={() => setPeriodMode("custom")}
+            className={`text-[13px] rounded-md px-3.5 py-2 ${
+              periodMode === "custom" ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+            }`}
+          >
+            Свой период
+          </button>
+          {periodMode === "custom" && (
+            <div className="flex items-center gap-1.5 pl-2 ml-1 border-l border-border">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="text-[13px] bg-paper border border-border rounded-md px-2 py-1.5"
+              />
+              <span className="text-muted text-xs">—</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="text-[13px] bg-paper border border-border rounded-md px-2 py-1.5"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
         {loading ? (
           <div className="text-sm text-muted">Загрузка…</div>
-        ) : requests.length === 0 ? (
-          <div className="text-sm text-muted">Запросов пока нет.</div>
+        ) : visibleRequests.length === 0 ? (
+          <div className="text-sm text-muted">{showHistory ? "За этот период запросов нет." : "Запросов пока нет."}</div>
         ) : (
           <div className="flex flex-col">
             <div
@@ -121,7 +187,7 @@ export default function RequestsPage() {
               <div>Статус</div>
               {canAct && <div>Действия</div>}
             </div>
-            {requests.map((r) => (
+            {visibleRequests.map((r) => (
               <div
                 key={r.id}
                 className={`grid ${
