@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
-import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import { getErrorMessage } from "@/lib/errors";
 
 type DayRow = {
@@ -174,14 +173,13 @@ export default function DataEntryPage() {
 
   const [rows, setRows] = useState<DayRow[]>([]);
   const [originalRows, setOriginalRows] = useState<DayRow[]>([]);
-  const [confirmedRows, setConfirmedRows] = useState<Map<string, string>>(new Map());
 
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [originalExpenses, setOriginalExpenses] = useState<ExpenseRow[]>([]);
-  const [confirmedExpenses, setConfirmedExpenses] = useState<Map<number, string>>(new Map());
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingDays, setSavingDays] = useState(false);
+  const [savingExpenses, setSavingExpenses] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -209,15 +207,16 @@ export default function DataEntryPage() {
   }
 
   function dayEffectivelyLocked(row: DayRow) {
-    const primaryRestricted = !row.id && !isFreelyEditableDate(row.entryDate);
-    return row.locked || primaryRestricted || rowIsExpired(row.unlockExpiresAt);
+    if (isFreelyEditableDate(row.entryDate)) return row.locked;
+    // Outside the free yesterday/today window, a row is only editable while
+    // an approved request's unlock window is still open — regardless of
+    // whether it already has data from before this restriction existed.
+    return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
 
   function expenseEffectivelyLocked(exp: ExpenseRow) {
     return exp.locked || rowIsExpired(exp.unlockExpiresAt);
   }
-
-  const { setGuard, requestNavigation } = useUnsavedChanges();
 
   const load = useCallback(async () => {
     if (!store) return;
@@ -319,8 +318,6 @@ export default function DataEntryPage() {
       setOriginalRows(merged);
       setExpenses(mergedExpenses);
       setOriginalExpenses(mergedExpenses);
-      setConfirmedRows(new Map());
-      setConfirmedExpenses(new Map());
     } catch (e) {
       setError(friendlyError(e));
       const empty = buildMonthRows(year, monthIndex);
@@ -328,8 +325,6 @@ export default function DataEntryPage() {
       setOriginalRows(empty);
       setExpenses([]);
       setOriginalExpenses([]);
-      setConfirmedRows(new Map());
-      setConfirmedExpenses(new Map());
     } finally {
       setLoading(false);
     }
@@ -339,25 +334,29 @@ export default function DataEntryPage() {
     load();
   }, [load]);
 
-  const confirmedDaysCount = useMemo(() => {
+  const dirtyDayCount = useMemo(() => {
     let count = 0;
     for (const row of rows) {
-      const snap = confirmedRows.get(row.entryDate);
-      if (snap !== undefined && snap === numericSnapshot(row)) count++;
+      if (dayEffectivelyLocked(row)) continue;
+      const original = originalRows.find((o) => o.entryDate === row.entryDate);
+      if (original && numericSnapshot(row) !== numericSnapshot(original)) count++;
     }
     return count;
-  }, [rows, confirmedRows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, originalRows, todayStr, yesterdayStr, nowTick]);
 
-  const confirmedExpensesCount = useMemo(() => {
+  const dirtyExpenseCount = useMemo(() => {
     let count = 0;
     expenses.forEach((exp, i) => {
-      const snap = confirmedExpenses.get(i);
-      if (snap !== undefined && snap === expenseSnapshot(exp)) count++;
+      if (expenseEffectivelyLocked(exp)) return;
+      const original = originalExpenses[i];
+      if (original && expenseSnapshot(exp) !== expenseSnapshot(original)) count++;
     });
     return count;
-  }, [expenses, confirmedExpenses]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenses, originalExpenses, nowTick]);
 
-  const dirty = confirmedDaysCount > 0 || confirmedExpensesCount > 0;
+  const dirty = dirtyDayCount > 0 || dirtyExpenseCount > 0;
 
   function shiftMonth(delta: number) {
     const doShift = () => {
@@ -365,14 +364,13 @@ export default function DataEntryPage() {
       setYear(Math.floor(total / 12));
       setMonthIndex(((total % 12) + 12) % 12);
     };
-    if (dirty) requestNavigation(doShift);
-    else doShift();
+    if (dirty && !window.confirm("У вас есть несохранённые изменения. Перейти и потерять их?")) return;
+    doShift();
   }
 
   function changeStore(nextStore: string) {
-    const doChange = () => setStore(nextStore);
-    if (dirty) requestNavigation(doChange);
-    else doChange();
+    if (dirty && !window.confirm("У вас есть несохранённые изменения. Перейти и потерять их?")) return;
+    setStore(nextStore);
   }
 
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], value: string) {
@@ -396,20 +394,8 @@ export default function DataEntryPage() {
     });
   }
 
-  function confirmDay(entryDate: string) {
-    const row = rows.find((r) => r.entryDate === entryDate);
-    if (!row) return;
-    setConfirmedRows((prev) => new Map(prev).set(entryDate, numericSnapshot(row)));
-  }
-
-  function confirmExpense(index: number) {
-    const exp = expenses[index];
-    if (!exp) return;
-    setConfirmedExpenses((prev) => new Map(prev).set(index, expenseSnapshot(exp)));
-  }
-
   async function requestDayUnlock(row: DayRow) {
-    if (saving) return;
+    if (savingDays) return;
     setError(null);
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -438,7 +424,7 @@ export default function DataEntryPage() {
   }
 
   async function requestExpenseUnlock(exp: ExpenseRow) {
-    if (!exp.id || saving) return;
+    if (!exp.id || savingExpenses) return;
     setError(null);
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -480,14 +466,15 @@ export default function DataEntryPage() {
     totals.instagram + totals.tiktok + totals.instagramPublic + totals.flyer + totals.twoGis;
   const expensesTotal = expenses.reduce((acc, e) => acc + (typeof e.amount === "number" ? e.amount : 0), 0);
 
-  async function handleSave() {
-    if (saving) return; // guards against a second click landing before the button disables
-    setSaving(true);
+  async function handleSaveDayRows() {
+    if (savingDays) return; // guards against a second click landing before the button disables
+    setSavingDays(true);
     setError(null);
     try {
       for (const row of rows) {
-        const snap = confirmedRows.get(row.entryDate);
-        if (snap === undefined || snap !== numericSnapshot(row)) continue;
+        if (dayEffectivelyLocked(row)) continue;
+        const original = originalRows.find((o) => o.entryDate === row.entryDate);
+        if (!original || numericSnapshot(row) === numericSnapshot(original)) continue;
 
         const payload: Record<string, unknown> = { store, entry_date: row.entryDate, locked: true, unlock_expires_at: null };
         for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
@@ -501,8 +488,7 @@ export default function DataEntryPage() {
 
           // This row already existed — it was unlocked via an approved
           // request, so this save is a "secondary" edit worth logging.
-          const original = originalRows.find((o) => o.entryDate === row.entryDate);
-          const changeDescription = original ? diffDayRow(original, row) : "";
+          const changeDescription = diffDayRow(original, row);
           if (changeDescription) {
             const { data: userData } = await supabase.auth.getUser();
             await supabase.from("edit_history").insert({
@@ -520,10 +506,24 @@ export default function DataEntryPage() {
         }
       }
 
+      await load();
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setSavingDays(false);
+    }
+  }
+
+  async function handleSaveExpenses() {
+    if (savingExpenses) return;
+    setSavingExpenses(true);
+    setError(null);
+    try {
       for (let i = 0; i < expenses.length; i++) {
         const exp = expenses[i];
-        const snap = confirmedExpenses.get(i);
-        if (snap === undefined || snap !== expenseSnapshot(exp)) continue;
+        if (expenseEffectivelyLocked(exp)) continue;
+        const original = originalExpenses[i];
+        if (!original || expenseSnapshot(exp) === expenseSnapshot(original)) continue;
 
         const payload = {
           expense_date: exp.date || null,
@@ -541,8 +541,7 @@ export default function DataEntryPage() {
             throw new Error(`Время на изменение расхода «${exp.category || "без статьи"}» истекло — запросите доступ снова.`);
           }
 
-          const original = originalExpenses[i];
-          const changeDescription = original ? diffExpense(original, exp) : "";
+          const changeDescription = diffExpense(original, exp);
           if (changeDescription) {
             const { data: userData } = await supabase.auth.getUser();
             await supabase.from("edit_history").insert({
@@ -564,21 +563,9 @@ export default function DataEntryPage() {
     } catch (e) {
       setError(friendlyError(e));
     } finally {
-      setSaving(false);
+      setSavingExpenses(false);
     }
   }
-
-  const saveRef = useRef(handleSave);
-  saveRef.current = handleSave;
-  const loadRef = useRef(load);
-  loadRef.current = load;
-
-  useEffect(() => {
-    const active = dirty && canEditSection;
-    setGuard(active, active ? { onSave: () => saveRef.current(), onDiscard: () => loadRef.current() } : null);
-    return () => setGuard(false, null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, canEditSection]);
 
   if (!canView) {
     return (
@@ -603,11 +590,10 @@ export default function DataEntryPage() {
         <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
           Первичное внесение доступно свободно только за вчера и сегодня — остальные даты, как и
-          повторное изменение уже сохранённой строки, нужно запросить в разделе «Запросы». На
-          одобренный запрос даётся 30 минут — если за это время не сохранить строку, доступ
-          пропадёт и понадобится новый запрос. Каждая строка сохраняется своей кнопкой «Сохранить»,
-          но фактически записывается в базу только после контрольного нажатия кнопки «Сохранить»
-          сверху — если не нажать её, внесённые строки не сохранятся.
+          изменение уже сохранённой строки, нужно запросить в разделе «Запросы». На одобренный
+          запрос даётся 30 минут — если за это время не сохранить строку, доступ пропадёт и
+          понадобится новый запрос. Таблица трафика и дополнительные расходы сохраняются отдельно —
+          своей кнопкой «Сохранить» под каждой таблицей.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -679,10 +665,6 @@ export default function DataEntryPage() {
           </div>
 
           {rows.map((row, i) => {
-            const original = originalRows.find((o) => o.entryDate === row.entryDate);
-            const rowDirty = !!original && NUMERIC_FIELDS.some((f) => row[f] !== original[f]);
-            const confirmedSnap = confirmedRows.get(row.entryDate);
-            const rowConfirmed = confirmedSnap !== undefined && confirmedSnap === numericSnapshot(row);
             const effectiveLocked = dayEffectivelyLocked(row);
             const rowEditableInputs = canEditSection && !effectiveLocked;
             const showCountdown = !effectiveLocked && row.unlockExpiresAt;
@@ -708,8 +690,8 @@ export default function DataEntryPage() {
                   />
                 ))}
                 <div className="flex flex-col items-end gap-0.5">
-                  {effectiveLocked ? (
-                    row.requestPending ? (
+                  {effectiveLocked &&
+                    (row.requestPending ? (
                       <span className="text-[11px] text-mutedLight italic">Ожидает</span>
                     ) : (
                       <button
@@ -720,21 +702,7 @@ export default function DataEntryPage() {
                       >
                         Запрос
                       </button>
-                    )
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={!canEditSection || !rowDirty || rowConfirmed}
-                      onClick={() => confirmDay(row.entryDate)}
-                      className={`text-[11px] font-bold rounded-md px-2 py-1 transition-colors ${
-                        rowDirty && !rowConfirmed
-                          ? "bg-accent text-paper"
-                          : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
-                      }`}
-                    >
-                      {rowConfirmed ? "Сохранено" : "Сохранить"}
-                    </button>
-                  )}
+                    ))}
                   {showCountdown && (
                     <span className="text-[9.5px] text-mutedLight italic">
                       ещё {minutesLeft(row.unlockExpiresAt as string, nowTick)}м
@@ -763,14 +731,28 @@ export default function DataEntryPage() {
             Итого расходов на маркетинг за месяц (по каналам):{" "}
             <span className="num text-ink font-bold">{channelTotal.toLocaleString("ru-RU")} ₸</span>
           </div>
-          <button
-            type="button"
-            disabled={!dirty || saving || loading}
-            onClick={load}
-            className="text-[13px] font-semibold text-muted border border-[#DDD6C8] rounded-lg px-4 py-2.5 disabled:opacity-50"
-          >
-            Отменить несохранённое
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={!dirty || savingDays || savingExpenses || loading}
+              onClick={load}
+              className="text-[13px] font-semibold text-muted border border-[#DDD6C8] rounded-lg px-4 py-2.5 disabled:opacity-50"
+            >
+              Отменить несохранённое
+            </button>
+            <button
+              type="button"
+              disabled={!canEditSection || dirtyDayCount === 0 || savingDays}
+              onClick={handleSaveDayRows}
+              className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
+                dirtyDayCount > 0 && !savingDays
+                  ? "bg-accent text-paper"
+                  : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+              }`}
+            >
+              {savingDays ? "Сохраняем…" : "Сохранить трафик и каналы"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -792,10 +774,6 @@ export default function DataEntryPage() {
         </div>
 
         {expenses.map((e, i) => {
-          const original = originalExpenses[i];
-          const rowDirty = !!original && expenseSnapshot(e) !== expenseSnapshot(original);
-          const confirmedSnap = confirmedExpenses.get(i);
-          const rowConfirmed = confirmedSnap !== undefined && confirmedSnap === expenseSnapshot(e);
           const effectiveLocked = expenseEffectivelyLocked(e);
           const rowEditableInputs = canEditSection && !effectiveLocked;
           const showCountdown = !effectiveLocked && e.unlockExpiresAt;
@@ -837,8 +815,8 @@ export default function DataEntryPage() {
                 className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
               />
               <div className="flex flex-col items-end gap-0.5">
-                {effectiveLocked ? (
-                  e.requestPending ? (
+                {effectiveLocked &&
+                  (e.requestPending ? (
                     <span className="text-[11px] text-mutedLight italic">Ожидает</span>
                   ) : (
                     <button
@@ -849,21 +827,7 @@ export default function DataEntryPage() {
                     >
                       Запрос
                     </button>
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    disabled={!canEditSection || !rowDirty || rowConfirmed}
-                    onClick={() => confirmExpense(i)}
-                    className={`text-[11px] font-bold rounded-md px-2 py-1 transition-colors ${
-                      rowDirty && !rowConfirmed
-                        ? "bg-accent text-paper"
-                        : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
-                    }`}
-                  >
-                    {rowConfirmed ? "Сохранено" : "Сохранить"}
-                  </button>
-                )}
+                  ))}
                 {showCountdown && (
                   <span className="text-[9.5px] text-mutedLight italic">
                     ещё {minutesLeft(e.unlockExpiresAt as string, nowTick)}м
@@ -890,6 +854,21 @@ export default function DataEntryPage() {
         <div className="flex items-center justify-between pt-2.5 border-t border-borderSoft text-[13px] font-bold">
           <span>Общая сумма расходов</span>
           <span className="num">{expensesTotal.toLocaleString("ru-RU")} ₸</span>
+        </div>
+
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            disabled={!canEditSection || dirtyExpenseCount === 0 || savingExpenses}
+            onClick={handleSaveExpenses}
+            className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
+              dirtyExpenseCount > 0 && !savingExpenses
+                ? "bg-accent text-paper"
+                : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+            }`}
+          >
+            {savingExpenses ? "Сохраняем…" : "Сохранить расходы"}
+          </button>
         </div>
       </div>
     </>
