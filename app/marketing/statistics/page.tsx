@@ -111,15 +111,6 @@ function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
 
-type RegisterSalesRow = {
-  registerId: string;
-  name: string;
-  revenue: number;
-  receipts: number;
-  items: number;
-  cost: number | null;
-};
-
 export default function StatisticsPage() {
   const { isAdmin, permissions } = useAuth();
   const { selected: selectedStores } = useStoreSelection();
@@ -133,7 +124,6 @@ export default function StatisticsPage() {
   const [expensesTotal, setExpensesTotal] = useState(0);
   const [prevExpensesTotal, setPrevExpensesTotal] = useState(0);
   const [range, setRange] = useState<Range | null>(null);
-  const [registerSales, setRegisterSales] = useState<RegisterSalesRow[]>([]);
 
   const canView = isAdmin || permissions["marketing.statistics"].canView;
 
@@ -143,7 +133,6 @@ export default function StatisticsPage() {
       setPrevious([]);
       setExpensesTotal(0);
       setPrevExpensesTotal(0);
-      setRegisterSales([]);
       setRange(getPeriodRange(periodIndex, new Date()));
       setLoading(false);
       return;
@@ -153,58 +142,6 @@ export default function StatisticsPage() {
     try {
       const r = getPeriodRange(periodIndex, new Date());
       setRange(r);
-
-      supabase
-        .from("moysklad_sales_daily")
-        .select("register_id, revenue, receipts_count, items_count, cost, moysklad_registers(name)")
-        .gte("sale_date", ymd(r.start))
-        .lte("sale_date", ymd(r.end))
-        .then(({ data, error: registerError }) => {
-          if (registerError || !data) {
-            setRegisterSales([]);
-            return;
-          }
-          type Agg = { registerId: string; name: string; revenue: number; receipts: number; items: number; costSum: number; costMissing: boolean };
-          const byRegister = new Map<string, Agg>();
-          for (const row of data as unknown as {
-            register_id: string;
-            revenue: number;
-            receipts_count: number;
-            items_count: number;
-            cost: number | null;
-            moysklad_registers: { name: string } | null;
-          }[]) {
-            const agg = byRegister.get(row.register_id) ?? {
-              registerId: row.register_id,
-              name: row.moysklad_registers?.name ?? row.register_id,
-              revenue: 0,
-              receipts: 0,
-              items: 0,
-              costSum: 0,
-              costMissing: false,
-            };
-            agg.revenue += row.revenue ?? 0;
-            agg.receipts += row.receipts_count ?? 0;
-            agg.items += row.items_count ?? 0;
-            // A missing value means "unknown", not zero — one day without
-            // cost data makes the whole period's margin unknown, since
-            // averaging in a false zero would inflate it.
-            if (row.cost === null) agg.costMissing = true;
-            else agg.costSum += row.cost;
-            byRegister.set(row.register_id, agg);
-          }
-          const rows: RegisterSalesRow[] = [...byRegister.values()]
-            .map((a) => ({
-              registerId: a.registerId,
-              name: a.name,
-              revenue: a.revenue,
-              receipts: a.receipts,
-              items: a.items,
-              cost: a.costMissing ? null : a.costSum,
-            }))
-            .sort((a, b) => b.revenue - a.revenue);
-          setRegisterSales(rows);
-        });
 
       const queries = [
         supabase
@@ -453,38 +390,6 @@ export default function StatisticsPage() {
           </div>
         </div>
       </div>
-
-      {registerSales.length > 0 && (
-        <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-          <div className="text-[15px] font-bold">Продажи по кассам (МойСклад)</div>
-          <div className="grid grid-cols-[1.4fr_1fr_0.7fr_1fr_1fr_0.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-            <div>Касса</div>
-            <div>Выручка</div>
-            <div>Чеков</div>
-            <div>Средний чек</div>
-            <div>Вещей в чеке</div>
-            <div>Маржа %</div>
-          </div>
-          {registerSales.map((r) => {
-            const avgCheck = r.receipts > 0 ? r.revenue / r.receipts : 0;
-            const itemsPerCheck = r.receipts > 0 ? r.items / r.receipts : 0;
-            const marginPct = r.cost !== null && r.revenue > 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : null;
-            return (
-              <div
-                key={r.registerId}
-                className="grid grid-cols-[1.4fr_1fr_0.7fr_1fr_1fr_0.8fr] gap-3 py-2 border-b border-borderSoft items-center text-[13px]"
-              >
-                <div className="font-semibold">{r.name}</div>
-                <div className="num">{money(r.revenue)}</div>
-                <div className="num">{r.receipts}</div>
-                <div className="num">{money(avgCheck)}</div>
-                <div className="num">{itemsPerCheck.toFixed(1)}</div>
-                <div className="num">{marginPct !== null ? `${marginPct.toFixed(0)}%` : "—"}</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
     </>
   );
 }

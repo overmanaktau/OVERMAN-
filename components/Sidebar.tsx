@@ -12,7 +12,6 @@ import type { SectionKey } from "@/lib/permissions";
 
 const TOP_LEVEL: { label: string; soon: boolean }[] = [
   { label: "Обзор", soon: true },
-  { label: "Продажа", soon: true },
   { label: "Склад", soon: true },
 ];
 
@@ -122,6 +121,7 @@ export default function Sidebar() {
     (item) => isAdmin || permissions[item.section]?.canView
   );
   const canSeeRequests = isAdmin || permissions["requests"].canView || permissions["requests"].canEdit;
+  const canSeeSales = isAdmin || permissions["marketing.statistics"].canView;
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
     marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),
@@ -146,16 +146,25 @@ export default function Sidebar() {
       <StorePicker />
 
       <nav className="flex flex-col gap-1">
-        {TOP_LEVEL.map((item) => (
-          <div
-            key={item.label}
-            className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium"
-          >
-            <span>{item.label}</span>
-            {item.soon && (
-              <span className="text-[10px] tracking-wide uppercase text-sidebarMuted border border-[#3A362E] rounded-full px-2 py-0.5">
-                скоро
-              </span>
+        {TOP_LEVEL.map((item, i) => (
+          <div key={item.label}>
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium">
+              <span>{item.label}</span>
+              {item.soon && (
+                <span className="text-[10px] tracking-wide uppercase text-sidebarMuted border border-[#3A362E] rounded-full px-2 py-0.5">
+                  скоро
+                </span>
+              )}
+            </div>
+            {i === 0 && canSeeSales && (
+              <GuardedLink
+                href="/sales"
+                className={`block px-3 py-2.5 rounded-lg text-sm font-semibold ${
+                  pathname === "/sales" ? "bg-accent text-paper" : "text-sidebarText hover:text-sidebarText"
+                }`}
+              >
+                Продажа
+              </GuardedLink>
             )}
           </div>
         ))}
