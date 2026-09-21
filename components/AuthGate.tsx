@@ -9,6 +9,7 @@ import { resolveAccessibleStoreCodes, type City, type Store, type StoreAccessGra
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 
 const SESSION_LIMIT_MS = 30 * 60 * 1000;
+const WARNING_SECONDS = 10;
 const RESUME_PATH_KEY = "overman.resumePath";
 
 type AuthContextValue = {
@@ -52,6 +53,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [value, setValue] = useState<AuthContextValue>(DEFAULT_VALUE);
   const [reloadTick, setReloadTick] = useState(0);
   const [lastSignInAt, setLastSignInAt] = useState<string | null>(null);
+  const [sessionDeadline, setSessionDeadline] = useState<number | null>(null);
+  const [warningSecondsLeft, setWarningSecondsLeft] = useState<number | null>(null);
   const [resumePath, setResumePath] = useState<string | null>(null);
   const resumeCheckedRef = useRef(false);
 
@@ -154,40 +157,60 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     };
   }, [router, reloadTick]);
 
-  // Auto sign-out 30 minutes after login for every role except the owner,
-  // who stays signed in indefinitely. If there were unsaved changes at that
-  // moment, save whatever was already confirmed and remember the page so we
-  // can offer to jump back to it after the next login.
+  // Sets the first deadline once we know when this session actually began —
+  // every role except the owner, who is never subject to this at all.
   useEffect(() => {
     if (status !== "ready" || value.role === null || value.role === "owner" || !lastSignInAt) return;
+    setSessionDeadline((prev) => prev ?? new Date(lastSignInAt).getTime() + SESSION_LIMIT_MS);
+  }, [status, value.role, lastSignInAt]);
 
-    const deadline = new Date(lastSignInAt).getTime() + SESSION_LIMIT_MS;
-    const msLeft = deadline - Date.now();
-
-    async function forceLogout() {
-      try {
-        if (isDirty) {
-          await saveNow();
-          try {
-            localStorage.setItem(RESUME_PATH_KEY, pathname);
-          } catch {
-            // storage unavailable — the resume prompt just won't appear next time
-          }
-        }
-      } catch {
-        // don't let a failed save trap the user in an expired session
-      }
-      await supabase.auth.signOut();
-      router.replace("/login");
-    }
-
+  // When the deadline arrives, open the warning countdown instead of signing
+  // out immediately.
+  useEffect(() => {
+    if (sessionDeadline === null) return;
+    const msLeft = sessionDeadline - Date.now();
     if (msLeft <= 0) {
-      forceLogout();
+      setWarningSecondsLeft(WARNING_SECONDS);
       return;
     }
-    const timer = window.setTimeout(forceLogout, msLeft);
+    const timer = window.setTimeout(() => setWarningSecondsLeft(WARNING_SECONDS), msLeft);
     return () => window.clearTimeout(timer);
-  }, [status, value.role, lastSignInAt, isDirty, saveNow, pathname, router]);
+  }, [sessionDeadline]);
+
+  // Ticks the warning countdown down every second. If it reaches zero
+  // without the user clicking "Продолжить", save whatever was already
+  // row-confirmed, remember the current page, and sign out.
+  useEffect(() => {
+    if (warningSecondsLeft === null) return;
+
+    if (warningSecondsLeft <= 0) {
+      (async () => {
+        try {
+          if (isDirty) {
+            await saveNow();
+            try {
+              localStorage.setItem(RESUME_PATH_KEY, pathname);
+            } catch {
+              // storage unavailable — the resume prompt just won't appear next time
+            }
+          }
+        } catch {
+          // don't let a failed save trap the user in an expired session
+        }
+        await supabase.auth.signOut();
+        router.replace("/login");
+      })();
+      return;
+    }
+
+    const timer = window.setTimeout(() => setWarningSecondsLeft((s) => (s ?? 1) - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [warningSecondsLeft, isDirty, saveNow, pathname, router]);
+
+  function handleContinueSession() {
+    setWarningSecondsLeft(null);
+    setSessionDeadline(Date.now() + SESSION_LIMIT_MS);
+  }
 
   // Right after a successful login, offer to jump back to whatever page the
   // auto sign-out interrupted.
@@ -250,6 +273,25 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={value}>
       {children}
+      {warningSecondsLeft !== null && (
+        <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-6">
+          <div className="bg-surface border border-border rounded-card p-6 max-w-sm w-full flex flex-col gap-4">
+            <div className="text-[15px] font-bold text-ink">Сессия истекает</div>
+            <p className="text-sm text-muted">
+              Вы будете автоматически выведены из аккаунта через {warningSecondsLeft} сек.
+            </p>
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                onClick={handleContinueSession}
+                className="text-[13px] font-bold text-paper bg-accent rounded-lg px-4 py-2"
+              >
+                Продолжить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {resumePath && (
         <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-6">
           <div className="bg-surface border border-border rounded-card p-6 max-w-sm w-full flex flex-col gap-4">
