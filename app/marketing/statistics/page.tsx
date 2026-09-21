@@ -306,6 +306,9 @@ export default function StatisticsPage() {
   const costPerBuyerChange =
     costPerBuyer !== null && prevCostPerBuyer !== null ? pctChange(costPerBuyer, prevCostPerBuyer) : null;
 
+  // Конверсия посетителей в покупателей: чек / посетитель × 100.
+  const conversionPct = totals.fact > 0 ? (salesTotals.receipts / totals.fact) * 100 : null;
+
   const spendVsCheckPct = costPerBuyer !== null && avgCheck !== null && avgCheck > 0 ? (costPerBuyer / avgCheck) * 100 : null;
   const prevSpendVsCheckPct =
     prevCostPerBuyer !== null && prevAvgCheck !== null && prevAvgCheck > 0 ? (prevCostPerBuyer / prevAvgCheck) * 100 : null;
@@ -470,6 +473,7 @@ export default function StatisticsPage() {
         <KpiCard
           label="Цена одного покупателя"
           value={costPerBuyer !== null ? money(costPerBuyer) : "—"}
+          valueSuffix={conversionPct !== null ? `(${conversionPct.toFixed(1)}%)` : undefined}
           note={
             costPerBuyerChange !== null
               ? `${costPerBuyerChange >= 0 ? "▲" : "▼"} ${Math.abs(costPerBuyerChange).toFixed(0)}% к пред. периоду`
