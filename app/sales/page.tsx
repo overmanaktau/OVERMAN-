@@ -163,6 +163,7 @@ export default function SalesPage() {
 
   const totalRevenue = registerSales.reduce((acc, r) => acc + r.revenue, 0);
   const totalReceipts = registerSales.reduce((acc, r) => acc + r.receipts, 0);
+  const totalItems = registerSales.reduce((acc, r) => acc + r.items, 0);
 
   function storeLabel(code: string | null) {
     if (!code) return "—";
@@ -212,39 +213,42 @@ export default function SalesPage() {
           <div className="text-sm text-muted py-4">Нет данных за этот период.</div>
         ) : (
           <>
-            <div className="grid grid-cols-[1.4fr_1fr_1fr_0.7fr_1fr_1fr_0.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+            <div className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Касса</div>
               <div>Город</div>
               <div>Выручка</div>
               <div>Чеков</div>
               <div>Средний чек</div>
-              <div>Вещей в чеке</div>
+              <div>Кол-во товара</div>
+              <div>Глубина чека</div>
               <div>Маржа %</div>
             </div>
             {registerSales.map((r) => {
               const avgCheck = r.receipts > 0 ? r.revenue / r.receipts : 0;
-              const itemsPerCheck = r.receipts > 0 ? r.items / r.receipts : 0;
+              const checkDepth = r.receipts > 0 ? r.items / r.receipts : 0;
               const marginPct = r.cost !== null && r.revenue > 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : null;
               return (
                 <div
                   key={r.registerId}
-                  className="grid grid-cols-[1.4fr_1fr_1fr_0.7fr_1fr_1fr_0.8fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                  className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
                 >
                   <div className="font-semibold">{r.name}</div>
                   <div className="text-muted">{storeLabel(r.store)}</div>
                   <div className="num">{money(r.revenue)}</div>
                   <div className="num">{r.receipts}</div>
                   <div className="num">{money(avgCheck)}</div>
-                  <div className="num">{itemsPerCheck.toFixed(1)}</div>
+                  <div className="num">{r.items.toLocaleString("ru-RU")}</div>
+                  <div className="num">{checkDepth.toFixed(1)}</div>
                   <div className="num">{marginPct !== null ? `${marginPct.toFixed(0)}%` : "—"}</div>
                 </div>
               );
             })}
-            <div className="grid grid-cols-[1.4fr_1fr_1fr_0.7fr_1fr_1fr_0.8fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
+            <div className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
               <div className="col-span-2">Итого</div>
               <div className="num">{money(totalRevenue)}</div>
               <div className="num">{totalReceipts}</div>
               <div className="num">{totalReceipts > 0 ? money(totalRevenue / totalReceipts) : "—"}</div>
+              <div className="num">{totalItems.toLocaleString("ru-RU")}</div>
               <div />
               <div />
             </div>
