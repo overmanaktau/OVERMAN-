@@ -269,7 +269,7 @@ export default function SalesPage() {
                       <div className="num">{groupReceipts}</div>
                       <div className="num">{groupReceipts > 0 ? money(groupRevenue / groupReceipts) : "—"}</div>
                       <div className="num">{groupItems.toLocaleString("ru-RU")}</div>
-                      <div />
+                      <div className="num">{groupReceipts > 0 ? (groupItems / groupReceipts).toFixed(1) : "—"}</div>
                       <div />
                     </div>
                   )}
@@ -282,7 +282,7 @@ export default function SalesPage() {
               <div className="num">{totalReceipts}</div>
               <div className="num">{totalReceipts > 0 ? money(totalRevenue / totalReceipts) : "—"}</div>
               <div className="num">{totalItems.toLocaleString("ru-RU")}</div>
-              <div />
+              <div className="num">{totalReceipts > 0 ? (totalItems / totalReceipts).toFixed(1) : "—"}</div>
               <div />
             </div>
           </>
