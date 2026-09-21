@@ -61,3 +61,13 @@ export async function fetchRetailDemandsForDate(date: string): Promise<RetailDem
   const filter = `moment>=${date} 00:00:00;moment<=${date} 23:59:59`;
   return fetchAllPages<RetailDemand>("/entity/retaildemand", filter);
 }
+
+// A return (retailsalesreturn) always references the original sale via
+// "demand" — it's an adjustment to an existing check, never a check of its
+// own, so callers subtract its sum/items but leave the receipt count alone.
+export type RetailSalesReturn = RetailDemand;
+
+export async function fetchRetailSalesReturnsForDate(date: string): Promise<RetailSalesReturn[]> {
+  const filter = `moment>=${date} 00:00:00;moment<=${date} 23:59:59`;
+  return fetchAllPages<RetailSalesReturn>("/entity/retailsalesreturn", filter);
+}

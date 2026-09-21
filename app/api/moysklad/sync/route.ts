@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
-import { fetchRetailDemandsForDate } from "@/lib/moysklad";
+import { fetchRetailDemandsForDate, fetchRetailSalesReturnsForDate } from "@/lib/moysklad";
 
 // Confirmed with the business owner: these are the only live registers
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
@@ -29,7 +29,10 @@ function yesterdayInAlmaty(): string {
 }
 
 async function runSync(date: string) {
-  const demands = await fetchRetailDemandsForDate(date);
+  const [demands, returns] = await Promise.all([
+    fetchRetailDemandsForDate(date),
+    fetchRetailSalesReturnsForDate(date),
+  ]);
 
   const byRegister = new Map<string, { name: string; revenue: number; receipts: number; items: number }>();
   for (const d of demands) {
@@ -41,6 +44,21 @@ async function runSync(date: string) {
     agg.receipts += 1;
     agg.items += (d.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
     byRegister.set(id, agg);
+  }
+
+  // A return always references an existing check (via "demand") — it's an
+  // adjustment to that sale, not a check of its own, so it subtracts from
+  // revenue and item count but never touches receipts_count.
+  let returnedAmount = 0;
+  for (const r of returns) {
+    const id = r.retailStore?.id;
+    const name = r.retailStore?.name;
+    if (!id || !name || !REGISTER_STORE[id]) continue;
+    const agg = byRegister.get(id) ?? { name, revenue: 0, receipts: 0, items: 0 };
+    agg.revenue -= (r.sum ?? 0) / 100;
+    agg.items -= (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
+    byRegister.set(id, agg);
+    returnedAmount += (r.sum ?? 0) / 100;
   }
 
   const skipped = demands.length - [...byRegister.values()].reduce((acc, r) => acc + r.receipts, 0);
@@ -64,7 +82,14 @@ async function runSync(date: string) {
     if (salesError) throw salesError;
   }
 
-  return { date, registers: byRegister.size, receipts: demands.length, skipped };
+  return {
+    date,
+    registers: byRegister.size,
+    receipts: demands.length,
+    returns: returns.length,
+    returnedAmount,
+    skipped,
+  };
 }
 
 async function handle(request: Request) {

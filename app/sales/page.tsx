@@ -189,7 +189,8 @@ export default function SalesPage() {
         <h1 className="font-serif text-[28px] font-semibold m-0">Продажа</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
           Продажи по кассам из МойСклад — обновляются раз в сутки, здесь ничего не считается
-          в реальном времени.
+          в реальном времени. Возвраты уже вычтены из выручки и количества товара; число чеков
+          при этом не уменьшается — возврат считается изменением уже пробитого чека, а не новым.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
