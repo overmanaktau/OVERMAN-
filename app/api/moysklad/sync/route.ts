@@ -3,6 +3,16 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { fetchRetailDemandsForDate } from "@/lib/moysklad";
 
+// Confirmed with the business owner: these are the only live registers.
+// Everything else in МойСклад's warehouse list (Кайнар, both "заморозка"
+// snapshots) is inactive or unrelated to retail sales and gets skipped.
+const REGISTER_STORE: Record<string, string> = {
+  "109ed308-b012-11f0-0a80-110900247319": "point_1", // Overman — Актау
+  "fe3b03d3-4da1-11f0-0a80-18910004c37d": "point_1", // Saya Park — Актау
+  "bb935bd2-93e9-11f1-0a80-1f560022775d": "point_3", // Aktobe OVERMAN — Актобе
+  "2ca9443b-a440-11f1-0a80-03ac00324d3c": "point_3", // Актобе скидка — Актобе
+};
+
 function yesterdayInAlmaty(): string {
   // Kazakhstan runs on a single UTC+5 zone (Asia/Almaty covers it, no DST) —
   // the server itself runs in UTC, so "yesterday" has to be computed in
@@ -24,7 +34,7 @@ async function runSync(date: string) {
   for (const d of demands) {
     const id = d.store?.id;
     const name = d.store?.name;
-    if (!id || !name) continue; // logged in the summary below, not fatal
+    if (!id || !name || !REGISTER_STORE[id]) continue; // not a live retail register
     const agg = byRegister.get(id) ?? { name, revenue: 0, receipts: 0, items: 0 };
     agg.revenue += (d.sum ?? 0) / 100;
     agg.receipts += 1;
@@ -37,7 +47,7 @@ async function runSync(date: string) {
   for (const [id, agg] of byRegister) {
     const { error: registerError } = await supabaseAdmin
       .from("moysklad_registers")
-      .upsert({ id, name: agg.name }, { onConflict: "id", ignoreDuplicates: false });
+      .upsert({ id, name: agg.name, store: REGISTER_STORE[id] }, { onConflict: "id", ignoreDuplicates: false });
     if (registerError) throw registerError;
 
     const { error: salesError } = await supabaseAdmin.from("moysklad_sales_daily").upsert(

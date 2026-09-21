@@ -164,7 +164,8 @@ export default function StatisticsPage() {
             setRegisterSales([]);
             return;
           }
-          const byRegister = new Map<string, RegisterSalesRow>();
+          type Agg = { registerId: string; name: string; revenue: number; receipts: number; items: number; costSum: number; costMissing: boolean };
+          const byRegister = new Map<string, Agg>();
           for (const row of data as unknown as {
             register_id: string;
             revenue: number;
@@ -179,15 +180,30 @@ export default function StatisticsPage() {
               revenue: 0,
               receipts: 0,
               items: 0,
-              cost: null,
+              costSum: 0,
+              costMissing: false,
             };
             agg.revenue += row.revenue ?? 0;
             agg.receipts += row.receipts_count ?? 0;
             agg.items += row.items_count ?? 0;
-            agg.cost = (agg.cost ?? 0) + (row.cost ?? 0);
+            // A missing value means "unknown", not zero — one day without
+            // cost data makes the whole period's margin unknown, since
+            // averaging in a false zero would inflate it.
+            if (row.cost === null) agg.costMissing = true;
+            else agg.costSum += row.cost;
             byRegister.set(row.register_id, agg);
           }
-          setRegisterSales([...byRegister.values()].sort((a, b) => b.revenue - a.revenue));
+          const rows: RegisterSalesRow[] = [...byRegister.values()]
+            .map((a) => ({
+              registerId: a.registerId,
+              name: a.name,
+              revenue: a.revenue,
+              receipts: a.receipts,
+              items: a.items,
+              cost: a.costMissing ? null : a.costSum,
+            }))
+            .sort((a, b) => b.revenue - a.revenue);
+          setRegisterSales(rows);
         });
 
       const queries = [
