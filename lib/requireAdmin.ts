@@ -13,34 +13,44 @@ async function getCallerRole(token: string) {
   return { user: userData.user, role: roleRow?.role ?? null, roleId: roleRow?.role_id ?? null };
 }
 
-// Strictly the admin role — for actions that must never be delegated.
+// Strictly admin-or-owner — for actions that must never be delegated to a
+// custom role. The owner counts as admin here too: it's a superset, not a
+// separate track.
 export async function requireAdmin(request: Request) {
   const authHeader = request.headers.get("authorization") ?? "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return null;
 
   const caller = await getCallerRole(token);
-  if (!caller || caller.role !== "admin") return null;
+  if (!caller || (caller.role !== "admin" && caller.role !== "owner")) return null;
   return caller.user;
 }
 
-// Admins, or anyone whose role was explicitly granted the given section's
-// permission (view lets them browse; edit lets them create/change/delete).
-// `isAdmin` on the result tells the caller whether this was the real admin
-// role or a delegated permission — routes use it to block privilege escalation
-// (e.g. a delegated manager promoting someone, including themselves, to admin).
+// Admins/owner, or anyone whose role was explicitly granted the given
+// section's permission (view lets them browse; edit lets them create/change/
+// delete). `isAdmin` on the result tells the caller whether this was a real
+// admin/owner or a delegated permission — routes use it to block privilege
+// escalation (e.g. a delegated manager promoting someone, including
+// themselves, to admin). `role` exposes the exact role for routes that need
+// to tell an owner apart from a plain admin (e.g. transferring ownership).
 export async function requireSectionAccess(
   request: Request,
   section: string,
   need: "view" | "edit"
-): Promise<{ user: NonNullable<Awaited<ReturnType<typeof getCallerRole>>>["user"]; isAdmin: boolean } | null> {
+): Promise<{
+  user: NonNullable<Awaited<ReturnType<typeof getCallerRole>>>["user"];
+  isAdmin: boolean;
+  role: "owner" | "admin" | "editor" | null;
+} | null> {
   const authHeader = request.headers.get("authorization") ?? "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return null;
 
   const caller = await getCallerRole(token);
   if (!caller) return null;
-  if (caller.role === "admin") return { user: caller.user, isAdmin: true };
+  if (caller.role === "admin" || caller.role === "owner") {
+    return { user: caller.user, isAdmin: true, role: caller.role };
+  }
   if (!caller.roleId) return null;
 
   const { data: permRow } = await supabaseAdmin
@@ -51,7 +61,7 @@ export async function requireSectionAccess(
     .maybeSingle();
 
   const allowed = need === "view" ? !!permRow?.can_view : !!permRow?.can_edit;
-  return allowed ? { user: caller.user, isAdmin: false } : null;
+  return allowed ? { user: caller.user, isAdmin: false, role: caller.role as "editor" | null } : null;
 }
 
 export function requireSettingsAccess(request: Request, need: "view" | "edit") {

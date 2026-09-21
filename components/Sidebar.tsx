@@ -163,11 +163,7 @@ export default function Sidebar() {
   const visibleSettings = SETTINGS_SUBMENU.filter(
     (item) => isAdmin || permissions[item.section]?.canView
   );
-  const canSeeRequests =
-    isAdmin ||
-    permissions["requests"].canView ||
-    permissions["requests"].canEdit ||
-    permissions["marketing.data_entry"].canEdit;
+  const canSeeRequests = isAdmin || permissions["requests"].canView || permissions["requests"].canEdit;
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
     marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),

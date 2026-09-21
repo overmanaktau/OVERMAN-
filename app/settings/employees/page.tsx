@@ -10,7 +10,7 @@ type Employee = {
   id: string;
   email: string;
   fullName: string | null;
-  role: "admin" | "editor" | null;
+  role: "owner" | "admin" | "editor" | null;
   roleId: number | null;
 };
 
@@ -41,7 +41,7 @@ function toGrants(rows: RoleDef["role_store_access"]): StoreAccessGrant[] {
 }
 
 function resolveStoreLabel(emp: Employee, roles: RoleDef[], cities: CityWithStores[]): string {
-  if (emp.role === "admin") return "Все точки";
+  if (emp.role === "admin" || emp.role === "owner") return "Все точки";
   if (!emp.roleId) return "—";
   const role = roles.find((r) => r.id === emp.roleId);
   if (!role) return "—";
@@ -275,7 +275,7 @@ function EmployeeAccessPanel({
 }
 
 export default function EmployeesPage() {
-  const { email: myEmail, isAdmin, permissions } = useAuth();
+  const { email: myEmail, isAdmin, isOwner, permissions } = useAuth();
   const canEdit = isAdmin || permissions["settings.employees"].canEdit;
   const [tab, setTab] = useState<"employees" | "roles" | "stores">("employees");
 
@@ -335,29 +335,29 @@ export default function EmployeesPage() {
   }, []);
 
   function roleChoiceValue(emp: Employee) {
+    if (emp.role === "owner") return "owner";
     if (emp.role === "admin") return "admin";
     if (emp.roleId) return String(emp.roleId);
     return "";
   }
 
   async function handleRoleChange(emp: Employee, value: string) {
+    if (value === "owner") {
+      if (!window.confirm(`Передать роль владельца ${emp.email}? Вы потеряете статус владельца и станете администратором.`)) {
+        return;
+      }
+    }
     setError(null);
     const prevRole = emp.roleId ? roles.find((r) => r.id === emp.roleId) ?? null : null;
     try {
       await authFetch(`/api/employees/${emp.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          role: value === "admin" ? "admin" : "custom",
-          roleId: value === "admin" || value === "" ? null : Number(value),
+          role: value === "admin" ? "admin" : value === "owner" ? "owner" : "custom",
+          roleId: value === "admin" || value === "owner" || value === "" ? null : Number(value),
         }),
       });
-      setEmployees((prev) =>
-        prev.map((e) =>
-          e.id === emp.id
-            ? { ...e, role: value === "admin" ? "admin" : "editor", roleId: value === "admin" || value === "" ? null : Number(value) }
-            : e
-        )
-      );
+      await loadAll();
       // The old role was a personal (per-employee) one and nobody uses it anymore — clean it up.
       if (prevRole?.is_personal && String(prevRole.id) !== value) {
         await authFetch(`/api/roles/${prevRole.id}`, { method: "DELETE" }).catch(() => {});
@@ -793,9 +793,10 @@ export default function EmployeesPage() {
                   <select
                     value={getEditedRoleChoice(emp)}
                     onChange={(e) => updateEmployeeEdit(emp, { roleChoice: e.target.value })}
-                    disabled={emp.email === myEmail || !canEdit}
+                    disabled={emp.email === myEmail || !canEdit || (emp.role === "owner" && !isOwner)}
                     className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
                   >
+                    {(isOwner || emp.role === "owner") && <option value="owner">Владелец</option>}
                     <option value="admin">Администратор</option>
                     <option value="">Без роли</option>
                     {sharedRoles.map((r) => (
@@ -830,7 +831,7 @@ export default function EmployeesPage() {
                       </>
                     ) : (
                       <>
-                        {emp.role !== "admin" && (
+                        {emp.role !== "admin" && emp.role !== "owner" && (
                           <button
                             type="button"
                             onClick={() => setAccessEditingId(accessEditingId === emp.id ? null : emp.id)}
@@ -853,8 +854,9 @@ export default function EmployeesPage() {
                         )}
                         <button
                           type="button"
-                          disabled={emp.email === myEmail || !canEdit}
+                          disabled={emp.email === myEmail || emp.role === "owner" || !canEdit}
                           onClick={() => handleDeleteEmployee(emp)}
+                          title={emp.role === "owner" ? "Владельца нельзя удалить" : undefined}
                           className="text-[12px] text-[#A34B36] font-semibold disabled:opacity-40 text-left"
                         >
                           Удалить

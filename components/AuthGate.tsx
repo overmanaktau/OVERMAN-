@@ -10,8 +10,9 @@ import { resolveAccessibleStoreCodes, type City, type Store, type StoreAccessGra
 type AuthContextValue = {
   email: string | null;
   fullName: string | null;
-  role: "admin" | "editor" | null;
+  role: "owner" | "admin" | "editor" | null;
   isAdmin: boolean;
+  isOwner: boolean;
   permissions: Permissions;
   cities: City[];
   stores: Store[];
@@ -24,6 +25,7 @@ const DEFAULT_VALUE: AuthContextValue = {
   fullName: null,
   role: null,
   isAdmin: false,
+  isOwner: false,
   permissions: emptyPermissions(),
   cities: [],
   stores: [],
@@ -72,8 +74,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         if (citiesError) throw citiesError;
         if (storesError) throw storesError;
 
-        const role = (roleRow?.role as "admin" | "editor") ?? "editor";
-        const isAdmin = role === "admin";
+        const role = (roleRow?.role as "owner" | "admin" | "editor") ?? "editor";
+        const isOwner = role === "owner";
+        const isAdmin = role === "admin" || isOwner;
 
         let permissions = emptyPermissions();
         let accessibleStoreCodes: string[] = [];
@@ -109,6 +112,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           fullName: roleRow?.full_name ?? null,
           role,
           isAdmin,
+          isOwner,
           permissions,
           cities: (cities ?? []) as City[],
           stores: (stores ?? []) as Store[],

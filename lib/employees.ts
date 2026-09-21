@@ -4,7 +4,7 @@ export type EmployeeSummary = {
   id: string;
   email: string;
   fullName: string | null;
-  role: "admin" | "editor" | null;
+  role: "owner" | "admin" | "editor" | null;
   roleId: number | null;
   createdAt: string;
 };
