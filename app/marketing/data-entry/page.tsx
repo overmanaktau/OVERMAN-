@@ -104,7 +104,7 @@ function friendlyError(e: unknown): string {
   if (/JWT|session|401|403/i.test(message)) {
     return "Сессия истекла или нет доступа. Попробуйте выйти и войти снова.";
   }
-  if (/запросите доступ снова/i.test(message)) {
+  if (/запросите доступ снова|требует одобренного запроса/i.test(message)) {
     return message;
   }
   return `Не удалось выполнить операцию: ${message}`;
@@ -192,23 +192,30 @@ export default function DataEntryPage() {
     const d = new Date(nowTick);
     return ymd(d.getFullYear(), d.getMonth(), d.getDate());
   }, [nowTick]);
+  const yesterdayStr = useMemo(() => {
+    const d = new Date(nowTick);
+    d.setDate(d.getDate() - 1);
+    return ymd(d.getFullYear(), d.getMonth(), d.getDate());
+  }, [nowTick]);
 
   function rowIsExpired(unlockExpiresAt: string | null) {
     return !!unlockExpiresAt && new Date(unlockExpiresAt).getTime() <= nowTick;
   }
 
-  // A row is only ever locked once something has actually been saved to it
-  // before — first-time entry (any past date, or "план" on a future date)
-  // is always free. Once saved, changing it again needs a request, until
-  // that request's 30-minute window is open.
-  function dayRowLocked(row: DayRow) {
-    return row.locked && (!row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt));
+  function isFreeWindowDate(entryDate: string) {
+    return entryDate === todayStr || entryDate === yesterdayStr;
   }
 
-  // The six actual-data fields only make sense for today or a past date —
-  // "план" is the only field a future date can ever carry.
-  function dayOtherFieldsDisabled(row: DayRow) {
-    return dayRowLocked(row) || row.entryDate > todayStr;
+  // "Трафик план" is never gated — any date, first entry or the hundredth
+  // edit. The six actual-data fields are free for first-time entry only on
+  // yesterday's or today's date; any other date needs a request even for
+  // the very first entry. Changing an already-saved value in those six
+  // fields again always needs a fresh request, regardless of date.
+  function dayOtherFieldsLocked(row: DayRow) {
+    if (isFreeWindowDate(row.entryDate)) {
+      return row.locked && (!row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt));
+    }
+    return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
 
   function expenseEffectivelyLocked(exp: ExpenseRow) {
@@ -245,7 +252,7 @@ export default function DataEntryPage() {
       const dayIds = (entriesRes.data ?? []).map((e) => e.id);
       const expenseIds = (expensesRes.data ?? []).map((e) => e.id);
 
-      const [dayReqRes, expReqRes] = await Promise.all([
+      const [dayReqRes, dayDateReqRes, expReqRes] = await Promise.all([
         dayIds.length
           ? supabase
               .from("edit_requests")
@@ -254,6 +261,15 @@ export default function DataEntryPage() {
               .eq("status", "pending")
               .in("row_id", dayIds)
           : Promise.resolve({ data: [] as { row_id: number }[], error: null }),
+        supabase
+          .from("edit_requests")
+          .select("entry_date")
+          .eq("table_name", "traffic_entries")
+          .eq("status", "pending")
+          .is("row_id", null)
+          .eq("store", store)
+          .gte("entry_date", firstStr)
+          .lte("entry_date", lastStr),
         expenseIds.length
           ? supabase
               .from("edit_requests")
@@ -264,15 +280,17 @@ export default function DataEntryPage() {
           : Promise.resolve({ data: [] as { row_id: number }[], error: null }),
       ]);
       if (dayReqRes.error) throw dayReqRes.error;
+      if (dayDateReqRes.error) throw dayDateReqRes.error;
       if (expReqRes.error) throw expReqRes.error;
 
       const pendingDayIds = new Set((dayReqRes.data ?? []).map((r) => r.row_id));
+      const pendingDayDates = new Set((dayDateReqRes.data ?? []).map((r) => r.entry_date as string));
       const pendingExpenseIds = new Set((expReqRes.data ?? []).map((r) => r.row_id));
 
       const byDate = new Map((entriesRes.data ?? []).map((e) => [e.entry_date, e]));
       const merged = buildMonthRows(year, monthIndex).map((row) => {
         const db = byDate.get(row.entryDate);
-        if (!db) return row;
+        if (!db) return { ...row, requestPending: pendingDayDates.has(row.entryDate) };
         return {
           ...row,
           id: db.id,
@@ -321,15 +339,17 @@ export default function DataEntryPage() {
   }, [load]);
 
   const dirtyDayCount = useMemo(() => {
+    // "план" can always change, so no row is ever fully excluded here — the
+    // disabled inputs already stop illegal edits to the other six fields,
+    // and the DB enforces it too, so a plain diff check is enough.
     let count = 0;
     for (const row of rows) {
-      if (dayRowLocked(row)) continue;
       const original = originalRows.find((o) => o.entryDate === row.entryDate);
       if (original && numericSnapshot(row) !== numericSnapshot(original)) count++;
     }
     return count;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, originalRows, nowTick]);
+  }, [rows, originalRows]);
 
   const dirtyExpenseCount = useMemo(() => {
     let count = 0;
@@ -361,8 +381,8 @@ export default function DataEntryPage() {
 
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], value: string) {
     const row = rows[index];
-    if (!canEditSection || !row || dayRowLocked(row)) return;
-    if (field !== "trafficPlan" && row.entryDate > todayStr) return;
+    if (!canEditSection || !row) return;
+    if (field !== "trafficPlan" && dayOtherFieldsLocked(row)) return;
     setRows((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value === "" ? "" : Number(value) };
@@ -383,7 +403,7 @@ export default function DataEntryPage() {
   }
 
   async function requestDayUnlock(row: DayRow) {
-    if (!row.id || savingDays) return;
+    if (savingDays) return;
     setError(null);
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -391,10 +411,14 @@ export default function DataEntryPage() {
       const uid = userData.user?.id;
       if (!uid) throw new Error("Нет активной сессии.");
 
-      const context = `Точка «${storeName}», трафик и каналы за ${row.date}.${year}. Заявитель: ${requesterLabel}`;
+      const isFirstEntry = !row.id;
+      const context = isFirstEntry
+        ? `Точка «${storeName}», первичное внесение за ${row.date}.${year}. Заявитель: ${requesterLabel}`
+        : `Точка «${storeName}», трафик и каналы за ${row.date}.${year}. Заявитель: ${requesterLabel}`;
       const { error } = await supabase.from("edit_requests").insert({
         table_name: "traffic_entries",
-        row_id: row.id,
+        row_id: row.id ?? null,
+        entry_date: isFirstEntry ? row.entryDate : null,
         store,
         context,
         requested_by: uid,
@@ -456,12 +480,20 @@ export default function DataEntryPage() {
     setError(null);
     try {
       for (const row of rows) {
-        if (dayRowLocked(row)) continue;
         const original = originalRows.find((o) => o.entryDate === row.entryDate);
         if (!original || numericSnapshot(row) === numericSnapshot(original)) continue;
 
-        const payload: Record<string, unknown> = { store, entry_date: row.entryDate, locked: true, unlock_expires_at: null };
+        const payload: Record<string, unknown> = { store, entry_date: row.entryDate };
         for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
+
+        // Re-locking (and clearing a still-open window) only makes sense
+        // when one of the six gated fields actually changed — a plan-only
+        // save shouldn't burn an approval the employee hasn't used yet.
+        const otherFieldsChanged = NUMERIC_FIELDS.some((f) => f !== "trafficPlan" && row[f] !== original[f]);
+        if (otherFieldsChanged) {
+          payload.locked = true;
+          payload.unlock_expires_at = null;
+        }
 
         if (row.id) {
           const { data: updated, error } = await supabase.from("traffic_entries").update(payload).eq("id", row.id).select("id");
@@ -573,12 +605,12 @@ export default function DataEntryPage() {
         <div className="text-xs text-mutedLight">Маркетинг</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Первичное внесение за прошедшую дату свободно, без запроса — но повторное изменение уже
-          сохранённой строки нужно запросить в разделе «Запросы». Для будущей даты можно заполнить
-          только «Трафик план» — остальные поля станут доступны, когда день наступит. На одобренный
-          запрос даётся 30 минут — если за это время не сохранить строку, доступ пропадёт и
-          понадобится новый запрос. Таблица трафика и дополнительные расходы сохраняются отдельно —
-          своей кнопкой «Сохранить» под каждой таблицей.
+          «Трафик план» можно заполнять и менять свободно — любая дата, без запроса. Остальные поля
+          (факт, каналы) свободны для первого ввода только за вчера и сегодня — любая другая дата, а
+          также повторное изменение уже сохранённого значения, требуют запроса в разделе «Запросы».
+          На одобренный запрос даётся 30 минут — если за это время не сохранить строку, доступ
+          пропадёт и понадобится новый запрос. Таблица трафика и дополнительные расходы сохраняются
+          отдельно — своей кнопкой «Сохранить» под каждой таблицей.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -650,10 +682,10 @@ export default function DataEntryPage() {
           </div>
 
           {rows.map((row, i) => {
-            const rowLocked = dayRowLocked(row);
-            const planEditable = canEditSection && !rowLocked;
-            const otherFieldsEditable = canEditSection && !dayOtherFieldsDisabled(row);
-            const showCountdown = !rowLocked && row.unlockExpiresAt;
+            const otherFieldsLocked = dayOtherFieldsLocked(row);
+            const planEditable = canEditSection;
+            const otherFieldsEditable = canEditSection && !otherFieldsLocked;
+            const showCountdown = !otherFieldsLocked && row.unlockExpiresAt;
 
             return (
               <div
@@ -676,7 +708,7 @@ export default function DataEntryPage() {
                   />
                 ))}
                 <div className="flex flex-col items-end gap-0.5">
-                  {rowLocked &&
+                  {otherFieldsLocked &&
                     (row.requestPending ? (
                       <span className="text-[11px] text-mutedLight italic">Ожидает</span>
                     ) : (
