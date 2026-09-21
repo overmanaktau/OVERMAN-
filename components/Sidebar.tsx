@@ -163,6 +163,7 @@ export default function Sidebar() {
   const visibleSettings = SETTINGS_SUBMENU.filter(
     (item) => isAdmin || permissions[item.section]?.canView
   );
+  const canSeeRequests = isAdmin || permissions["marketing.data_entry"].canEdit;
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
     marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),
@@ -232,6 +233,19 @@ export default function Sidebar() {
               </div>
             )}
           </div>
+        )}
+
+        {canSeeRequests && (
+          <GuardedLink
+            href="/requests"
+            className={`px-3 py-2.5 rounded-lg text-sm mt-1 ${
+              pathname === "/requests"
+                ? "bg-accent text-paper font-semibold"
+                : "text-sidebarText font-semibold hover:text-sidebarText"
+            }`}
+          >
+            Запросы
+          </GuardedLink>
         )}
 
         <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium mt-1">

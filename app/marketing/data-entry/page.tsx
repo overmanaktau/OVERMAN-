@@ -19,6 +19,8 @@ type DayRow = {
   instagramPublic: number | "";
   flyer: number | "";
   twoGis: number | "";
+  locked: boolean;
+  requestPending: boolean;
 };
 
 type ExpenseRow = {
@@ -27,6 +29,8 @@ type ExpenseRow = {
   category: string;
   amount: number | "";
   comment: string;
+  locked: boolean;
+  requestPending: boolean;
 };
 
 const WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]; // matches Date#getDay()
@@ -73,6 +77,14 @@ function friendlyError(e: unknown): string {
   return `Не удалось выполнить операцию: ${message}`;
 }
 
+function numericSnapshot(row: DayRow) {
+  return NUMERIC_FIELDS.map((f) => row[f]).join("|");
+}
+
+function expenseSnapshot(e: ExpenseRow) {
+  return [e.date, e.category, e.amount, e.comment].join("|");
+}
+
 function buildMonthRows(year: number, monthIndex: number): DayRow[] {
   const total = daysInMonth(year, monthIndex);
   const rows: DayRow[] = [];
@@ -90,18 +102,18 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
       instagramPublic: "",
       flyer: "",
       twoGis: "",
+      locked: false,
+      requestPending: false,
     });
   }
   return rows;
 }
 
 export default function DataEntryPage() {
-  const { isAdmin, permissions, cities, stores, accessibleStoreCodes } = useAuth();
+  const { isAdmin, permissions, cities, stores, accessibleStoreCodes, fullName, email } = useAuth();
   const canView = isAdmin || permissions["marketing.data_entry"].canView;
   const canEditSection = isAdmin || permissions["marketing.data_entry"].canEdit;
-  // Locking/unlocking the month follows the same edit permission as the data
-  // itself — no separate admin-only gate; restrict a role via its edit checkbox instead.
-  const canEditLocked = canEditSection;
+  const requesterLabel = fullName || email || "Пользователь";
 
   const accessibleStores = stores.filter((s) => accessibleStoreCodes.includes(s.code));
   const accessibleCities = useMemo(
@@ -135,21 +147,24 @@ export default function DataEntryPage() {
     [accessibleStores.map((s) => s.code).join(","), cityId]
   );
 
+  const storeName = stores.find((s) => s.code === store)?.name ?? store;
+
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [monthIndex, setMonthIndex] = useState(today.getMonth());
 
   const [rows, setRows] = useState<DayRow[]>([]);
+  const [originalRows, setOriginalRows] = useState<DayRow[]>([]);
+  const [confirmedRows, setConfirmedRows] = useState<Map<string, string>>(new Map());
+
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
-  const [locked, setLocked] = useState(false);
-  const [monthStatusId, setMonthStatusId] = useState<number | null>(null);
+  const [originalExpenses, setOriginalExpenses] = useState<ExpenseRow[]>([]);
+  const [confirmedExpenses, setConfirmedExpenses] = useState<Map<number, string>>(new Map());
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
 
-  const editable = canEditSection && (!locked || canEditLocked);
   const { setGuard, requestNavigation } = useUnsavedChanges();
 
   const load = useCallback(async () => {
@@ -161,14 +176,13 @@ export default function DataEntryPage() {
       const firstStr = ymd(year, monthIndex, 1);
       const lastStr = ymd(year, monthIndex, daysInMonth(year, monthIndex));
 
-      const [entriesRes, statusRes, expensesRes] = await Promise.all([
+      const [entriesRes, expensesRes] = await Promise.all([
         supabase
           .from("traffic_entries")
           .select("*")
           .eq("store", store)
           .gte("entry_date", firstStr)
           .lte("entry_date", lastStr),
-        supabase.from("month_status").select("*").eq("store", store).eq("month", firstStr).maybeSingle(),
         supabase
           .from("extra_expenses")
           .select("*")
@@ -177,8 +191,35 @@ export default function DataEntryPage() {
           .order("expense_date"),
       ]);
 
-      const firstError = entriesRes.error || statusRes.error || expensesRes.error;
-      if (firstError) throw firstError;
+      if (entriesRes.error) throw entriesRes.error;
+      if (expensesRes.error) throw expensesRes.error;
+
+      const lockedDayIds = (entriesRes.data ?? []).filter((e) => e.locked).map((e) => e.id);
+      const lockedExpenseIds = (expensesRes.data ?? []).filter((e) => e.locked).map((e) => e.id);
+
+      const [dayReqRes, expReqRes] = await Promise.all([
+        lockedDayIds.length
+          ? supabase
+              .from("edit_requests")
+              .select("row_id")
+              .eq("table_name", "traffic_entries")
+              .eq("status", "pending")
+              .in("row_id", lockedDayIds)
+          : Promise.resolve({ data: [] as { row_id: number }[], error: null }),
+        lockedExpenseIds.length
+          ? supabase
+              .from("edit_requests")
+              .select("row_id")
+              .eq("table_name", "extra_expenses")
+              .eq("status", "pending")
+              .in("row_id", lockedExpenseIds)
+          : Promise.resolve({ data: [] as { row_id: number }[], error: null }),
+      ]);
+      if (dayReqRes.error) throw dayReqRes.error;
+      if (expReqRes.error) throw expReqRes.error;
+
+      const pendingDayIds = new Set((dayReqRes.data ?? []).map((r) => r.row_id));
+      const pendingExpenseIds = new Set((expReqRes.data ?? []).map((r) => r.row_id));
 
       const byDate = new Map((entriesRes.data ?? []).map((e) => [e.entry_date, e]));
       const merged = buildMonthRows(year, monthIndex).map((row) => {
@@ -194,27 +235,36 @@ export default function DataEntryPage() {
           instagramPublic: db.instagram_public ?? "",
           flyer: db.flyer ?? "",
           twoGis: db.two_gis ?? "",
+          locked: db.locked ?? false,
+          requestPending: pendingDayIds.has(db.id),
         };
       });
 
+      const mergedExpenses = (expensesRes.data ?? []).map((e) => ({
+        id: e.id,
+        date: e.expense_date,
+        category: e.category ?? "",
+        amount: e.amount ?? "",
+        comment: e.comment ?? "",
+        locked: e.locked ?? false,
+        requestPending: pendingExpenseIds.has(e.id),
+      }));
+
       setRows(merged);
-      setLocked(statusRes.data?.locked ?? false);
-      setMonthStatusId(statusRes.data?.id ?? null);
-      setExpenses(
-        (expensesRes.data ?? []).map((e) => ({
-          id: e.id,
-          date: e.expense_date,
-          category: e.category ?? "",
-          amount: e.amount ?? "",
-          comment: e.comment ?? "",
-        }))
-      );
-      setDirty(false);
+      setOriginalRows(merged);
+      setExpenses(mergedExpenses);
+      setOriginalExpenses(mergedExpenses);
+      setConfirmedRows(new Map());
+      setConfirmedExpenses(new Map());
     } catch (e) {
       setError(friendlyError(e));
-      setRows(buildMonthRows(year, monthIndex));
+      const empty = buildMonthRows(year, monthIndex);
+      setRows(empty);
+      setOriginalRows(empty);
       setExpenses([]);
-      setDirty(false);
+      setOriginalExpenses([]);
+      setConfirmedRows(new Map());
+      setConfirmedExpenses(new Map());
     } finally {
       setLoading(false);
     }
@@ -223,6 +273,26 @@ export default function DataEntryPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const confirmedDaysCount = useMemo(() => {
+    let count = 0;
+    for (const row of rows) {
+      const snap = confirmedRows.get(row.entryDate);
+      if (snap !== undefined && snap === numericSnapshot(row)) count++;
+    }
+    return count;
+  }, [rows, confirmedRows]);
+
+  const confirmedExpensesCount = useMemo(() => {
+    let count = 0;
+    expenses.forEach((exp, i) => {
+      const snap = confirmedExpenses.get(i);
+      if (snap !== undefined && snap === expenseSnapshot(exp)) count++;
+    });
+    return count;
+  }, [expenses, confirmedExpenses]);
+
+  const dirty = confirmedDaysCount > 0 || confirmedExpensesCount > 0;
 
   function shiftMonth(delta: number) {
     const doShift = () => {
@@ -252,17 +322,16 @@ export default function DataEntryPage() {
   }
 
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], value: string) {
-    if (!editable) return;
+    if (!canEditSection || rows[index]?.locked) return;
     setRows((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value === "" ? "" : Number(value) };
       return next;
     });
-    setDirty(true);
   }
 
-  function updateExpense(index: number, field: keyof ExpenseRow, value: string) {
-    if (!editable) return;
+  function updateExpense(index: number, field: keyof Pick<ExpenseRow, "date" | "category" | "amount" | "comment">, value: string) {
+    if (!canEditSection || expenses[index]?.locked) return;
     setExpenses((prev) => {
       const next = [...prev];
       next[index] = {
@@ -271,7 +340,68 @@ export default function DataEntryPage() {
       };
       return next;
     });
-    setDirty(true);
+  }
+
+  function confirmDay(entryDate: string) {
+    const row = rows.find((r) => r.entryDate === entryDate);
+    if (!row) return;
+    setConfirmedRows((prev) => new Map(prev).set(entryDate, numericSnapshot(row)));
+  }
+
+  function confirmExpense(index: number) {
+    const exp = expenses[index];
+    if (!exp) return;
+    setConfirmedExpenses((prev) => new Map(prev).set(index, expenseSnapshot(exp)));
+  }
+
+  async function requestDayUnlock(row: DayRow) {
+    if (!row.id || saving) return;
+    setError(null);
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const uid = userData.user?.id;
+      if (!uid) throw new Error("Нет активной сессии.");
+
+      const context = `Точка «${storeName}», трафик и каналы за ${row.date}.${year}. Заявитель: ${requesterLabel}`;
+      const { error } = await supabase.from("edit_requests").insert({
+        table_name: "traffic_entries",
+        row_id: row.id,
+        store,
+        context,
+        requested_by: uid,
+      });
+      if (error) throw error;
+
+      setRows((prev) => prev.map((r) => (r.entryDate === row.entryDate ? { ...r, requestPending: true } : r)));
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+  }
+
+  async function requestExpenseUnlock(exp: ExpenseRow) {
+    if (!exp.id || saving) return;
+    setError(null);
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const uid = userData.user?.id;
+      if (!uid) throw new Error("Нет активной сессии.");
+
+      const context = `Доп. расход «${exp.category || "без статьи"}» от ${exp.date || "—"}. Заявитель: ${requesterLabel}`;
+      const { error } = await supabase.from("edit_requests").insert({
+        table_name: "extra_expenses",
+        row_id: exp.id,
+        store: null,
+        context,
+        requested_by: uid,
+      });
+      if (error) throw error;
+
+      setExpenses((prev) => prev.map((e) => (e.id === exp.id ? { ...e, requestPending: true } : e)));
+    } catch (e) {
+      setError(friendlyError(e));
+    }
   }
 
   const totals = useMemo(() => {
@@ -297,73 +427,45 @@ export default function DataEntryPage() {
     setSaving(true);
     setError(null);
     try {
-      const nextRows = [...rows];
-      for (let i = 0; i < nextRows.length; i++) {
-        const row = nextRows[i];
-        const hasData = NUMERIC_FIELDS.some((f) => row[f] !== "");
-        if (!row.id && !hasData) continue;
+      for (const row of rows) {
+        const snap = confirmedRows.get(row.entryDate);
+        if (snap === undefined || snap !== numericSnapshot(row)) continue;
 
-        const payload: Record<string, unknown> = { store, entry_date: row.entryDate };
+        const payload: Record<string, unknown> = { store, entry_date: row.entryDate, locked: true };
         for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
 
         if (row.id) {
           const { error } = await supabase.from("traffic_entries").update(payload).eq("id", row.id);
           if (error) throw error;
         } else {
-          const { data, error } = await supabase
-            .from("traffic_entries")
-            .insert(payload)
-            .select("id")
-            .single();
+          const { error } = await supabase.from("traffic_entries").insert(payload);
           if (error) throw error;
-          nextRows[i] = { ...row, id: data.id };
         }
       }
 
-      const nextExpenses = [...expenses];
-      for (let i = 0; i < nextExpenses.length; i++) {
-        const exp = nextExpenses[i];
-        if (!exp.id && !exp.date && !exp.category && exp.amount === "") continue;
+      for (let i = 0; i < expenses.length; i++) {
+        const exp = expenses[i];
+        const snap = confirmedExpenses.get(i);
+        if (snap === undefined || snap !== expenseSnapshot(exp)) continue;
 
         const payload = {
           expense_date: exp.date || null,
           category: exp.category,
           amount: exp.amount === "" ? 0 : exp.amount,
           comment: exp.comment,
+          locked: true,
         };
 
         if (exp.id) {
           const { error } = await supabase.from("extra_expenses").update(payload).eq("id", exp.id);
           if (error) throw error;
         } else {
-          const { data, error } = await supabase
-            .from("extra_expenses")
-            .insert(payload)
-            .select("id")
-            .single();
+          const { error } = await supabase.from("extra_expenses").insert(payload);
           if (error) throw error;
-          nextExpenses[i] = { ...exp, id: data.id };
         }
       }
 
-      const firstStr = ymd(year, monthIndex, 1);
-      if (monthStatusId) {
-        const { error } = await supabase.from("month_status").update({ locked: true }).eq("id", monthStatusId);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase
-          .from("month_status")
-          .insert({ store, month: firstStr, locked: true })
-          .select("id")
-          .single();
-        if (error) throw error;
-        setMonthStatusId(data.id);
-      }
-
-      setRows(nextRows);
-      setExpenses(nextExpenses);
-      setLocked(true);
-      setDirty(false);
+      await load();
     } catch (e) {
       setError(friendlyError(e));
     } finally {
@@ -377,11 +479,11 @@ export default function DataEntryPage() {
   loadRef.current = load;
 
   useEffect(() => {
-    const active = dirty && editable;
+    const active = dirty && canEditSection;
     setGuard(active, active ? { onSave: () => saveRef.current(), onDiscard: () => loadRef.current() } : null);
     return () => setGuard(false, null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, editable]);
+  }, [dirty, canEditSection]);
 
   if (!canView) {
     return (
@@ -403,17 +505,12 @@ export default function DataEntryPage() {
     <>
       <div className="flex flex-col gap-1">
         <div className="text-xs text-mutedLight">Маркетинг</div>
-        <div className="flex items-center gap-2.5">
-          <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
-          {locked && (
-            <span className="text-[11px] tracking-wide uppercase text-muted bg-[#EDE8DC] border border-border rounded-full px-2.5 py-1">
-              месяц закрыт
-            </span>
-          )}
-        </div>
+        <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Трафик и расходы по каналам вводятся вручную за каждый день. Сохранить месяц и снова
-          открыть его для правок может любой пользователь с правом редактирования этого раздела.
+          Каждая строка сохраняется своей кнопкой «Сохранить» — после этого её можно изменить ещё раз
+          только через запрос в разделе «Запросы». Все нажатые строки фактически запишутся в базу
+          только после контрольного нажатия кнопки «Сохранить» сверху — если не нажать её, внесённые
+          строки не сохранятся.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -483,7 +580,7 @@ export default function DataEntryPage() {
         </div>
 
         <div className="max-h-[460px] overflow-y-auto rounded-md">
-          <div className="sticky top-0 z-10 bg-surface grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+          <div className="sticky top-0 z-10 bg-surface grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px_100px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
             <div>Дата</div>
             <div>День</div>
             <div>Трафик план</div>
@@ -493,33 +590,71 @@ export default function DataEntryPage() {
             <div>Insta паблик</div>
             <div>Флаер</div>
             <div>2ГИС</div>
+            <div>Строка</div>
           </div>
 
-          {rows.map((row, i) => (
-            <div
-              key={row.entryDate}
-              className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-borderSoft ${
-                row.weekend ? "bg-weekendTint" : ""
-              }`}
-            >
-              <div className="text-[12.5px] text-muted">{row.date}</div>
-              <div className="text-[12.5px] text-mutedLight">{row.weekday}</div>
-              {NUMERIC_FIELDS.map((field) => (
-                <input
-                  key={field}
-                  type="number"
-                  disabled={!editable}
-                  value={row[field] === "" ? "" : (row[field] as number)}
-                  onChange={(e) => updateCell(i, field, e.target.value)}
-                  placeholder="0"
-                  className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-                />
-              ))}
-            </div>
-          ))}
+          {rows.map((row, i) => {
+            const original = originalRows.find((o) => o.entryDate === row.entryDate);
+            const rowDirty = !!original && NUMERIC_FIELDS.some((f) => row[f] !== original[f]);
+            const confirmedSnap = confirmedRows.get(row.entryDate);
+            const rowConfirmed = confirmedSnap !== undefined && confirmedSnap === numericSnapshot(row);
+            const rowEditableInputs = canEditSection && !row.locked;
+
+            return (
+              <div
+                key={row.entryDate}
+                className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px_100px] gap-2 items-center py-1 border-b border-borderSoft ${
+                  row.weekend ? "bg-weekendTint" : ""
+                }`}
+              >
+                <div className="text-[12.5px] text-muted">{row.date}</div>
+                <div className="text-[12.5px] text-mutedLight">{row.weekday}</div>
+                {NUMERIC_FIELDS.map((field) => (
+                  <input
+                    key={field}
+                    type="number"
+                    disabled={!rowEditableInputs}
+                    value={row[field] === "" ? "" : (row[field] as number)}
+                    onChange={(e) => updateCell(i, field, e.target.value)}
+                    placeholder="0"
+                    className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                  />
+                ))}
+                <div className="flex items-center justify-end">
+                  {row.locked ? (
+                    row.requestPending ? (
+                      <span className="text-[11px] text-mutedLight italic">Ожидает</span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!canEditSection}
+                        onClick={() => requestDayUnlock(row)}
+                        className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
+                      >
+                        Запрос
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!canEditSection || !rowDirty || rowConfirmed}
+                      onClick={() => confirmDay(row.entryDate)}
+                      className={`text-[11px] font-bold rounded-md px-2 py-1 transition-colors ${
+                        rowDirty && !rowConfirmed
+                          ? "bg-accent text-paper"
+                          : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+                      }`}
+                    >
+                      {rowConfirmed ? "Сохранено" : "Сохранить"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
+        <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px_100px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
           <div className="col-span-2">Итого</div>
           <div className="num">{totals.trafficPlan || 0}</div>
           <div className="num">{totals.trafficFact || 0}</div>
@@ -528,6 +663,7 @@ export default function DataEntryPage() {
           <div className="num">{totals.instagramPublic.toLocaleString("ru-RU")}</div>
           <div className="num">{totals.flyer.toLocaleString("ru-RU")}</div>
           <div className="num">{totals.twoGis.toLocaleString("ru-RU")}</div>
+          <div />
         </div>
 
         <div className="flex items-center justify-between pt-2 border-t border-borderSoft">
@@ -535,24 +671,14 @@ export default function DataEntryPage() {
             Итого расходов на маркетинг за месяц (по каналам):{" "}
             <span className="num text-ink font-bold">{channelTotal.toLocaleString("ru-RU")} ₸</span>
           </div>
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              disabled={!editable || saving || loading}
-              onClick={load}
-              className="text-[13px] font-semibold text-muted border border-[#DDD6C8] rounded-lg px-4 py-2.5 disabled:opacity-50"
-            >
-              Отмена
-            </button>
-            <button
-              type="button"
-              disabled={!editable || saving || loading}
-              onClick={handleSave}
-              className="text-[13px] font-bold text-paper bg-accent rounded-lg px-[18px] py-2.5 disabled:opacity-50"
-            >
-              {saving ? "Сохраняем…" : locked ? "Месяц сохранён" : "Сохранить месяц"}
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={!dirty || saving || loading}
+            onClick={load}
+            className="text-[13px] font-semibold text-muted border border-[#DDD6C8] rounded-lg px-4 py-2.5 disabled:opacity-50"
+          >
+            Отменить несохранённое
+          </button>
         </div>
       </div>
 
@@ -565,58 +691,96 @@ export default function DataEntryPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-[130px_220px_120px_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+        <div className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
           <div>Дата</div>
           <div>Статья</div>
           <div>Сумма</div>
           <div>Комментарий</div>
+          <div>Строка</div>
         </div>
 
-        {expenses.map((e, i) => (
-          <div
-            key={e.id ?? `new-${i}`}
-            className="grid grid-cols-[130px_220px_120px_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
-          >
-            <input
-              type="date"
-              disabled={!editable}
-              value={e.date}
-              onChange={(ev) => updateExpense(i, "date", ev.target.value)}
-              className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-            />
-            <input
-              type="text"
-              disabled={!editable}
-              value={e.category}
-              onChange={(ev) => updateExpense(i, "category", ev.target.value)}
-              placeholder="Статья расхода"
-              className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-            />
-            <input
-              type="number"
-              disabled={!editable}
-              value={e.amount === "" ? "" : e.amount}
-              onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
-              placeholder="0"
-              className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-            />
-            <input
-              type="text"
-              disabled={!editable}
-              value={e.comment}
-              onChange={(ev) => updateExpense(i, "comment", ev.target.value)}
-              placeholder="Комментарий"
-              className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-            />
-          </div>
-        ))}
+        {expenses.map((e, i) => {
+          const original = originalExpenses[i];
+          const rowDirty = !!original && expenseSnapshot(e) !== expenseSnapshot(original);
+          const confirmedSnap = confirmedExpenses.get(i);
+          const rowConfirmed = confirmedSnap !== undefined && confirmedSnap === expenseSnapshot(e);
+          const rowEditableInputs = canEditSection && !e.locked;
+
+          return (
+            <div
+              key={e.id ?? `new-${i}`}
+              className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+            >
+              <input
+                type="date"
+                disabled={!rowEditableInputs}
+                value={e.date}
+                onChange={(ev) => updateExpense(i, "date", ev.target.value)}
+                className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+              />
+              <input
+                type="text"
+                disabled={!rowEditableInputs}
+                value={e.category}
+                onChange={(ev) => updateExpense(i, "category", ev.target.value)}
+                placeholder="Статья расхода"
+                className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+              />
+              <input
+                type="number"
+                disabled={!rowEditableInputs}
+                value={e.amount === "" ? "" : e.amount}
+                onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
+                placeholder="0"
+                className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+              />
+              <input
+                type="text"
+                disabled={!rowEditableInputs}
+                value={e.comment}
+                onChange={(ev) => updateExpense(i, "comment", ev.target.value)}
+                placeholder="Комментарий"
+                className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+              />
+              <div className="flex items-center justify-end">
+                {e.locked ? (
+                  e.requestPending ? (
+                    <span className="text-[11px] text-mutedLight italic">Ожидает</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!canEditSection}
+                      onClick={() => requestExpenseUnlock(e)}
+                      className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
+                    >
+                      Запрос
+                    </button>
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!canEditSection || !rowDirty || rowConfirmed}
+                    onClick={() => confirmExpense(i)}
+                    className={`text-[11px] font-bold rounded-md px-2 py-1 transition-colors ${
+                      rowDirty && !rowConfirmed
+                        ? "bg-accent text-paper"
+                        : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+                    }`}
+                  >
+                    {rowConfirmed ? "Сохранено" : "Сохранить"}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
 
         <button
           type="button"
-          disabled={!editable}
+          disabled={!canEditSection}
           onClick={() => {
-            setExpenses((prev) => [...prev, { date: "", category: "", amount: "", comment: "" }]);
-            setDirty(true);
+            setExpenses((prev) => [...prev, { date: "", category: "", amount: "", comment: "", locked: false, requestPending: false }]);
+            setOriginalExpenses((prev) => [...prev, { date: "", category: "", amount: "", comment: "", locked: false, requestPending: false }]);
           }}
           className="flex items-center gap-2 text-[13px] font-semibold text-accent py-3 text-left disabled:opacity-50"
         >
