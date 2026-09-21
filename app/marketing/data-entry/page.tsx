@@ -388,6 +388,7 @@ export default function DataEntryPage() {
     if (savingDays) return; // guards against a second click landing before the button disables
     setSavingDays(true);
     setError(null);
+    const failed: string[] = [];
     try {
       for (const row of rows) {
         const original = originalRows.find((o) => o.entryDate === row.entryDate);
@@ -396,32 +397,43 @@ export default function DataEntryPage() {
         const payload: Record<string, unknown> = { store, entry_date: row.entryDate };
         for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
 
-        if (row.id) {
-          const { error } = await supabase.from("traffic_entries").update(payload).eq("id", row.id);
-          if (error) throw error;
+        try {
+          if (row.id) {
+            const { error } = await supabase.from("traffic_entries").update(payload).eq("id", row.id);
+            if (error) throw error;
 
-          const changeDescription = diffDayRow(original, row);
-          if (changeDescription) {
-            const { data: userData } = await supabase.auth.getUser();
-            await supabase.from("edit_history").insert({
-              table_name: "traffic_entries",
-              row_id: row.id,
-              store,
-              summary: `Точка «${storeName}», трафик и каналы за ${row.date}.${year}: ${changeDescription}`,
-              changed_by: userData.user?.id ?? null,
-              changed_by_name: requesterLabel,
-            });
+            const changeDescription = diffDayRow(original, row);
+            if (changeDescription) {
+              const { data: userData } = await supabase.auth.getUser();
+              await supabase.from("edit_history").insert({
+                table_name: "traffic_entries",
+                row_id: row.id,
+                store,
+                summary: `Точка «${storeName}», трафик и каналы за ${row.date}.${year}: ${changeDescription}`,
+                changed_by: userData.user?.id ?? null,
+                changed_by_name: requesterLabel,
+              });
+            }
+          } else {
+            const { error } = await supabase.from("traffic_entries").insert(payload);
+            if (error) throw error;
           }
-        } else {
-          const { error } = await supabase.from("traffic_entries").insert(payload);
-          if (error) throw error;
+        } catch (rowError) {
+          // One row failing (a network blip, a momentary conflict) must not
+          // abort the rest — every other dirty row still gets its own
+          // attempt, and we always reload afterwards so the page never
+          // shows local state that's out of sync with what's really saved.
+          failed.push(`${row.date}.${year} (${getErrorMessage(rowError)})`);
         }
       }
 
-      await load();
-    } catch (e) {
-      setError(friendlyError(e));
     } finally {
+      // load() clears the error banner itself, so setting ours before
+      // calling it would just get wiped — set it only after load() settles.
+      await load();
+      if (failed.length > 0) {
+        setError(`Не удалось сохранить: ${failed.join(", ")}. Остальные строки сохранены — попробуйте ещё раз для этих дат.`);
+      }
       setSavingDays(false);
     }
   }
@@ -430,6 +442,7 @@ export default function DataEntryPage() {
     if (savingExpenses) return;
     setSavingExpenses(true);
     setError(null);
+    const failed: string[] = [];
     try {
       for (let i = 0; i < expenses.length; i++) {
         const exp = expenses[i];
@@ -446,35 +459,43 @@ export default function DataEntryPage() {
           unlock_expires_at: null,
         };
 
-        if (exp.id) {
-          const { data: updated, error } = await supabase.from("extra_expenses").update(payload).eq("id", exp.id).select("id");
-          if (error) throw error;
-          if (!updated || updated.length === 0) {
-            throw new Error(`Время на изменение расхода «${exp.category || "без статьи"}» истекло — запросите доступ снова.`);
-          }
+        try {
+          if (exp.id) {
+            const { data: updated, error } = await supabase.from("extra_expenses").update(payload).eq("id", exp.id).select("id");
+            if (error) throw error;
+            if (!updated || updated.length === 0) {
+              throw new Error("время на изменение истекло — запросите доступ снова");
+            }
 
-          const changeDescription = diffExpense(original, exp);
-          if (changeDescription) {
-            const { data: userData } = await supabase.auth.getUser();
-            await supabase.from("edit_history").insert({
-              table_name: "extra_expenses",
-              row_id: exp.id,
-              store: null,
-              summary: `Доп. расход «${exp.category || "без статьи"}» от ${exp.date || "—"}: ${changeDescription}`,
-              changed_by: userData.user?.id ?? null,
-              changed_by_name: requesterLabel,
-            });
+            const changeDescription = diffExpense(original, exp);
+            if (changeDescription) {
+              const { data: userData } = await supabase.auth.getUser();
+              await supabase.from("edit_history").insert({
+                table_name: "extra_expenses",
+                row_id: exp.id,
+                store: null,
+                summary: `Доп. расход «${exp.category || "без статьи"}» от ${exp.date || "—"}: ${changeDescription}`,
+                changed_by: userData.user?.id ?? null,
+                changed_by_name: requesterLabel,
+              });
+            }
+          } else {
+            const { error } = await supabase.from("extra_expenses").insert(payload);
+            if (error) throw error;
           }
-        } else {
-          const { error } = await supabase.from("extra_expenses").insert(payload);
-          if (error) throw error;
+        } catch (rowError) {
+          // Same reasoning as handleSaveDayRows: one row's failure must not
+          // abort the rest, and we always reload so the page reflects what's
+          // really in the database.
+          failed.push(`«${exp.category || "без статьи"}» (${getErrorMessage(rowError)})`);
         }
       }
 
-      await load();
-    } catch (e) {
-      setError(friendlyError(e));
     } finally {
+      await load();
+      if (failed.length > 0) {
+        setError(`Не удалось сохранить: ${failed.join(", ")}. Остальные расходы сохранены — попробуйте ещё раз для этих строк.`);
+      }
       setSavingExpenses(false);
     }
   }
