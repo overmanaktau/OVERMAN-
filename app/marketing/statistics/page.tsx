@@ -499,20 +499,20 @@ export default function StatisticsPage() {
           label="Общий расход на маркетинг"
           value={money(totalSpend)}
           note={spendChange !== null ? `${spendChange >= 0 ? "▲" : "▼"} ${Math.abs(spendChange).toFixed(0)}% к пред. периоду` : undefined}
-          noteTone={spendChange !== null ? (spendChange >= 0 ? "positive" : "negative") : "neutral"}
+          noteTone={spendChange !== null ? (spendChange >= 0 ? "negative" : "positive") : "neutral"}
         />
         <KpiCard
           label="Доп. расходы"
           value={money(expensesTotal)}
           note={expensesChange !== null ? `${expensesChange >= 0 ? "▲" : "▼"} ${Math.abs(expensesChange).toFixed(0)}% к пред. периоду` : undefined}
-          noteTone={expensesChange !== null ? (expensesChange >= 0 ? "positive" : "negative") : "neutral"}
+          noteTone={expensesChange !== null ? (expensesChange >= 0 ? "negative" : "positive") : "neutral"}
         />
         <KpiCard
           label="Цена одного посетителя"
           value={costPerVisitor !== null ? money(costPerVisitor) : "—"}
           valueTone={costPerVisitor !== null ? costPerVisitorTone(costPerVisitor) : "neutral"}
           note={costChange !== null ? `${costChange >= 0 ? "▲" : "▼"} ${Math.abs(costChange).toFixed(0)}% к пред. периоду` : undefined}
-          noteTone={costChange !== null ? (costChange >= 0 ? "positive" : "negative") : "neutral"}
+          noteTone={costChange !== null ? (costChange >= 0 ? "negative" : "positive") : "neutral"}
         />
         <KpiCard
           label="Цена одного покупателя"
@@ -523,7 +523,7 @@ export default function StatisticsPage() {
               ? `${costPerBuyerChange >= 0 ? "▲" : "▼"} ${Math.abs(costPerBuyerChange).toFixed(0)}% к пред. периоду`
               : "нет данных МойСклад за период"
           }
-          noteTone={costPerBuyerChange !== null ? (costPerBuyerChange >= 0 ? "positive" : "negative") : "neutral"}
+          noteTone={costPerBuyerChange !== null ? (costPerBuyerChange >= 0 ? "negative" : "positive") : "neutral"}
         />
         <KpiCard
           label="Маркетинг, % от среднего чека"
@@ -535,7 +535,7 @@ export default function StatisticsPage() {
               ? `${spendVsCheckChange >= 0 ? "▲" : "▼"} ${Math.abs(spendVsCheckChange).toFixed(0)}% к пред. периоду`
               : "нет данных МойСклад за период"
           }
-          noteTone={spendVsCheckChange !== null ? (spendVsCheckChange >= 0 ? "positive" : "negative") : "neutral"}
+          noteTone={spendVsCheckChange !== null ? (spendVsCheckChange >= 0 ? "negative" : "positive") : "neutral"}
         />
       </div>
 
