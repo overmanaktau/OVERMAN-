@@ -18,6 +18,7 @@ const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] 
   { label: "Статистика", href: "/marketing/statistics", section: "marketing.statistics" },
   { label: "Публикации", href: "/marketing/publications", section: "marketing.publications" },
   { label: "Инстаграм таргет", href: "/marketing/instagram-target", section: "marketing.instagram_target" },
+  { label: "Аналитика конкурентов", href: "/marketing/competitor-analytics", section: "marketing.competitor_analytics" },
   { label: "Внесение данных", href: "/marketing/data-entry", section: "marketing.data_entry" },
 ];
 

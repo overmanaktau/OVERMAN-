@@ -3,6 +3,7 @@ export const SECTIONS = [
   { key: "marketing.data_entry", label: "Внесение данных" },
   { key: "marketing.publications", label: "Публикации" },
   { key: "marketing.instagram_target", label: "Инстаграм таргет" },
+  { key: "marketing.competitor_analytics", label: "Аналитика конкурентов" },
   { key: "requests", label: "Запросы" },
   { key: "history", label: "История" },
   { key: "accounts", label: "Аккаунты" },
