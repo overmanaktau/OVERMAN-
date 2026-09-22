@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
@@ -35,20 +35,69 @@ type ContentItem = {
   tracked_competitors: { platform: string; handle: string; display_name: string | null } | null;
 };
 
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+function ymd(d: Date) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function addDays(d: Date, n: number) {
+  const next = new Date(d);
+  next.setDate(next.getDate() + n);
+  return next;
+}
+function stripTime(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+function parseYmd(s: string): Date {
+  const [y, m, day] = s.split("-").map(Number);
+  return new Date(y, m - 1, day);
+}
+
 const TOP_PERIODS = [
-  { key: 3, label: "3 дня", noun: "за 3 дня" },
-  { key: 7, label: "7 дней", noun: "за 7 дней" },
-  { key: 10, label: "10 дней", noun: "за 10 дней" },
-  { key: 30, label: "30 дней", noun: "за 30 дней" },
+  { key: "yesterday", label: "Вчера", noun: "за вчера" },
+  { key: "3d", label: "3 дня", noun: "за 3 дня" },
+  { key: "7d", label: "7 дней", noun: "за 7 дней" },
+  { key: "10d", label: "10 дней", noun: "за 10 дней" },
+  { key: "month", label: "За этот месяц", noun: "за этот месяц" },
 ] as const;
 type TopPeriod = (typeof TOP_PERIODS)[number]["key"];
+
+function getTopPeriodRange(key: TopPeriod, today: Date): { start: Date; end: Date } {
+  const d = stripTime(today);
+  if (key === "yesterday") {
+    const y = addDays(d, -1);
+    return { start: y, end: y };
+  }
+  if (key === "3d") return { start: addDays(d, -2), end: d };
+  if (key === "7d") return { start: addDays(d, -6), end: d };
+  if (key === "10d") return { start: addDays(d, -9), end: d };
+  return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: d }; // За этот месяц
+}
+
+const SORT_OPTIONS = [
+  { key: "engagement", label: "По вовлечённости" },
+  { key: "likes", label: "По лайкам" },
+  { key: "views", label: "По просмотрам" },
+  { key: "comments", label: "По комментариям" },
+  { key: "shares", label: "По репостам" },
+] as const;
+type SortKey = (typeof SORT_OPTIONS)[number]["key"];
+
+function engagementScore(item: ContentItem, sortKey: SortKey): number {
+  if (sortKey === "likes") return item.likes;
+  if (sortKey === "views") return item.views;
+  if (sortKey === "comments") return item.comments;
+  if (sortKey === "shares") return item.shares;
+  return item.likes + item.comments + item.shares + item.views;
+}
 
 export default function CompetitorAnalyticsPage() {
   const { isAdmin, permissions, fullName, email } = useAuth();
   const canView = isAdmin || permissions["marketing.competitor_analytics"].canView;
   const canEdit = isAdmin || permissions["marketing.competitor_analytics"].canEdit;
 
-  const [tab, setTab] = useState<"competitors" | "top" | "ads">("competitors");
+  const [tab, setTab] = useState<"competitors" | "top" | "ads">("top");
 
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +108,16 @@ export default function CompetitorAnalyticsPage() {
   const [newDisplayName, setNewDisplayName] = useState("");
   const [adding, setAdding] = useState(false);
 
-  const [topPeriod, setTopPeriod] = useState<TopPeriod>(7);
+  const [topPeriod, setTopPeriod] = useState<TopPeriod>("7d");
+  const [activeCustomTop, setActiveCustomTop] = useState<{ start: string; end: string } | null>(null);
+  const [showTopCustomPicker, setShowTopCustomPicker] = useState(false);
+  const [topCustomStart, setTopCustomStart] = useState("");
+  const [topCustomEnd, setTopCustomEnd] = useState("");
+  const topCustomPickerRef = useRef<HTMLDivElement>(null);
+
+  const [sortKey, setSortKey] = useState<SortKey>("engagement");
+  const [showOutsiders, setShowOutsiders] = useState(false);
+
   const [topContent, setTopContent] = useState<ContentItem[]>([]);
   const [topLoading, setTopLoading] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
@@ -86,21 +144,18 @@ export default function CompetitorAnalyticsPage() {
     load();
   }, [load]);
 
-  const loadTopContent = useCallback(async (period: TopPeriod) => {
+  const loadTopContent = useCallback(async (start: Date, end: Date) => {
     setTopLoading(true);
     setTopError(null);
     try {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - period);
       const { data, error } = await supabase
         .from("competitor_content")
         .select("*, tracked_competitors(platform, handle, display_name)")
-        .gte("posted_at", cutoff.toISOString())
+        .gte("posted_at", start.toISOString())
+        .lt("posted_at", addDays(end, 1).toISOString())
         .order("posted_at", { ascending: false });
       if (error) throw error;
-      const rows = (data ?? []) as ContentItem[];
-      rows.sort((a, b) => b.likes + b.comments + b.shares + b.views - (a.likes + a.comments + a.shares + a.views));
-      setTopContent(rows);
+      setTopContent((data ?? []) as ContentItem[]);
     } catch (e) {
       setTopError(getErrorMessage(e));
     } finally {
@@ -108,9 +163,39 @@ export default function CompetitorAnalyticsPage() {
     }
   }, []);
 
+  const topRange = useMemo(
+    () =>
+      activeCustomTop
+        ? { start: parseYmd(activeCustomTop.start), end: parseYmd(activeCustomTop.end) }
+        : getTopPeriodRange(topPeriod, new Date()),
+    [topPeriod, activeCustomTop]
+  );
+
   useEffect(() => {
-    if (tab === "top") loadTopContent(topPeriod);
-  }, [tab, topPeriod, loadTopContent]);
+    if (tab === "top") loadTopContent(topRange.start, topRange.end);
+  }, [tab, topRange, loadTopContent]);
+
+  useEffect(() => {
+    if (!showTopCustomPicker) return;
+    function onClick(e: MouseEvent) {
+      if (topCustomPickerRef.current && !topCustomPickerRef.current.contains(e.target as Node)) {
+        setShowTopCustomPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showTopCustomPicker]);
+
+  function applyTopCustomRange() {
+    if (!topCustomStart || !topCustomEnd || topCustomStart > topCustomEnd) return;
+    setActiveCustomTop({ start: topCustomStart, end: topCustomEnd });
+    setShowTopCustomPicker(false);
+  }
+
+  const sortedTopContent = useMemo(() => {
+    const sorted = [...topContent].sort((a, b) => engagementScore(b, sortKey) - engagementScore(a, sortKey));
+    return showOutsiders ? sorted.reverse() : sorted;
+  }, [topContent, sortKey, showOutsiders]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -178,7 +263,7 @@ export default function CompetitorAnalyticsPage() {
       </div>
 
       <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
-        {(["competitors", "ads", "top"] as const).map((t) => (
+        {(["top", "ads", "competitors"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -280,25 +365,125 @@ export default function CompetitorAnalyticsPage() {
         </div>
       ) : tab === "top" ? (
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+          <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit relative">
             {TOP_PERIODS.map(({ key, label }) => (
               <button
                 key={key}
                 type="button"
-                onClick={() => setTopPeriod(key)}
+                onClick={() => {
+                  setTopPeriod(key);
+                  setActiveCustomTop(null);
+                }}
                 className={`text-[13px] rounded-md px-3.5 py-2 ${
-                  topPeriod === key ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+                  topPeriod === key && !activeCustomTop ? "bg-accent text-paper font-bold" : "text-muted font-medium"
                 }`}
               >
                 {label}
               </button>
             ))}
+            <div className="w-px h-5 bg-border mx-0.5" />
+            <div ref={topCustomPickerRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!showTopCustomPicker) {
+                    setTopCustomStart(activeCustomTop?.start ?? ymd(addDays(new Date(), -6)));
+                    setTopCustomEnd(activeCustomTop?.end ?? ymd(new Date()));
+                  }
+                  setShowTopCustomPicker((v) => !v);
+                }}
+                className={`text-[13px] rounded-md px-3.5 py-2 ${
+                  activeCustomTop ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+                }`}
+              >
+                {activeCustomTop ? `${activeCustomTop.start} — ${activeCustomTop.end}` : "Свой период"}
+              </button>
+              {showTopCustomPicker && (
+                <div className="absolute right-0 top-full mt-2 z-50 bg-surface border border-border rounded-lg shadow-lg p-3.5 flex flex-col gap-2.5 w-[230px]">
+                  <label className="flex flex-col gap-1 text-xs text-muted">
+                    С
+                    <input
+                      type="date"
+                      value={topCustomStart}
+                      max={topCustomEnd || undefined}
+                      onChange={(e) => setTopCustomStart(e.target.value)}
+                      className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-muted">
+                    По
+                    <input
+                      type="date"
+                      value={topCustomEnd}
+                      min={topCustomStart || undefined}
+                      onChange={(e) => setTopCustomEnd(e.target.value)}
+                      className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                    />
+                  </label>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowTopCustomPicker(false)}
+                      className="text-[12.5px] font-semibold text-muted px-2.5 py-1.5 rounded-md hover:bg-paper"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      type="button"
+                      onClick={applyTopCustomRange}
+                      disabled={!topCustomStart || !topCustomEnd || topCustomStart > topCustomEnd}
+                      className="text-[12.5px] font-bold text-paper bg-accent rounded-md px-3 py-1.5 disabled:opacity-50"
+                    >
+                      Применить
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+              {SORT_OPTIONS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSortKey(key)}
+                  className={`text-[13px] rounded-md px-3 py-2 ${
+                    sortKey === key ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+              {([
+                [false, "Лидеры"],
+                [true, "Аутсайдеры"],
+              ] as const).map(([val, label]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setShowOutsiders(val)}
+                  className={`text-[13px] rounded-md px-3.5 py-2 ${
+                    showOutsiders === val ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {topError && (
             <div className="flex items-center gap-3 text-sm text-[#A34B36]">
               <span>{topError}</span>
-              <button type="button" onClick={() => loadTopContent(topPeriod)} className="font-semibold underline">
+              <button
+                type="button"
+                onClick={() => loadTopContent(topRange.start, topRange.end)}
+                className="font-semibold underline"
+              >
                 Повторить
               </button>
             </div>
@@ -306,18 +491,22 @@ export default function CompetitorAnalyticsPage() {
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="text-[15px] font-bold">
-              Топ контента {TOP_PERIODS.find((p) => p.key === topPeriod)?.noun} по вовлечённости
+              {showOutsiders ? "Аутсайдеры" : "Топ контента"}{" "}
+              {activeCustomTop
+                ? `за период ${activeCustomTop.start} — ${activeCustomTop.end}`
+                : TOP_PERIODS.find((p) => p.key === topPeriod)?.noun}{" "}
+              · {SORT_OPTIONS.find((o) => o.key === sortKey)?.label.toLowerCase()}
             </div>
             {topLoading ? (
               <div className="text-sm text-muted py-4">Загрузка…</div>
-            ) : topContent.length === 0 ? (
+            ) : sortedTopContent.length === 0 ? (
               <div className="text-sm text-muted py-4">
                 Нет данных за этот период — контент отслеживаемых конкурентов ещё не синхронизирован
                 (нужен источник данных, например Apify).
               </div>
             ) : (
               <div className="flex flex-col">
-                {topContent.map((item, i) => {
+                {sortedTopContent.map((item, i) => {
                   const likeConversion = item.views > 0 ? (item.likes / item.views) * 100 : null;
                   return (
                     <div
