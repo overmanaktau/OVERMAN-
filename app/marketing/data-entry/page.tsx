@@ -93,6 +93,15 @@ function daysInMonth(year: number, monthIndex: number) {
   return new Date(year, monthIndex + 1, 0).getDate();
 }
 
+// Keyboard-only, digits-only: no arrow-key increment/decrement, no "e"/"+"/"-"/".",
+// no mouse-wheel scrubbing — just typing numbers, backspace, and basic navigation.
+function digitsOnlyKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.ctrlKey || e.metaKey) return; // allow copy/paste/select-all
+  const allowed = ["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"];
+  if (allowed.includes(e.key)) return;
+  if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+}
+
 function friendlyError(e: unknown): string {
   const message = getErrorMessage(e);
   if (/fetch|network|failed to fetch/i.test(message)) {
@@ -331,8 +340,9 @@ export default function DataEntryPage() {
     setStore(nextStore);
   }
 
-  function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], value: string) {
+  function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], rawValue: string) {
     if (!canEditSection || !rows[index]) return;
+    const value = rawValue.replace(/\D/g, ""); // digits only, even from paste/autofill
     setRows((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value === "" ? "" : Number(value) };
@@ -340,8 +350,9 @@ export default function DataEntryPage() {
     });
   }
 
-  function updateExpense(index: number, field: keyof Pick<ExpenseRow, "date" | "category" | "amount" | "comment">, value: string) {
+  function updateExpense(index: number, field: keyof Pick<ExpenseRow, "date" | "category" | "amount" | "comment">, rawValue: string) {
     if (!canEditSection || !expenses[index] || expenseEffectivelyLocked(expenses[index])) return;
+    const value = field === "amount" ? rawValue.replace(/\D/g, "") : rawValue; // digits only, even from paste
     setExpenses((prev) => {
       const next = [...prev];
       next[index] = {
@@ -596,8 +607,8 @@ export default function DataEntryPage() {
           Трафик и расходы по каналам — {MONTH_NAMES[monthIndex].toLowerCase()} {year}
         </div>
 
-        <div className="max-h-[460px] overflow-y-auto rounded-md">
-          <div className="sticky top-0 z-10 bg-surface grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+        <div>
+          <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
             <div>Дата</div>
             <div>День</div>
             <div>Трафик план</div>
@@ -621,10 +632,12 @@ export default function DataEntryPage() {
               {NUMERIC_FIELDS.map((field) => (
                 <input
                   key={field}
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   disabled={!canEditSection}
                   value={row[field] === "" ? "" : (row[field] as number)}
                   onChange={(e) => updateCell(i, field, e.target.value)}
+                  onKeyDown={digitsOnlyKeyDown}
                   placeholder="0"
                   className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
                 />
@@ -709,10 +722,12 @@ export default function DataEntryPage() {
                 className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
               />
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 disabled={!rowEditableInputs}
                 value={e.amount === "" ? "" : e.amount}
                 onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
+                onKeyDown={digitsOnlyKeyDown}
                 placeholder="0"
                 className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
               />
