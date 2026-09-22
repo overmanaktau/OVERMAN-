@@ -84,12 +84,19 @@ const SORT_OPTIONS = [
 ] as const;
 type SortKey = (typeof SORT_OPTIONS)[number]["key"];
 
+// "Вовлечённость" — доля аудитории, реально провзаимодействовавшей с постом
+// (лайки+комментарии+репосты относительно охвата), а не просто сумма счётчиков,
+// которую иначе полностью забивают просмотры (они на порядки больше остального).
+function engagementRate(item: ContentItem): number {
+  return item.views > 0 ? ((item.likes + item.comments + item.shares) / item.views) * 100 : 0;
+}
+
 function engagementScore(item: ContentItem, sortKey: SortKey): number {
   if (sortKey === "likes") return item.likes;
   if (sortKey === "views") return item.views;
   if (sortKey === "comments") return item.comments;
   if (sortKey === "shares") return item.shares;
-  return item.likes + item.comments + item.shares + item.views;
+  return engagementRate(item);
 }
 
 export default function CompetitorAnalyticsPage() {
@@ -507,6 +514,7 @@ export default function CompetitorAnalyticsPage() {
             ) : (
               <div className="flex flex-col">
                 {sortedTopContent.map((item, i) => {
+                  const rate = item.views > 0 ? engagementRate(item) : null;
                   const likeConversion = item.views > 0 ? (item.likes / item.views) * 100 : null;
                   return (
                     <div
@@ -532,9 +540,10 @@ export default function CompetitorAnalyticsPage() {
                         <div className="text-muted num">
                           👁 {item.views} · ♥ {item.likes} · 💬 {item.comments} · ✈ {item.shares}
                         </div>
-                        {likeConversion !== null && (
+                        {rate !== null && (
                           <div className="text-mutedLight text-[11px] num">
-                            Конверсия лайков: {likeConversion.toFixed(1)}%
+                            Вовлечённость: {rate.toFixed(1)}%
+                            {likeConversion !== null && ` · лайки/просмотры: ${likeConversion.toFixed(1)}%`}
                           </div>
                         )}
                       </div>
