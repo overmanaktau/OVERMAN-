@@ -133,13 +133,6 @@ function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
 
-// The old blanket "нет данных МойСклад за период" was misleading — it showed
-// even when the current period had real data and only the comparison arrow
-// was unavailable because the previous period had nothing to compare against.
-// Call only when the change itself is null.
-function moyskladCompareNote(curr: number | null): string {
-  return curr === null ? "нет данных МойСклад за этот период" : "нет данных МойСклад за предыдущий период для сравнения";
-}
 
 function spendVsCheckTone(pct: number): "positive" | "warning" | "negative" {
   if (pct <= 8) return "positive";
@@ -370,6 +363,41 @@ export default function StatisticsPage() {
   const spendVsCheckChange =
     spendVsCheckPct !== null && prevSpendVsCheckPct !== null ? pctChange(spendVsCheckPct, prevSpendVsCheckPct) : null;
 
+  // Each "no comparison" note names the actual reason instead of a blanket
+  // "нет данных" — the current period can have perfectly real data while
+  // the comparison arrow is unavailable for a completely different reason
+  // (no previous period at all for "Всё время", the previous period itself
+  // missing data, or — the subtle one — the previous period having data but
+  // zero spend/traffic, which makes the % change mathematically undefined).
+  const hasPrevPeriod = range?.hasPrev ?? false;
+
+  const planCompletionNote =
+    planCompletionPct === null
+      ? "нет данных за этот период"
+      : !hasPrevPeriod
+        ? "нет предыдущего периода для сравнения"
+        : prevTotals.plan === 0
+          ? "нет данных за предыдущий период для сравнения"
+          : "в предыдущем периоде не было фактического трафика";
+
+  const costPerBuyerNote =
+    costPerBuyer === null
+      ? "нет данных МойСклад за этот период"
+      : !hasPrevPeriod
+        ? "нет предыдущего периода для сравнения"
+        : prevSalesTotals.receipts === 0
+          ? "нет данных МойСклад за предыдущий период для сравнения"
+          : "в предыдущем периоде не было расходов на маркетинг";
+
+  const spendVsCheckNote =
+    spendVsCheckPct === null
+      ? "нет данных МойСклад за этот период"
+      : !hasPrevPeriod
+        ? "нет предыдущего периода для сравнения"
+        : prevSalesTotals.receipts === 0
+          ? "нет данных МойСклад за предыдущий период для сравнения"
+          : "в предыдущем периоде не было расходов на маркетинг";
+
   const channels = CHANNEL_DEFS.map((c) => ({ ...c, amount: totals[c.key] }))
     .sort((a, b) => b.amount - a.amount)
     .map((c, i) => ({
@@ -512,9 +540,7 @@ export default function StatisticsPage() {
           note={
             planCompletionChange !== null
               ? `${planCompletionChange >= 0 ? "▲" : "▼"} ${Math.abs(planCompletionChange).toFixed(0)}% к пред. периоду`
-              : planCompletionPct === null
-                ? "нет данных за этот период"
-                : "нет данных за предыдущий период для сравнения"
+              : planCompletionNote
           }
           noteTone={planCompletionChange !== null ? (planCompletionChange >= 0 ? "positive" : "negative") : "neutral"}
         />
@@ -544,7 +570,7 @@ export default function StatisticsPage() {
           note={
             costPerBuyerChange !== null
               ? `${costPerBuyerChange >= 0 ? "▲" : "▼"} ${Math.abs(costPerBuyerChange).toFixed(0)}% к пред. периоду`
-              : moyskladCompareNote(costPerBuyer)
+              : costPerBuyerNote
           }
           noteTone={costPerBuyerChange !== null ? (costPerBuyerChange >= 0 ? "negative" : "positive") : "neutral"}
         />
@@ -556,7 +582,7 @@ export default function StatisticsPage() {
           note={
             spendVsCheckChange !== null
               ? `${spendVsCheckChange >= 0 ? "▲" : "▼"} ${Math.abs(spendVsCheckChange).toFixed(0)}% к пред. периоду`
-              : moyskladCompareNote(spendVsCheckPct)
+              : spendVsCheckNote
           }
           noteTone={spendVsCheckChange !== null ? (spendVsCheckChange >= 0 ? "negative" : "positive") : "neutral"}
         />
