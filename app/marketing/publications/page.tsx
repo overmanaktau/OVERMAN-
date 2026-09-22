@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { DataTableCard } from "@/components/DataTableCard";
 
-const PERIODS = ["Прошлая неделя", "Эта неделя", "С начала месяца", "30 дней", "Всё время"];
+const PERIODS = ["Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 2; // "С начала месяца"
 
 const WEEKDAY_LABELS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
@@ -68,11 +68,16 @@ function getPeriodRange(index: number, today: Date): { start: Date; end: Date } 
     return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: d };
   }
   if (index === 3) {
-    // 30 дней
-    return { start: addDays(d, -29), end: d };
+    // Прошлый месяц
+    return { start: new Date(d.getFullYear(), d.getMonth() - 1, 1), end: new Date(d.getFullYear(), d.getMonth(), 0) };
   }
   // Всё время
   return { start: new Date(2000, 0, 1), end: d };
+}
+
+function parseYmd(s: string): Date {
+  const [y, m, day] = s.split("-").map(Number);
+  return new Date(y, m - 1, day);
 }
 
 function avg(nums: number[]): number {
@@ -95,6 +100,11 @@ export default function PublicationsPage() {
   );
 
   const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
+  const [activeCustom, setActiveCustom] = useState<{ start: string; end: string } | null>(null);
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const customPickerRef = useRef<HTMLDivElement>(null);
   const [cityFilter, setCityFilter] = useState<number | "all">("all");
 
   const filterStoreCodes = useMemo(
@@ -118,7 +128,9 @@ export default function PublicationsPage() {
     setLoading(true);
     setError(null);
     try {
-      const { start, end } = getPeriodRange(periodIndex, new Date());
+      const { start, end } = activeCustom
+        ? { start: parseYmd(activeCustom.start), end: parseYmd(activeCustom.end) }
+        : getPeriodRange(periodIndex, new Date());
       const { data, error: err } = await supabase
         .from("publication_entries")
         .select("*")
@@ -134,11 +146,26 @@ export default function PublicationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [periodIndex, filterStoreCodes.join(",")]);
+  }, [periodIndex, activeCustom?.start, activeCustom?.end, filterStoreCodes.join(",")]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!showCustomPicker) return;
+    function onClick(e: MouseEvent) {
+      if (customPickerRef.current && !customPickerRef.current.contains(e.target as Node)) setShowCustomPicker(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showCustomPicker]);
+
+  function applyCustomRange() {
+    if (!customStart || !customEnd || customStart > customEnd) return;
+    setActiveCustom({ start: customStart, end: customEnd });
+    setShowCustomPicker(false);
+  }
 
   if (!canView) {
     return (
@@ -237,24 +264,83 @@ export default function PublicationsPage() {
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+        <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit relative">
           {PERIODS.map((p, i) => (
             <button
               key={p}
               type="button"
-              onClick={() => setPeriodIndex(i)}
+              onClick={() => {
+                setPeriodIndex(i);
+                setActiveCustom(null);
+              }}
               disabled={loading}
               className={`text-[13px] rounded-md px-3.5 py-2 disabled:opacity-60 ${
-                i === periodIndex ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+                i === periodIndex && !activeCustom ? "bg-accent text-paper font-bold" : "text-muted font-medium"
               }`}
             >
               {p}
             </button>
           ))}
           <div className="w-px h-5 bg-border mx-0.5" />
-          <button type="button" disabled title="Скоро" className="text-[13px] text-mutedLight font-medium px-3.5 py-2">
-            Свой период
-          </button>
+          <div ref={customPickerRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                if (!showCustomPicker) {
+                  setCustomStart(activeCustom?.start ?? ymd(addDays(new Date(), -6)));
+                  setCustomEnd(activeCustom?.end ?? ymd(new Date()));
+                }
+                setShowCustomPicker((v) => !v);
+              }}
+              disabled={loading}
+              className={`text-[13px] rounded-md px-3.5 py-2 disabled:opacity-60 ${
+                activeCustom ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+              }`}
+            >
+              {activeCustom ? `${activeCustom.start} — ${activeCustom.end}` : "Свой период"}
+            </button>
+            {showCustomPicker && (
+              <div className="absolute left-0 top-full mt-2 z-50 bg-surface border border-border rounded-lg shadow-lg p-3.5 flex flex-col gap-2.5 w-[230px]">
+                <label className="flex flex-col gap-1 text-xs text-muted">
+                  С
+                  <input
+                    type="date"
+                    value={customStart}
+                    max={customEnd || undefined}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-muted">
+                  По
+                  <input
+                    type="date"
+                    value={customEnd}
+                    min={customStart || undefined}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                  />
+                </label>
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomPicker(false)}
+                    className="text-[12.5px] font-semibold text-muted px-2.5 py-1.5 rounded-md hover:bg-paper"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyCustomRange}
+                    disabled={!customStart || !customEnd || customStart > customEnd}
+                    className="text-[12.5px] font-bold text-paper bg-accent rounded-md px-3 py-1.5 disabled:opacity-50"
+                  >
+                    Применить
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <select

@@ -7,7 +7,7 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
-const PERIODS = ["Прошлая неделя", "Эта неделя", "С начала месяца", "30 дней", "Всё время"];
+const PERIODS = ["Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 2; // "С начала месяца"
 
 const CHANNEL_DEFS = [
@@ -68,10 +68,12 @@ function getPeriodRange(index: number, today: Date): Range {
     return { start, end, prevStart, prevEnd, hasPrev: true };
   }
   if (index === 3) {
-    const start = addDays(d, -29);
-    const end = d;
-    const prevEnd = addDays(start, -1);
-    return { start, end, prevStart: addDays(prevEnd, -29), prevEnd, hasPrev: true };
+    // Прошлый месяц
+    const start = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    const end = new Date(d.getFullYear(), d.getMonth(), 0);
+    const prevStart = new Date(d.getFullYear(), d.getMonth() - 2, 1);
+    const prevEnd = new Date(d.getFullYear(), d.getMonth() - 1, 0);
+    return { start, end, prevStart, prevEnd, hasPrev: true };
   }
   // "Всё время"
   return { start: new Date(2000, 0, 1), end: d, prevStart: d, prevEnd: d, hasPrev: false };
