@@ -7,7 +7,6 @@ import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import AccountMenu from "@/components/AccountMenu";
-import GlobalSaveButton from "@/components/GlobalSaveButton";
 import type { SectionKey } from "@/lib/permissions";
 
 const TOP_LEVEL: { label: string; soon: boolean }[] = [
@@ -135,7 +134,6 @@ export default function Sidebar() {
   return (
     <div className="w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6">
       <div className="fixed top-4 right-4 z-[100] flex items-center gap-2">
-        <GlobalSaveButton />
         <AccountMenu />
       </div>
       <div className="flex flex-col gap-0.5 px-2">
