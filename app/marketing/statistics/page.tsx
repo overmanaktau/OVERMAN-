@@ -7,8 +7,8 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
-const PERIODS = ["Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
-const DEFAULT_PERIOD = 2; // "С начала месяца"
+const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
+const DEFAULT_PERIOD = 3; // "С начала месяца"
 
 const CHANNEL_DEFS = [
   { key: "instagram", label: "Instagram" },
@@ -50,16 +50,22 @@ function getPeriodRange(index: number, today: Date): Range {
   const thisSunday = addDays(thisMonday, 6);
 
   if (index === 0) {
+    // Вчера
+    const start = addDays(d, -1);
+    const end = addDays(d, -1);
+    return { start, end, prevStart: addDays(d, -2), prevEnd: addDays(d, -2), hasPrev: true };
+  }
+  if (index === 1) {
     const start = addDays(thisMonday, -7);
     const end = addDays(thisSunday, -7);
     return { start, end, prevStart: addDays(start, -7), prevEnd: addDays(end, -7), hasPrev: true };
   }
-  if (index === 1) {
+  if (index === 2) {
     const start = thisMonday;
     const end = thisSunday;
     return { start, end, prevStart: addDays(start, -7), prevEnd: addDays(end, -7), hasPrev: true };
   }
-  if (index === 2) {
+  if (index === 3) {
     const start = new Date(d.getFullYear(), d.getMonth(), 1);
     const end = d;
     const daysSoFar = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
@@ -67,7 +73,7 @@ function getPeriodRange(index: number, today: Date): Range {
     const prevStart = addDays(prevEnd, -(daysSoFar - 1));
     return { start, end, prevStart, prevEnd, hasPrev: true };
   }
-  if (index === 3) {
+  if (index === 4) {
     // Прошлый месяц
     const start = new Date(d.getFullYear(), d.getMonth() - 1, 1);
     const end = new Date(d.getFullYear(), d.getMonth(), 0);
