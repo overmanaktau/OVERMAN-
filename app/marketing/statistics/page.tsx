@@ -133,6 +133,14 @@ function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
 
+// The old blanket "нет данных МойСклад за период" was misleading — it showed
+// even when the current period had real data and only the comparison arrow
+// was unavailable because the previous period had nothing to compare against.
+// Call only when the change itself is null.
+function moyskladCompareNote(curr: number | null): string {
+  return curr === null ? "нет данных МойСклад за этот период" : "нет данных МойСклад за предыдущий период для сравнения";
+}
+
 function spendVsCheckTone(pct: number): "positive" | "warning" | "negative" {
   if (pct <= 8) return "positive";
   if (pct <= 9) return "warning";
@@ -496,7 +504,9 @@ export default function StatisticsPage() {
           note={
             planCompletionChange !== null
               ? `${planCompletionChange >= 0 ? "▲" : "▼"} ${Math.abs(planCompletionChange).toFixed(0)}% к пред. периоду`
-              : "нет данных за период"
+              : planCompletionPct === null
+                ? "нет данных за этот период"
+                : "нет данных за предыдущий период для сравнения"
           }
           noteTone={planCompletionChange !== null ? (planCompletionChange >= 0 ? "positive" : "negative") : "neutral"}
         />
@@ -526,7 +536,7 @@ export default function StatisticsPage() {
           note={
             costPerBuyerChange !== null
               ? `${costPerBuyerChange >= 0 ? "▲" : "▼"} ${Math.abs(costPerBuyerChange).toFixed(0)}% к пред. периоду`
-              : "нет данных МойСклад за период"
+              : moyskladCompareNote(costPerBuyer)
           }
           noteTone={costPerBuyerChange !== null ? (costPerBuyerChange >= 0 ? "negative" : "positive") : "neutral"}
         />
@@ -538,7 +548,7 @@ export default function StatisticsPage() {
           note={
             spendVsCheckChange !== null
               ? `${spendVsCheckChange >= 0 ? "▲" : "▼"} ${Math.abs(spendVsCheckChange).toFixed(0)}% к пред. периоду`
-              : "нет данных МойСклад за период"
+              : moyskladCompareNote(spendVsCheckPct)
           }
           noteTone={spendVsCheckChange !== null ? (spendVsCheckChange >= 0 ? "negative" : "positive") : "neutral"}
         />
