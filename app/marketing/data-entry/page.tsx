@@ -174,6 +174,8 @@ export default function DataEntryPage() {
   const [loading, setLoading] = useState(true);
   const [savingDays, setSavingDays] = useState(false);
   const [savingExpenses, setSavingExpenses] = useState(false);
+  const [justSavedDays, setJustSavedDays] = useState(false);
+  const [justSavedExpenses, setJustSavedExpenses] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -305,6 +307,15 @@ export default function DataEntryPage() {
 
   const dirty = dirtyDayCount > 0 || dirtyExpenseCount > 0;
 
+  // "Сохранено" is a transient confirmation — clear it as soon as the user
+  // touches something again, so it can't linger and look like a stale claim.
+  useEffect(() => {
+    if (dirtyDayCount > 0) setJustSavedDays(false);
+  }, [dirtyDayCount]);
+  useEffect(() => {
+    if (dirtyExpenseCount > 0) setJustSavedExpenses(false);
+  }, [dirtyExpenseCount]);
+
   function shiftMonth(delta: number) {
     const doShift = () => {
       const total = year * 12 + monthIndex + delta;
@@ -433,6 +444,8 @@ export default function DataEntryPage() {
       await load();
       if (failed.length > 0) {
         setError(`Не удалось сохранить: ${failed.join(", ")}. Остальные строки сохранены — попробуйте ещё раз для этих дат.`);
+      } else {
+        setJustSavedDays(true);
       }
       setSavingDays(false);
     }
@@ -495,6 +508,8 @@ export default function DataEntryPage() {
       await load();
       if (failed.length > 0) {
         setError(`Не удалось сохранить: ${failed.join(", ")}. Остальные расходы сохранены — попробуйте ещё раз для этих строк.`);
+      } else {
+        setJustSavedExpenses(true);
       }
       setSavingExpenses(false);
     }
@@ -645,7 +660,7 @@ export default function DataEntryPage() {
                   : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
               }`}
             >
-              {savingDays ? "Сохраняем…" : "Сохранить трафик и каналы"}
+              {savingDays ? "Сохраняем…" : justSavedDays ? "Сохранено" : "Сохранить трафик и каналы"}
             </button>
           </div>
         </div>
@@ -762,7 +777,7 @@ export default function DataEntryPage() {
                 : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
             }`}
           >
-            {savingExpenses ? "Сохраняем…" : "Сохранить расходы"}
+            {savingExpenses ? "Сохраняем…" : justSavedExpenses ? "Сохранено" : "Сохранить расходы"}
           </button>
         </div>
       </div>

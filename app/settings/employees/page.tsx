@@ -213,12 +213,17 @@ function EmployeeAccessPanel({
     role ? toGrants(role.role_store_access) : []
   );
   const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
   const initialRef = useRef({ permissions, storeAccess });
 
   async function handleSave() {
     setSaving(true);
     try {
       await onSave(permissions, storeAccess);
+      setJustSaved(true);
+      // Brief confirmation flash before the panel closes itself — same
+      // save→saving→saved cycle as every other save button on this page.
+      window.setTimeout(() => onCancel(), 900);
     } finally {
       setSaving(false);
     }
@@ -256,10 +261,10 @@ function EmployeeAccessPanel({
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || justSaved}
             className="text-[12.5px] font-semibold text-paper bg-accent rounded-md px-3 py-1.5 disabled:opacity-50"
           >
-            {saving ? "Сохраняем…" : "Сохранить"}
+            {saving ? "Сохраняем…" : justSaved ? "Сохранено" : "Сохранить"}
           </button>
           <button type="button" onClick={onCancel} className="text-[12.5px] text-muted">
             Отмена
@@ -292,6 +297,12 @@ export default function EmployeesPage() {
     Record<string, { fullName: string; email: string; roleChoice: string }>
   >({});
   const [cityEdits, setCityEdits] = useState<Record<number, string>>({});
+  const [savingEmployeeId, setSavingEmployeeId] = useState<string | null>(null);
+  const [justSavedEmployeeId, setJustSavedEmployeeId] = useState<string | null>(null);
+  const [savingCityId, setSavingCityId] = useState<number | null>(null);
+  const [justSavedCityId, setJustSavedCityId] = useState<number | null>(null);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [passwordJustSaved, setPasswordJustSaved] = useState(false);
 
   const sharedRoles = roles.filter((r) => !r.is_personal);
 
@@ -429,7 +440,6 @@ export default function EmployeesPage() {
           body: JSON.stringify({ role: "custom", roleId: created.id }),
         });
       }
-      setAccessEditingId(null);
       await loadAll();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось сохранить права доступа.");
@@ -498,10 +508,17 @@ export default function EmployeesPage() {
   async function handleSaveEmployeeEdit(emp: Employee) {
     const edit = employeeEdits[emp.id];
     if (!edit) return;
-    if (edit.fullName !== (emp.fullName ?? "")) await handleRenameEmployee(emp, edit.fullName);
-    if (edit.email !== emp.email) await handleUpdateEmail(emp, edit.email);
-    if (edit.roleChoice !== roleChoiceValue(emp)) await handleRoleChange(emp, edit.roleChoice);
-    discardEmployeeEdit(emp);
+    setSavingEmployeeId(emp.id);
+    try {
+      if (edit.fullName !== (emp.fullName ?? "")) await handleRenameEmployee(emp, edit.fullName);
+      if (edit.email !== emp.email) await handleUpdateEmail(emp, edit.email);
+      if (edit.roleChoice !== roleChoiceValue(emp)) await handleRoleChange(emp, edit.roleChoice);
+      discardEmployeeEdit(emp);
+      setJustSavedEmployeeId(emp.id);
+      window.setTimeout(() => setJustSavedEmployeeId((id) => (id === emp.id ? null : id)), 1200);
+    } finally {
+      setSavingEmployeeId(null);
+    }
   }
 
   function isCityDirty(city: CityWithStores) {
@@ -518,8 +535,15 @@ export default function EmployeesPage() {
   async function handleSaveCityEdit(city: CityWithStores) {
     const edit = cityEdits[city.id];
     if (edit === undefined || edit.trim() === "" || edit === city.name) return;
-    await handleRenameCity(city.id, edit);
-    discardCityEdit(city.id);
+    setSavingCityId(city.id);
+    try {
+      await handleRenameCity(city.id, edit);
+      discardCityEdit(city.id);
+      setJustSavedCityId(city.id);
+      window.setTimeout(() => setJustSavedCityId((id) => (id === city.id ? null : id)), 1200);
+    } finally {
+      setSavingCityId(null);
+    }
   }
 
   async function handleResetPassword(emp: Employee, password: string) {
@@ -528,12 +552,19 @@ export default function EmployeesPage() {
       return;
     }
     setError(null);
+    setResettingPassword(true);
     try {
       await authFetch(`/api/employees/${emp.id}`, { method: "PATCH", body: JSON.stringify({ password }) });
-      setResettingId(null);
-      setResetPasswordValue("");
+      setPasswordJustSaved(true);
+      window.setTimeout(() => {
+        setResettingId(null);
+        setResetPasswordValue("");
+        setPasswordJustSaved(false);
+      }, 1000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось сбросить пароль.");
+    } finally {
+      setResettingPassword(false);
     }
   }
 
@@ -793,9 +824,10 @@ export default function EmployeesPage() {
                         <button
                           type="button"
                           onClick={() => handleSaveEmployeeEdit(emp)}
-                          className="text-[12px] text-accent font-bold text-left"
+                          disabled={savingEmployeeId === emp.id}
+                          className="text-[12px] text-accent font-bold text-left disabled:opacity-50"
                         >
-                          Сохранить
+                          {savingEmployeeId === emp.id ? "Сохраняем…" : "Сохранить"}
                         </button>
                         <button
                           type="button"
@@ -805,6 +837,8 @@ export default function EmployeesPage() {
                           Отмена
                         </button>
                       </>
+                    ) : justSavedEmployeeId === emp.id ? (
+                      <span className="text-[12px] text-accent font-bold">Сохранено</span>
                     ) : (
                       <>
                         {emp.role !== "owner" && (
@@ -889,9 +923,10 @@ export default function EmployeesPage() {
                     <button
                       type="button"
                       onClick={() => handleResetPassword(emp, resetPasswordValue)}
-                      className="text-[12.5px] font-semibold text-paper bg-accent rounded-md px-3 py-1.5"
+                      disabled={resettingPassword || passwordJustSaved}
+                      className="text-[12.5px] font-semibold text-paper bg-accent rounded-md px-3 py-1.5 disabled:opacity-50"
                     >
-                      Сохранить пароль
+                      {resettingPassword ? "Сохраняем…" : passwordJustSaved ? "Сохранено" : "Сохранить пароль"}
                     </button>
                     <button
                       type="button"
@@ -1019,14 +1054,17 @@ export default function EmployeesPage() {
                     <button
                       type="button"
                       onClick={() => handleSaveCityEdit(city)}
-                      className="text-[13px] text-accent font-bold"
+                      disabled={savingCityId === city.id}
+                      className="text-[13px] text-accent font-bold disabled:opacity-50"
                     >
-                      Сохранить
+                      {savingCityId === city.id ? "Сохраняем…" : "Сохранить"}
                     </button>
                     <button type="button" onClick={() => discardCityEdit(city.id)} className="text-[13px] text-muted">
                       Отмена
                     </button>
                   </>
+                ) : canEdit && justSavedCityId === city.id ? (
+                  <span className="text-[13px] text-accent font-bold">Сохранено</span>
                 ) : (
                   canEdit && (
                     <button type="button" onClick={() => handleDeleteCity(city)} className="text-[13px] text-[#A34B36] font-semibold">
@@ -1083,11 +1121,14 @@ function RoleCard({
   const [permissions, setPermissions] = useState<Permissions>(toPermissions(role.role_permissions));
   const [storeAccess, setStoreAccess] = useState<StoreAccessGrant[]>(toGrants(role.role_store_access));
   const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
 
   async function handleSave() {
     setSaving(true);
     try {
       await onSave(role, name, permissions, storeAccess);
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 1200);
     } finally {
       setSaving(false);
     }
@@ -1135,7 +1176,7 @@ function RoleCard({
               disabled={saving}
               className="text-[13px] font-bold text-paper bg-accent rounded-lg px-4 py-2 disabled:opacity-50"
             >
-              {saving ? "Сохраняем…" : "Сохранить"}
+              {saving ? "Сохраняем…" : justSaved ? "Сохранено" : "Сохранить"}
             </button>
             <button
               type="button"
