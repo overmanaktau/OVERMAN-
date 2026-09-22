@@ -317,6 +317,7 @@ export default function StatisticsPage() {
     planCompletionPct !== null && prevPlanCompletionPct !== null
       ? pctChange(planCompletionPct, prevPlanCompletionPct)
       : null;
+  const trafficShortfall = Math.max(0, totals.plan - totals.fact);
 
   const channelTotal =
     totals.instagram + totals.tiktok + totals.instagram_public + totals.flyer + totals.two_gis;
@@ -486,7 +487,11 @@ export default function StatisticsPage() {
           value={totals.plan > 0 ? `${Math.round((totals.fact / totals.plan) * 100)}%` : "—"}
           valueTone={totals.plan > 0 ? planCompletionTone((totals.fact / totals.plan) * 100) : "neutral"}
           valueSuffix={
-            totals.plan > 0 ? `(${totals.fact.toLocaleString("ru-RU")} из ${totals.plan.toLocaleString("ru-RU")})` : undefined
+            totals.plan > 0
+              ? `(${totals.fact.toLocaleString("ru-RU")} из ${totals.plan.toLocaleString("ru-RU")}${
+                  trafficShortfall > 0 ? ` · не хватает ${trafficShortfall.toLocaleString("ru-RU")}` : ""
+                })`
+              : undefined
           }
           note={
             planCompletionChange !== null
