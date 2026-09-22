@@ -9,6 +9,7 @@ type Competitor = {
   id: number;
   platform: "instagram" | "tiktok";
   handle: string;
+  profile_url: string | null;
   display_name: string | null;
   notes: string | null;
   created_by_name: string | null;
@@ -19,6 +20,27 @@ const PLATFORM_LABEL: Record<Competitor["platform"], string> = {
   instagram: "Instagram",
   tiktok: "TikTok",
 };
+
+// Ссылка на профиль однозначнее ника — форматы отличаются на платформах,
+// в ней легко опечататься. Ник всё равно парсим из неё — на нём завязан
+// unique(platform, handle), и он удобнее для отображения ("@ник").
+function parseHandleFromProfileUrl(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  try {
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    const path = new URL(withProtocol).pathname.replace(/^\/+|\/+$/g, "");
+    const first = path.split("/")[0];
+    return first ? first.replace(/^@/, "") : null;
+  } catch {
+    return null;
+  }
+}
+
+function competitorProfileUrl(c: Competitor): string {
+  if (c.profile_url) return c.profile_url;
+  return c.platform === "instagram" ? `https://instagram.com/${c.handle}` : `https://www.tiktok.com/@${c.handle}`;
+}
 
 type ContentItem = {
   id: number;
@@ -75,6 +97,14 @@ function getTopPeriodRange(key: TopPeriod, today: Date): { start: Date; end: Dat
   return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: d }; // За этот месяц
 }
 
+const TOP_LIMITS = [
+  { key: 3, label: "Топ 3" },
+  { key: 5, label: "Топ 5" },
+  { key: 10, label: "Топ 10" },
+  { key: null, label: "Все" },
+] as const;
+type TopLimit = (typeof TOP_LIMITS)[number]["key"];
+
 const SORT_OPTIONS = [
   { key: "engagement", label: "По вовлечённости" },
   { key: "likes", label: "По лайкам" },
@@ -111,7 +141,7 @@ export default function CompetitorAnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [newPlatform, setNewPlatform] = useState<Competitor["platform"]>("instagram");
-  const [newHandle, setNewHandle] = useState("");
+  const [newProfileUrl, setNewProfileUrl] = useState("");
   const [newDisplayName, setNewDisplayName] = useState("");
   const [adding, setAdding] = useState(false);
 
@@ -124,6 +154,7 @@ export default function CompetitorAnalyticsPage() {
 
   const [sortKey, setSortKey] = useState<SortKey>("engagement");
   const [showOutsiders, setShowOutsiders] = useState(false);
+  const [topLimit, setTopLimit] = useState<TopLimit>(10);
 
   const [topContent, setTopContent] = useState<ContentItem[]>([]);
   const [topLoading, setTopLoading] = useState(false);
@@ -204,21 +235,29 @@ export default function CompetitorAnalyticsPage() {
     return showOutsiders ? sorted.reverse() : sorted;
   }, [topContent, sortKey, showOutsiders]);
 
+  const displayedTopContent = topLimit ? sortedTopContent.slice(0, topLimit) : sortedTopContent;
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
-    const handle = newHandle.trim().replace(/^@/, "");
-    if (!handle) return;
+    const profileUrl = newProfileUrl.trim();
+    if (!profileUrl) return;
+    const handle = parseHandleFromProfileUrl(profileUrl);
+    if (!handle) {
+      setError("Не удалось распознать ник из ссылки — проверьте, что это ссылка на профиль");
+      return;
+    }
     setAdding(true);
     setError(null);
     try {
       const { error } = await supabase.from("tracked_competitors").insert({
         platform: newPlatform,
         handle,
+        profile_url: profileUrl.startsWith("http") ? profileUrl : `https://${profileUrl}`,
         display_name: newDisplayName.trim() || null,
         created_by_name: fullName || email,
       });
       if (error) throw error;
-      setNewHandle("");
+      setNewProfileUrl("");
       setNewDisplayName("");
       await load();
     } catch (e) {
@@ -309,7 +348,14 @@ export default function CompetitorAnalyticsPage() {
                           key={c.id}
                           className="grid grid-cols-[1fr_1fr_auto] gap-3 items-center py-2 border-b border-borderSoft text-[13px]"
                         >
-                          <div className="font-semibold">@{c.handle}</div>
+                          <a
+                            href={competitorProfileUrl(c)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-semibold hover:underline"
+                          >
+                            @{c.handle}
+                          </a>
                           <div className="text-muted">{c.display_name || "—"}</div>
                           {canEdit && (
                             <button
@@ -347,9 +393,9 @@ export default function CompetitorAnalyticsPage() {
                 <input
                   type="text"
                   required
-                  placeholder="Никнейм, например overman_kz"
-                  value={newHandle}
-                  onChange={(e) => setNewHandle(e.target.value)}
+                  placeholder="Ссылка на профиль, например instagram.com/overman_kz"
+                  value={newProfileUrl}
+                  onChange={(e) => setNewProfileUrl(e.target.value)}
                   className="border border-border rounded-lg px-3 py-2.5 text-sm"
                 />
                 <input
@@ -464,22 +510,38 @@ export default function CompetitorAnalyticsPage() {
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
-              {([
-                [false, "Лидеры"],
-                [true, "Аутсайдеры"],
-              ] as const).map(([val, label]) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => setShowOutsiders(val)}
-                  className={`text-[13px] rounded-md px-3.5 py-2 ${
-                    showOutsiders === val ? "bg-accent text-paper font-bold" : "text-muted font-medium"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+                {TOP_LIMITS.map(({ key, label }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setTopLimit(key)}
+                    className={`text-[13px] rounded-md px-3 py-2 ${
+                      topLimit === key ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+                {([
+                  [false, "Лидеры"],
+                  [true, "Аутсайдеры"],
+                ] as const).map(([val, label]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setShowOutsiders(val)}
+                    className={`text-[13px] rounded-md px-3.5 py-2 ${
+                      showOutsiders === val ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -498,22 +560,23 @@ export default function CompetitorAnalyticsPage() {
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="text-[15px] font-bold">
-              {showOutsiders ? "Аутсайдеры" : "Топ контента"}{" "}
+              {topLimit ? `Топ ${topLimit}` : showOutsiders ? "Аутсайдеры" : "Топ контента"}{" "}
               {activeCustomTop
                 ? `за период ${activeCustomTop.start} — ${activeCustomTop.end}`
                 : TOP_PERIODS.find((p) => p.key === topPeriod)?.noun}{" "}
               · {SORT_OPTIONS.find((o) => o.key === sortKey)?.label.toLowerCase()}
+              {topLimit && showOutsiders ? " · аутсайдеры" : ""}
             </div>
             {topLoading ? (
               <div className="text-sm text-muted py-4">Загрузка…</div>
-            ) : sortedTopContent.length === 0 ? (
+            ) : displayedTopContent.length === 0 ? (
               <div className="text-sm text-muted py-4">
                 Нет данных за этот период — контент отслеживаемых конкурентов ещё не синхронизирован
                 (нужен источник данных, например Apify).
               </div>
             ) : (
               <div className="flex flex-col">
-                {sortedTopContent.map((item, i) => {
+                {displayedTopContent.map((item, i) => {
                   const rate = item.views > 0 ? engagementRate(item) : null;
                   const likeConversion = item.views > 0 ? (item.likes / item.views) * 100 : null;
                   return (
