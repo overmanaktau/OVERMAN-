@@ -174,14 +174,19 @@ export default function StatisticsPage() {
         .filter((reg) => selectedStores.includes(reg.store))
         .map((reg) => reg.id);
 
+      // МойСклад данные за сегодня всегда неполные (продажи ещё идут), поэтому
+      // в статистику никогда не попадает текущий день — только по вчера включительно.
+      const yesterdayStr = ymd(addDays(stripTime(new Date()), -1));
+
       function salesQuery(from: string, to: string) {
-        return registerIds.length > 0
+        const cappedTo = to > yesterdayStr ? yesterdayStr : to;
+        return registerIds.length > 0 && from <= cappedTo
           ? supabase
               .from("moysklad_sales_daily")
               .select("revenue, receipts_count")
               .in("register_id", registerIds)
               .gte("sale_date", from)
-              .lte("sale_date", to)
+              .lte("sale_date", cappedTo)
           : Promise.resolve({ data: [], error: null });
       }
 
