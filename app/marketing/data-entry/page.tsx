@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
 import { getErrorMessage } from "@/lib/errors";
+import { DataTableCard } from "@/components/DataTableCard";
 
 type DayRow = {
   id?: number;
@@ -602,200 +603,227 @@ export default function DataEntryPage() {
         </div>
       </div>
 
-      <div className="bg-surface border border-border rounded-card px-6 pt-[22px] pb-5 flex flex-col gap-3.5">
-        <div className="text-[15px] font-bold">
-          Трафик и расходы по каналам — {MONTH_NAMES[monthIndex].toLowerCase()} {year}
-        </div>
-
-        <div>
-          <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-            <div>Дата</div>
-            <div>День</div>
-            <div>Трафик план</div>
-            <div>Трафик факт</div>
-            <div>Instagram</div>
-            <div>TikTok</div>
-            <div>Insta паблик</div>
-            <div>Флаер</div>
-            <div>2ГИС</div>
-          </div>
-
-          {rows.map((row, i) => (
-            <div
-              key={row.entryDate}
-              className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-borderSoft ${
-                row.weekend ? "bg-weekendTint" : ""
-              }`}
-            >
-              <div className="text-[12.5px] text-muted">{row.date}</div>
-              <div className="text-[12.5px] text-mutedLight">{row.weekday}</div>
-              {NUMERIC_FIELDS.map((field) => (
-                <input
-                  key={field}
-                  type="text"
-                  inputMode="numeric"
-                  disabled={!canEditSection}
-                  value={row[field] === "" ? "" : (row[field] as number)}
-                  onChange={(e) => updateCell(i, field, e.target.value)}
-                  onKeyDown={digitsOnlyKeyDown}
-                  placeholder="0"
-                  className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-                />
-              ))}
+      <DataTableCard
+        title={`Трафик и расходы по каналам — ${MONTH_NAMES[monthIndex].toLowerCase()} ${year}`}
+        rows={rows}
+        getSearchText={(row) => `${row.date} ${row.weekday}`}
+        csvHeaders={["Дата", "День", "Трафик план", "Трафик факт", "Instagram", "TikTok", "Insta паблик", "Флаер", "2ГИС"]}
+        toCsvRow={(row) => [
+          row.date,
+          row.weekday,
+          row.trafficPlan === "" ? 0 : row.trafficPlan,
+          row.trafficFact === "" ? 0 : row.trafficFact,
+          row.instagram === "" ? 0 : row.instagram,
+          row.tiktok === "" ? 0 : row.tiktok,
+          row.instagramPublic === "" ? 0 : row.instagramPublic,
+          row.flyer === "" ? 0 : row.flyer,
+          row.twoGis === "" ? 0 : row.twoGis,
+        ]}
+        csvFilename={`traffic-${year}-${pad2(monthIndex + 1)}.csv`}
+      >
+        {(visibleRows) => (
+          <>
+            <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+              <div>Дата</div>
+              <div>День</div>
+              <div>Трафик план</div>
+              <div>Трафик факт</div>
+              <div>Instagram</div>
+              <div>TikTok</div>
+              <div>Insta паблик</div>
+              <div>Флаер</div>
+              <div>2ГИС</div>
             </div>
-          ))}
-        </div>
 
-        <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
-          <div className="col-span-2">Итого</div>
-          <div className="num">{totals.trafficPlan || 0}</div>
-          <div className="num">{totals.trafficFact || 0}</div>
-          <div className="num">{totals.instagram.toLocaleString("ru-RU")}</div>
-          <div className="num">{totals.tiktok.toLocaleString("ru-RU")}</div>
-          <div className="num">{totals.instagramPublic.toLocaleString("ru-RU")}</div>
-          <div className="num">{totals.flyer.toLocaleString("ru-RU")}</div>
-          <div className="num">{totals.twoGis.toLocaleString("ru-RU")}</div>
-        </div>
-
-        <div className="flex items-center justify-between pt-2 border-t border-borderSoft">
-          <div className="text-[13px] text-muted">
-            Итого расходов на маркетинг за месяц (по каналам):{" "}
-            <span className="num text-ink font-bold">{channelTotal.toLocaleString("ru-RU")} ₸</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={!canEditSection || dirtyDayCount === 0 || savingDays}
-              onClick={handleSaveDayRows}
-              className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
-                dirtyDayCount > 0 && !savingDays
-                  ? "bg-accent text-paper"
-                  : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
-              }`}
-            >
-              {savingDays ? "Сохраняем…" : justSavedDays ? "Сохранено" : "Сохранить трафик и каналы"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-        <div className="flex flex-col gap-0.5">
-          <div className="text-[15px] font-bold">Дополнительные расходы на маркетинг</div>
-          <div className="text-[12.5px] text-muted">
-            Сюда вносятся расходы, не относящиеся к таблице выше — по логике ДДС: дата, статья,
-            сумма, комментарий.
-          </div>
-        </div>
-
-        <div className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-          <div>Дата</div>
-          <div>Статья</div>
-          <div>Сумма</div>
-          <div>Комментарий</div>
-          <div>Строка</div>
-        </div>
-
-        {expenses.map((e, i) => {
-          const effectiveLocked = expenseEffectivelyLocked(e);
-          const rowEditableInputs = canEditSection && !effectiveLocked;
-          const showCountdown = !effectiveLocked && e.unlockExpiresAt;
-
-          return (
-            <div
-              key={e.id ?? `new-${i}`}
-              className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
-            >
-              <input
-                type="date"
-                disabled={!rowEditableInputs}
-                value={e.date}
-                onChange={(ev) => updateExpense(i, "date", ev.target.value)}
-                className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-              />
-              <input
-                type="text"
-                disabled={!rowEditableInputs}
-                value={e.category}
-                onChange={(ev) => updateExpense(i, "category", ev.target.value)}
-                placeholder="Статья расхода"
-                className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-              />
-              <input
-                type="text"
-                inputMode="numeric"
-                disabled={!rowEditableInputs}
-                value={e.amount === "" ? "" : e.amount}
-                onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
-                onKeyDown={digitsOnlyKeyDown}
-                placeholder="0"
-                className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-              />
-              <input
-                type="text"
-                disabled={!rowEditableInputs}
-                value={e.comment}
-                onChange={(ev) => updateExpense(i, "comment", ev.target.value)}
-                placeholder="Комментарий"
-                className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-              />
-              <div className="flex flex-col items-end gap-0.5">
-                {effectiveLocked &&
-                  (e.requestPending ? (
-                    <span className="text-[11px] text-mutedLight italic">Ожидает</span>
-                  ) : (
-                    <button
-                      type="button"
+            {visibleRows.map((row) => {
+              const i = rows.indexOf(row);
+              return (
+                <div
+                  key={row.entryDate}
+                  className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-borderSoft ${
+                    row.weekend ? "bg-weekendTint" : ""
+                  }`}
+                >
+                  <div className="text-[12.5px] text-muted">{row.date}</div>
+                  <div className="text-[12.5px] text-mutedLight">{row.weekday}</div>
+                  {NUMERIC_FIELDS.map((field) => (
+                    <input
+                      key={field}
+                      type="text"
+                      inputMode="numeric"
                       disabled={!canEditSection}
-                      onClick={() => requestExpenseUnlock(e)}
-                      className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
-                    >
-                      Запрос
-                    </button>
+                      value={row[field] === "" ? "" : (row[field] as number)}
+                      onChange={(e) => updateCell(i, field, e.target.value)}
+                      onKeyDown={digitsOnlyKeyDown}
+                      placeholder="0"
+                      className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                    />
                   ))}
-                {showCountdown && (
-                  <span className="text-[9.5px] text-mutedLight italic">
-                    ещё {minutesLeft(e.unlockExpiresAt as string, nowTick)}м
-                  </span>
-                )}
+                </div>
+              );
+            })}
+
+            <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
+              <div className="col-span-2">Итого</div>
+              <div className="num">{totals.trafficPlan || 0}</div>
+              <div className="num">{totals.trafficFact || 0}</div>
+              <div className="num">{totals.instagram.toLocaleString("ru-RU")}</div>
+              <div className="num">{totals.tiktok.toLocaleString("ru-RU")}</div>
+              <div className="num">{totals.instagramPublic.toLocaleString("ru-RU")}</div>
+              <div className="num">{totals.flyer.toLocaleString("ru-RU")}</div>
+              <div className="num">{totals.twoGis.toLocaleString("ru-RU")}</div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-borderSoft">
+              <div className="text-[13px] text-muted">
+                Итого расходов на маркетинг за месяц (по каналам):{" "}
+                <span className="num text-ink font-bold">{channelTotal.toLocaleString("ru-RU")} ₸</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!canEditSection || dirtyDayCount === 0 || savingDays}
+                  onClick={handleSaveDayRows}
+                  className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
+                    dirtyDayCount > 0 && !savingDays
+                      ? "bg-accent text-paper"
+                      : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+                  }`}
+                >
+                  {savingDays ? "Сохраняем…" : justSavedDays ? "Сохранено" : "Сохранить трафик и каналы"}
+                </button>
               </div>
             </div>
-          );
-        })}
+          </>
+        )}
+      </DataTableCard>
 
-        <button
-          type="button"
-          disabled={!canEditSection}
-          onClick={() => {
-            const blank: ExpenseRow = { date: "", category: "", amount: "", comment: "", locked: false, requestPending: false, unlockExpiresAt: null };
-            setExpenses((prev) => [...prev, blank]);
-            setOriginalExpenses((prev) => [...prev, blank]);
-          }}
-          className="flex items-center gap-2 text-[13px] font-semibold text-accent py-3 text-left disabled:opacity-50"
-        >
-          + Добавить расход
-        </button>
+      <DataTableCard
+        title="Дополнительные расходы на маркетинг"
+        rows={expenses}
+        getSearchText={(e) => `${e.date} ${e.category} ${e.comment}`}
+        csvHeaders={["Дата", "Статья", "Сумма", "Комментарий"]}
+        toCsvRow={(e) => [e.date, e.category, e.amount === "" ? 0 : e.amount, e.comment]}
+        csvFilename={`expenses-${year}-${pad2(monthIndex + 1)}.csv`}
+      >
+        {(visibleExpenses) => (
+          <>
+            <div className="text-[12.5px] text-muted -mt-1">
+              Сюда вносятся расходы, не относящиеся к таблице выше — по логике ДДС: дата, статья,
+              сумма, комментарий.
+            </div>
 
-        <div className="flex items-center justify-between pt-2.5 border-t border-borderSoft text-[13px] font-bold">
-          <span>Общая сумма расходов</span>
-          <span className="num">{expensesTotal.toLocaleString("ru-RU")} ₸</span>
-        </div>
+            <div className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 pb-2.5 pt-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+              <div>Дата</div>
+              <div>Статья</div>
+              <div>Сумма</div>
+              <div>Комментарий</div>
+              <div>Строка</div>
+            </div>
 
-        <div className="flex items-center justify-end">
-          <button
-            type="button"
-            disabled={!canEditSection || dirtyExpenseCount === 0 || savingExpenses}
-            onClick={handleSaveExpenses}
-            className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
-              dirtyExpenseCount > 0 && !savingExpenses
-                ? "bg-accent text-paper"
-                : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
-            }`}
-          >
-            {savingExpenses ? "Сохраняем…" : justSavedExpenses ? "Сохранено" : "Сохранить расходы"}
-          </button>
-        </div>
-      </div>
+            {visibleExpenses.map((e) => {
+              const i = expenses.indexOf(e);
+              const effectiveLocked = expenseEffectivelyLocked(e);
+              const rowEditableInputs = canEditSection && !effectiveLocked;
+              const showCountdown = !effectiveLocked && e.unlockExpiresAt;
+
+              return (
+                <div
+                  key={e.id ?? `new-${i}`}
+                  className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                >
+                  <input
+                    type="date"
+                    disabled={!rowEditableInputs}
+                    value={e.date}
+                    onChange={(ev) => updateExpense(i, "date", ev.target.value)}
+                    className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                  />
+                  <input
+                    type="text"
+                    disabled={!rowEditableInputs}
+                    value={e.category}
+                    onChange={(ev) => updateExpense(i, "category", ev.target.value)}
+                    placeholder="Статья расхода"
+                    className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                  />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    disabled={!rowEditableInputs}
+                    value={e.amount === "" ? "" : e.amount}
+                    onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
+                    onKeyDown={digitsOnlyKeyDown}
+                    placeholder="0"
+                    className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                  />
+                  <input
+                    type="text"
+                    disabled={!rowEditableInputs}
+                    value={e.comment}
+                    onChange={(ev) => updateExpense(i, "comment", ev.target.value)}
+                    placeholder="Комментарий"
+                    className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                  />
+                  <div className="flex flex-col items-end gap-0.5">
+                    {effectiveLocked &&
+                      (e.requestPending ? (
+                        <span className="text-[11px] text-mutedLight italic">Ожидает</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!canEditSection}
+                          onClick={() => requestExpenseUnlock(e)}
+                          className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
+                        >
+                          Запрос
+                        </button>
+                      ))}
+                    {showCountdown && (
+                      <span className="text-[9.5px] text-mutedLight italic">
+                        ещё {minutesLeft(e.unlockExpiresAt as string, nowTick)}м
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              disabled={!canEditSection}
+              onClick={() => {
+                const blank: ExpenseRow = { date: "", category: "", amount: "", comment: "", locked: false, requestPending: false, unlockExpiresAt: null };
+                setExpenses((prev) => [...prev, blank]);
+                setOriginalExpenses((prev) => [...prev, blank]);
+              }}
+              className="flex items-center gap-2 text-[13px] font-semibold text-accent py-3 text-left disabled:opacity-50"
+            >
+              + Добавить расход
+            </button>
+
+            <div className="flex items-center justify-between pt-2.5 border-t border-borderSoft text-[13px] font-bold">
+              <span>Общая сумма расходов</span>
+              <span className="num">{expensesTotal.toLocaleString("ru-RU")} ₸</span>
+            </div>
+
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                disabled={!canEditSection || dirtyExpenseCount === 0 || savingExpenses}
+                onClick={handleSaveExpenses}
+                className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
+                  dirtyExpenseCount > 0 && !savingExpenses
+                    ? "bg-accent text-paper"
+                    : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+                }`}
+              >
+                {savingExpenses ? "Сохраняем…" : justSavedExpenses ? "Сохранено" : "Сохранить расходы"}
+              </button>
+            </div>
+          </>
+        )}
+      </DataTableCard>
     </>
   );
 }
