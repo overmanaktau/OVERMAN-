@@ -133,6 +133,12 @@ function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
 
+function spendVsCheckTone(pct: number): "positive" | "warning" | "negative" {
+  if (pct <= 8) return "positive";
+  if (pct <= 9) return "warning";
+  return "negative";
+}
+
 export default function StatisticsPage() {
   const { isAdmin, permissions } = useAuth();
   const { selected: selectedStores } = useStoreSelection();
@@ -292,6 +298,13 @@ export default function StatisticsPage() {
 
   const totals = sumTraffic(current);
   const prevTotals = sumTraffic(previous);
+
+  const planCompletionPct = totals.plan > 0 ? (totals.fact / totals.plan) * 100 : null;
+  const prevPlanCompletionPct = prevTotals.plan > 0 ? (prevTotals.fact / prevTotals.plan) * 100 : null;
+  const planCompletionChange =
+    planCompletionPct !== null && prevPlanCompletionPct !== null
+      ? pctChange(planCompletionPct, prevPlanCompletionPct)
+      : null;
 
   const channelTotal =
     totals.instagram + totals.tiktok + totals.instagram_public + totals.flyer + totals.two_gis;
@@ -459,11 +472,15 @@ export default function StatisticsPage() {
         <KpiCard
           label="Выполнение плана по трафику"
           value={totals.plan > 0 ? `${Math.round((totals.fact / totals.plan) * 100)}%` : "—"}
+          valueSuffix={
+            totals.plan > 0 ? `(${totals.fact.toLocaleString("ru-RU")} из ${totals.plan.toLocaleString("ru-RU")})` : undefined
+          }
           note={
-            totals.plan > 0
-              ? `${totals.fact.toLocaleString("ru-RU")} из ${totals.plan.toLocaleString("ru-RU")} план`
+            planCompletionChange !== null
+              ? `${planCompletionChange >= 0 ? "▲" : "▼"} ${Math.abs(planCompletionChange).toFixed(0)}% к пред. периоду`
               : "нет данных за период"
           }
+          noteTone={planCompletionChange !== null ? (planCompletionChange >= 0 ? "positive" : "negative") : "neutral"}
         />
         <KpiCard
           label="Общий расход на маркетинг"
@@ -497,6 +514,7 @@ export default function StatisticsPage() {
         <KpiCard
           label="Маркетинг, % от среднего чека"
           value={spendVsCheckPct !== null ? `${spendVsCheckPct.toFixed(1)}%` : "—"}
+          valueTone={spendVsCheckPct !== null ? spendVsCheckTone(spendVsCheckPct) : "neutral"}
           valueSuffix={avgCheck !== null ? `(${money(avgCheck)})` : undefined}
           note={
             spendVsCheckChange !== null
