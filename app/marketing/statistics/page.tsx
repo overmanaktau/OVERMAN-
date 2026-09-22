@@ -356,9 +356,17 @@ export default function StatisticsPage() {
   // Конверсия посетителей в покупателей: чек / посетитель × 100.
   const conversionPct = totals.fact > 0 ? (salesTotals.receipts / totals.fact) * 100 : null;
 
-  const spendVsCheckPct = costPerBuyer !== null && avgCheck !== null && avgCheck > 0 ? (costPerBuyer / avgCheck) * 100 : null;
+  // Только расходы по каналам — без доп. расходов, в отличие от «Цена
+  // одного покупателя», которая считает весь маркетинговый расход.
+  const channelCostPerBuyer = salesTotals.receipts > 0 ? channelTotal / salesTotals.receipts : null;
+  const prevChannelCostPerBuyer = prevSalesTotals.receipts > 0 ? prevChannelTotal / prevSalesTotals.receipts : null;
+
+  const spendVsCheckPct =
+    channelCostPerBuyer !== null && avgCheck !== null && avgCheck > 0 ? (channelCostPerBuyer / avgCheck) * 100 : null;
   const prevSpendVsCheckPct =
-    prevCostPerBuyer !== null && prevAvgCheck !== null && prevAvgCheck > 0 ? (prevCostPerBuyer / prevAvgCheck) * 100 : null;
+    prevChannelCostPerBuyer !== null && prevAvgCheck !== null && prevAvgCheck > 0
+      ? (prevChannelCostPerBuyer / prevAvgCheck) * 100
+      : null;
   const spendVsCheckChange =
     spendVsCheckPct !== null && prevSpendVsCheckPct !== null ? pctChange(spendVsCheckPct, prevSpendVsCheckPct) : null;
 
