@@ -139,6 +139,18 @@ function spendVsCheckTone(pct: number): "positive" | "warning" | "negative" {
   return "negative";
 }
 
+function costPerVisitorTone(value: number): "positive" | "warning" | "negative" {
+  if (value <= 500) return "positive";
+  if (value <= 600) return "warning";
+  return "negative";
+}
+
+function planCompletionTone(pct: number): "positive" | "warning" | "negative" {
+  if (pct >= 100) return "positive";
+  if (pct >= 90) return "warning";
+  return "negative";
+}
+
 export default function StatisticsPage() {
   const { isAdmin, permissions } = useAuth();
   const { selected: selectedStores } = useStoreSelection();
@@ -472,6 +484,7 @@ export default function StatisticsPage() {
         <KpiCard
           label="Выполнение плана по трафику"
           value={totals.plan > 0 ? `${Math.round((totals.fact / totals.plan) * 100)}%` : "—"}
+          valueTone={totals.plan > 0 ? planCompletionTone((totals.fact / totals.plan) * 100) : "neutral"}
           valueSuffix={
             totals.plan > 0 ? `(${totals.fact.toLocaleString("ru-RU")} из ${totals.plan.toLocaleString("ru-RU")})` : undefined
           }
@@ -497,6 +510,7 @@ export default function StatisticsPage() {
         <KpiCard
           label="Цена одного посетителя"
           value={costPerVisitor !== null ? money(costPerVisitor) : "—"}
+          valueTone={costPerVisitor !== null ? costPerVisitorTone(costPerVisitor) : "neutral"}
           note={costChange !== null ? `${costChange >= 0 ? "▲" : "▼"} ${Math.abs(costChange).toFixed(0)}% к пред. периоду` : undefined}
           noteTone={costChange !== null ? (costChange >= 0 ? "positive" : "negative") : "neutral"}
         />
