@@ -55,10 +55,22 @@ export type RetailDemand = {
   positions?: { rows?: { quantity?: number }[]; meta?: { size?: number } };
 };
 
-// Pulls all retail sale documents (retaildemand) for the given date (local
-// calendar day). Money in МойСклад is in kopecks — callers divide by 100.
+// The business's "day" for a given date runs from that date's midnight
+// through 02:00 the following morning (matches the nightly sync itself
+// running at 02:00 Aktau) — not a strict calendar-day cutoff at 23:59.
+function dayWindow(date: string): { from: string; to: string } {
+  const [y, m, d] = date.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  const nextDate = next.toISOString().slice(0, 10);
+  return { from: `${date} 00:00:00`, to: `${nextDate} 02:00:00` };
+}
+
+// Pulls all retail sale documents (retaildemand) for the given date's
+// business day (see dayWindow above). Money in МойСклад is in kopecks —
+// callers divide by 100.
 export async function fetchRetailDemandsForDate(date: string): Promise<RetailDemand[]> {
-  const filter = `moment>=${date} 00:00:00;moment<=${date} 23:59:59`;
+  const { from, to } = dayWindow(date);
+  const filter = `moment>=${from};moment<${to}`;
   return fetchAllPages<RetailDemand>("/entity/retaildemand", filter);
 }
 
@@ -68,6 +80,7 @@ export async function fetchRetailDemandsForDate(date: string): Promise<RetailDem
 export type RetailSalesReturn = RetailDemand;
 
 export async function fetchRetailSalesReturnsForDate(date: string): Promise<RetailSalesReturn[]> {
-  const filter = `moment>=${date} 00:00:00;moment<=${date} 23:59:59`;
+  const { from, to } = dayWindow(date);
+  const filter = `moment>=${from};moment<${to}`;
   return fetchAllPages<RetailSalesReturn>("/entity/retailsalesreturn", filter);
 }
