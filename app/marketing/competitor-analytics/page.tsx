@@ -20,6 +20,28 @@ const PLATFORM_LABEL: Record<Competitor["platform"], string> = {
   tiktok: "TikTok",
 };
 
+type ContentItem = {
+  id: number;
+  platform: "instagram" | "tiktok";
+  post_url: string;
+  posted_at: string;
+  caption: string | null;
+  media_type: string | null;
+  thumbnail_url: string | null;
+  likes: number;
+  comments: number;
+  shares: number;
+  views: number;
+  tracked_competitors: { platform: string; handle: string; display_name: string | null } | null;
+};
+
+const TOP_PERIODS = [
+  { key: "day", label: "День", noun: "за день" },
+  { key: "week", label: "Неделя", noun: "за неделю" },
+  { key: "month", label: "Месяц", noun: "за месяц" },
+] as const;
+type TopPeriod = (typeof TOP_PERIODS)[number]["key"];
+
 export default function CompetitorAnalyticsPage() {
   const { isAdmin, permissions, fullName, email } = useAuth();
   const canView = isAdmin || permissions["marketing.competitor_analytics"].canView;
@@ -35,6 +57,11 @@ export default function CompetitorAnalyticsPage() {
   const [newHandle, setNewHandle] = useState("");
   const [newDisplayName, setNewDisplayName] = useState("");
   const [adding, setAdding] = useState(false);
+
+  const [topPeriod, setTopPeriod] = useState<TopPeriod>("week");
+  const [topContent, setTopContent] = useState<ContentItem[]>([]);
+  const [topLoading, setTopLoading] = useState(false);
+  const [topError, setTopError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,6 +84,33 @@ export default function CompetitorAnalyticsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadTopContent = useCallback(async (period: TopPeriod) => {
+    setTopLoading(true);
+    setTopError(null);
+    try {
+      const days = period === "day" ? 1 : period === "week" ? 7 : 30;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const { data, error } = await supabase
+        .from("competitor_content")
+        .select("*, tracked_competitors(platform, handle, display_name)")
+        .gte("posted_at", cutoff.toISOString())
+        .order("posted_at", { ascending: false });
+      if (error) throw error;
+      const rows = (data ?? []) as ContentItem[];
+      rows.sort((a, b) => b.likes + b.comments + b.shares + b.views - (a.likes + a.comments + a.shares + a.views));
+      setTopContent(rows);
+    } catch (e) {
+      setTopError(getErrorMessage(e));
+    } finally {
+      setTopLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "top") loadTopContent(topPeriod);
+  }, [tab, topPeriod, loadTopContent]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -225,11 +279,70 @@ export default function CompetitorAnalyticsPage() {
           )}
         </div>
       ) : tab === "top" ? (
-        <div className="bg-surface border border-border rounded-card p-8 max-w-xl">
-          <p className="text-sm text-muted">
-            Здесь появится топ постов и Reels отслеживаемых конкурентов по вовлечённости (лайки,
-            комментарии, репосты, просмотры) — после подключения источника данных (Apify).
-          </p>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+            {TOP_PERIODS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTopPeriod(key)}
+                className={`text-[13px] rounded-md px-3.5 py-2 ${
+                  topPeriod === key ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {topError && (
+            <div className="flex items-center gap-3 text-sm text-[#A34B36]">
+              <span>{topError}</span>
+              <button type="button" onClick={() => loadTopContent(topPeriod)} className="font-semibold underline">
+                Повторить
+              </button>
+            </div>
+          )}
+
+          <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+            <div className="text-[15px] font-bold">
+              Топ контента {TOP_PERIODS.find((p) => p.key === topPeriod)?.noun} по вовлечённости
+            </div>
+            {topLoading ? (
+              <div className="text-sm text-muted py-4">Загрузка…</div>
+            ) : topContent.length === 0 ? (
+              <div className="text-sm text-muted py-4">
+                Нет данных за этот период — контент отслеживаемых конкурентов ещё не синхронизирован
+                (нужен источник данных, например Apify).
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                {topContent.map((item, i) => (
+                  <div
+                    key={item.id}
+                    className="grid grid-cols-[auto_1fr_auto] gap-3 items-center py-3 border-b border-borderSoft text-[13px]"
+                  >
+                    <div className="text-mutedLight font-semibold w-5">{i + 1}</div>
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <a
+                        href={item.post_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold truncate hover:underline"
+                      >
+                        @{item.tracked_competitors?.handle ?? "—"}
+                        {item.tracked_competitors?.display_name ? ` · ${item.tracked_competitors.display_name}` : ""}
+                      </a>
+                      {item.caption && <div className="text-muted truncate">{item.caption}</div>}
+                    </div>
+                    <div className="text-muted text-right whitespace-nowrap num">
+                      ♥ {item.likes} · 💬 {item.comments} · ↗ {item.shares} · ⏵ {item.views}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <div className="bg-surface border border-border rounded-card p-8 max-w-xl">
