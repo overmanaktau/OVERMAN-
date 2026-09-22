@@ -36,9 +36,10 @@ type ContentItem = {
 };
 
 const TOP_PERIODS = [
-  { key: "day", label: "День", noun: "за день" },
-  { key: "week", label: "Неделя", noun: "за неделю" },
-  { key: "month", label: "Месяц", noun: "за месяц" },
+  { key: 3, label: "3 дня", noun: "за 3 дня" },
+  { key: 7, label: "7 дней", noun: "за 7 дней" },
+  { key: 10, label: "10 дней", noun: "за 10 дней" },
+  { key: 30, label: "30 дней", noun: "за 30 дней" },
 ] as const;
 type TopPeriod = (typeof TOP_PERIODS)[number]["key"];
 
@@ -58,7 +59,7 @@ export default function CompetitorAnalyticsPage() {
   const [newDisplayName, setNewDisplayName] = useState("");
   const [adding, setAdding] = useState(false);
 
-  const [topPeriod, setTopPeriod] = useState<TopPeriod>("week");
+  const [topPeriod, setTopPeriod] = useState<TopPeriod>(7);
   const [topContent, setTopContent] = useState<ContentItem[]>([]);
   const [topLoading, setTopLoading] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
@@ -89,9 +90,8 @@ export default function CompetitorAnalyticsPage() {
     setTopLoading(true);
     setTopError(null);
     try {
-      const days = period === "day" ? 1 : period === "week" ? 7 : 30;
       const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - days);
+      cutoff.setDate(cutoff.getDate() - period);
       const { data, error } = await supabase
         .from("competitor_content")
         .select("*, tracked_competitors(platform, handle, display_name)")
@@ -178,7 +178,7 @@ export default function CompetitorAnalyticsPage() {
       </div>
 
       <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
-        {(["competitors", "top", "ads"] as const).map((t) => (
+        {(["competitors", "ads", "top"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -187,7 +187,7 @@ export default function CompetitorAnalyticsPage() {
               tab === t ? "bg-accent text-paper font-bold" : "text-muted font-medium"
             }`}
           >
-            {t === "competitors" ? "Конкуренты" : t === "top" ? "Топ контента" : "Реклама"}
+            {t === "competitors" ? "Внесение конкурентов" : t === "ads" ? "Реклама" : "Топ контента"}
           </button>
         ))}
       </div>
@@ -317,29 +317,41 @@ export default function CompetitorAnalyticsPage() {
               </div>
             ) : (
               <div className="flex flex-col">
-                {topContent.map((item, i) => (
-                  <div
-                    key={item.id}
-                    className="grid grid-cols-[auto_1fr_auto] gap-3 items-center py-3 border-b border-borderSoft text-[13px]"
-                  >
-                    <div className="text-mutedLight font-semibold w-5">{i + 1}</div>
-                    <div className="flex flex-col gap-0.5 min-w-0">
-                      <a
-                        href={item.post_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-semibold truncate hover:underline"
-                      >
-                        @{item.tracked_competitors?.handle ?? "—"}
-                        {item.tracked_competitors?.display_name ? ` · ${item.tracked_competitors.display_name}` : ""}
-                      </a>
-                      {item.caption && <div className="text-muted truncate">{item.caption}</div>}
+                {topContent.map((item, i) => {
+                  const likeConversion = item.views > 0 ? (item.likes / item.views) * 100 : null;
+                  return (
+                    <div
+                      key={item.id}
+                      className="grid grid-cols-[auto_1fr_auto] gap-3 items-center py-3 border-b border-borderSoft text-[13px]"
+                    >
+                      <div className="text-mutedLight font-semibold w-5">{i + 1}</div>
+                      <div className="flex flex-col gap-0.5 min-w-0">
+                        <a
+                          href={item.post_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold truncate hover:underline"
+                        >
+                          @{item.tracked_competitors?.handle ?? "—"}
+                          {item.tracked_competitors?.display_name
+                            ? ` · ${item.tracked_competitors.display_name}`
+                            : ""}
+                        </a>
+                        {item.caption && <div className="text-muted truncate">{item.caption}</div>}
+                      </div>
+                      <div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
+                        <div className="text-muted num">
+                          👁 {item.views} · ♥ {item.likes} · 💬 {item.comments} · ✈ {item.shares}
+                        </div>
+                        {likeConversion !== null && (
+                          <div className="text-mutedLight text-[11px] num">
+                            Конверсия лайков: {likeConversion.toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-muted text-right whitespace-nowrap num">
-                      ♥ {item.likes} · 💬 {item.comments} · ↗ {item.shares} · ⏵ {item.views}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
