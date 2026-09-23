@@ -199,12 +199,18 @@ function EmployeeAccessPanel({
   canEdit,
   onSave,
   onCancel,
+  dirtyKey,
+  onRegisterDirty,
+  onUnregisterDirty,
 }: {
   role: RoleDef | null;
   cities: CityWithStores[];
   canEdit: boolean;
   onSave: (permissions: Permissions, storeAccess: StoreAccessGrant[]) => Promise<void>;
   onCancel: () => void;
+  dirtyKey: string;
+  onRegisterDirty: (key: string, dirty: boolean, save: () => Promise<void>) => void;
+  onUnregisterDirty: (key: string) => void;
 }) {
   const [permissions, setPermissions] = useState<Permissions>(
     role ? toPermissions(role.role_permissions) : emptyPermissions()
@@ -241,6 +247,12 @@ function EmployeeAccessPanel({
   useEffect(() => {
     setGuard(dirty, dirty ? { onSave: () => saveRef.current(), onDiscard: () => {} } : null);
     return () => setGuard(false, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty]);
+
+  useEffect(() => {
+    onRegisterDirty(dirtyKey, dirty, () => saveRef.current());
+    return () => onUnregisterDirty(dirtyKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty]);
 
@@ -697,7 +709,28 @@ export default function EmployeesPage() {
     }
   }
 
-  const anyDirty = employees.some(isEmployeeDirty) || cities.some(isCityDirty);
+  // EmployeeAccessPanel (per-employee "Права") and RoleCard (per-role) each
+  // track their own dirty state locally — this registry lets them report it
+  // up so the page-wide Сохранить button (and anyDirty below) actually sees
+  // it, instead of only knowing about employee-row and city-name edits.
+  const dirtyRegistry = useRef<Map<string, boolean>>(new Map());
+  const saveRegistry = useRef<Map<string, () => Promise<void>>>(new Map());
+  const [registryTick, setRegistryTick] = useState(0);
+
+  function registerDirty(key: string, isDirty: boolean, save: () => Promise<void>) {
+    saveRegistry.current.set(key, save);
+    if (dirtyRegistry.current.get(key) !== isDirty) {
+      dirtyRegistry.current.set(key, isDirty);
+      setRegistryTick((v) => v + 1);
+    }
+  }
+  function unregisterDirty(key: string) {
+    saveRegistry.current.delete(key);
+    if (dirtyRegistry.current.delete(key)) setRegistryTick((v) => v + 1);
+  }
+  const registryDirty = [...dirtyRegistry.current.values()].some(Boolean);
+
+  const anyDirty = employees.some(isEmployeeDirty) || cities.some(isCityDirty) || registryDirty;
 
   async function saveAllDirty() {
     for (const emp of employees) {
@@ -705,6 +738,9 @@ export default function EmployeesPage() {
     }
     for (const city of cities) {
       if (isCityDirty(city)) await handleSaveCityEdit(city);
+    }
+    for (const [key, isDirty] of dirtyRegistry.current) {
+      if (isDirty) await saveRegistry.current.get(key)?.();
     }
   }
 
@@ -933,6 +969,9 @@ export default function EmployeesPage() {
                     canEdit={canEdit}
                     onSave={(perms, storeAccess) => handleSaveEmployeeAccess(emp, perms, storeAccess)}
                     onCancel={() => setAccessEditingId(null)}
+                    dirtyKey={`access:${emp.id}`}
+                    onRegisterDirty={registerDirty}
+                    onUnregisterDirty={unregisterDirty}
                   />
                 )}
                 {resettingId === emp.id && canEdit && (
@@ -1031,6 +1070,8 @@ export default function EmployeesPage() {
               onSave={handleSaveRole}
               onDelete={handleDeleteRole}
               canEdit={canEdit}
+              onRegisterDirty={registerDirty}
+              onUnregisterDirty={unregisterDirty}
             />
           ))}
 
@@ -1143,12 +1184,16 @@ function RoleCard({
   onSave,
   onDelete,
   canEdit,
+  onRegisterDirty,
+  onUnregisterDirty,
 }: {
   role: RoleDef;
   cities: CityWithStores[];
   onSave: (role: RoleDef, name: string, permissions: Permissions, storeAccess: StoreAccessGrant[]) => Promise<void>;
   onDelete: (role: RoleDef) => Promise<void>;
   canEdit: boolean;
+  onRegisterDirty: (key: string, dirty: boolean, save: () => Promise<void>) => void;
+  onUnregisterDirty: (key: string) => void;
 }) {
   const [name, setName] = useState(role.name);
   const [permissions, setPermissions] = useState<Permissions>(toPermissions(role.role_permissions));
@@ -1188,6 +1233,13 @@ function RoleCard({
   useEffect(() => {
     setGuard(dirty, dirty ? { onSave: () => saveRef.current(), onDiscard: () => discardRef.current() } : null);
     return () => setGuard(false, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty]);
+
+  const dirtyKey = `role:${role.id}`;
+  useEffect(() => {
+    onRegisterDirty(dirtyKey, dirty, () => saveRef.current());
+    return () => onUnregisterDirty(dirtyKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty]);
 
