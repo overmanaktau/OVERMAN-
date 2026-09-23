@@ -34,12 +34,29 @@ async function runSync(date: string) {
     fetchRetailSalesReturnsForDate(date),
   ]);
 
-  const byRegister = new Map<string, { name: string; revenue: number; receipts: number; items: number }>();
+  type RegisterAgg = {
+    name: string;
+    revenue: number;
+    receipts: number;
+    items: number;
+    returnedAmount: number;
+    returnedReceipts: number;
+    returnedItems: number;
+  };
+  const byRegister = new Map<string, RegisterAgg>();
   for (const d of demands) {
     const id = d.retailStore?.id;
     const name = d.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue; // not a live retail register
-    const agg = byRegister.get(id) ?? { name, revenue: 0, receipts: 0, items: 0 };
+    const agg = byRegister.get(id) ?? {
+      name,
+      revenue: 0,
+      receipts: 0,
+      items: 0,
+      returnedAmount: 0,
+      returnedReceipts: 0,
+      returnedItems: 0,
+    };
     agg.revenue += (d.sum ?? 0) / 100;
     agg.receipts += 1;
     agg.items += (d.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
@@ -51,22 +68,38 @@ async function runSync(date: string) {
   // also voids the receipt itself (receipts_count -1) when the original
   // check was a single item, since there's no completed sale left; a return
   // from a multi-item check just shrinks that receipt, it doesn't void it.
+  // returnedAmount/returnedReceipts/returnedItems are kept alongside so the
+  // UI can show both the final (already-netted) figure and, next to it, how
+  // much of it was returns.
   let returnedAmount = 0;
   let voidedReceipts = 0;
   for (const r of returns) {
     const id = r.retailStore?.id;
     const name = r.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue;
-    const agg = byRegister.get(id) ?? { name, revenue: 0, receipts: 0, items: 0 };
-    agg.revenue -= (r.sum ?? 0) / 100;
-    agg.items -= (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
-    returnedAmount += (r.sum ?? 0) / 100;
+    const agg = byRegister.get(id) ?? {
+      name,
+      revenue: 0,
+      receipts: 0,
+      items: 0,
+      returnedAmount: 0,
+      returnedReceipts: 0,
+      returnedItems: 0,
+    };
+    const rSum = (r.sum ?? 0) / 100;
+    const rItems = (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
+    agg.revenue -= rSum;
+    agg.items -= rItems;
+    agg.returnedAmount += rSum;
+    agg.returnedItems += rItems;
+    returnedAmount += rSum;
 
     const demandHref = r.demand?.meta?.href;
     if (demandHref) {
       const originalItemCount = await fetchDemandItemCount(demandHref);
       if (originalItemCount === 1) {
         agg.receipts = Math.max(0, agg.receipts - 1);
+        agg.returnedReceipts += 1;
         voidedReceipts += 1;
       }
     }
@@ -91,6 +124,9 @@ async function runSync(date: string) {
         revenue: agg.revenue,
         receipts_count: agg.receipts,
         items_count: agg.items,
+        returned_amount: agg.returnedAmount,
+        returned_receipts: agg.returnedReceipts,
+        returned_items: agg.returnedItems,
       },
       { onConflict: "register_id,sale_date" }
     );

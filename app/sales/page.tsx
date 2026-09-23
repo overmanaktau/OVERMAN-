@@ -72,7 +72,24 @@ type RegisterSalesRow = {
   receipts: number;
   items: number;
   cost: number | null;
+  returnedAmount: number;
+  returnedReceipts: number;
+  returnedItems: number;
 };
+
+// revenue/receipts/items on a row are already net of returns. "Gross" adds
+// the returned amounts back — "what it looked like before the return came
+// in" — purely for display; nothing that sums across rows elsewhere in the
+// app ever uses this, only this page's own toggle.
+function grossOf<T extends { revenue: number; receipts: number; items: number; returnedAmount: number; returnedReceipts: number; returnedItems: number }>(
+  r: T
+) {
+  return {
+    revenue: r.revenue + r.returnedAmount,
+    receipts: r.receipts + r.returnedReceipts,
+    items: r.items + r.returnedItems,
+  };
+}
 
 export default function SalesPage() {
   const { isAdmin, permissions, stores } = useAuth();
@@ -88,6 +105,7 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [registerSales, setRegisterSales] = useState<RegisterSalesRow[]>([]);
+  const [showGross, setShowGross] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,7 +116,9 @@ export default function SalesPage() {
         : getPeriodRange(periodIndex, new Date());
       const { data, error: registerError } = await supabase
         .from("moysklad_sales_daily")
-        .select("register_id, revenue, receipts_count, items_count, cost, moysklad_registers(name, store)")
+        .select(
+          "register_id, revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items, moysklad_registers(name, store)"
+        )
         .gte("sale_date", ymd(r.start))
         .lte("sale_date", ymd(r.end));
       if (registerError) throw registerError;
@@ -112,6 +132,9 @@ export default function SalesPage() {
         items: number;
         costSum: number;
         costMissing: boolean;
+        returnedAmount: number;
+        returnedReceipts: number;
+        returnedItems: number;
       };
       const byRegister = new Map<string, Agg>();
       for (const row of (data ?? []) as unknown as {
@@ -120,6 +143,9 @@ export default function SalesPage() {
         receipts_count: number;
         items_count: number;
         cost: number | null;
+        returned_amount: number | null;
+        returned_receipts: number | null;
+        returned_items: number | null;
         moysklad_registers: { name: string; store: string | null } | null;
       }[]) {
         const agg = byRegister.get(row.register_id) ?? {
@@ -131,10 +157,16 @@ export default function SalesPage() {
           items: 0,
           costSum: 0,
           costMissing: false,
+          returnedAmount: 0,
+          returnedReceipts: 0,
+          returnedItems: 0,
         };
         agg.revenue += row.revenue ?? 0;
         agg.receipts += row.receipts_count ?? 0;
         agg.items += row.items_count ?? 0;
+        agg.returnedAmount += row.returned_amount ?? 0;
+        agg.returnedReceipts += row.returned_receipts ?? 0;
+        agg.returnedItems += row.returned_items ?? 0;
         // A missing value means "unknown", not zero — one day without cost
         // data makes the whole period's margin unknown, since averaging in
         // a false zero would inflate it.
@@ -153,6 +185,9 @@ export default function SalesPage() {
           receipts: a.receipts,
           items: a.items,
           cost: a.costMissing ? null : a.costSum,
+          returnedAmount: a.returnedAmount,
+          returnedReceipts: a.returnedReceipts,
+          returnedItems: a.returnedItems,
         }))
         .sort((a, b) => b.revenue - a.revenue);
       setRegisterSales(rows);
@@ -192,9 +227,31 @@ export default function SalesPage() {
     );
   }
 
-  const totalRevenue = registerSales.reduce((acc, r) => acc + r.revenue, 0);
-  const totalReceipts = registerSales.reduce((acc, r) => acc + r.receipts, 0);
-  const totalItems = registerSales.reduce((acc, r) => acc + r.items, 0);
+  // revenue/receipts/items on each row are already net of returns; when
+  // showGross is on, this adds the returned amounts back for display only —
+  // every sum here and below is derived from this, so nothing outside this
+  // page (Статистика, KPIs, etc.) is ever affected by the toggle.
+  function displayed(r: RegisterSalesRow) {
+    return showGross ? grossOf(r) : { revenue: r.revenue, receipts: r.receipts, items: r.items };
+  }
+
+  const totalRevenue = registerSales.reduce((acc, r) => acc + displayed(r).revenue, 0);
+  const totalReceipts = registerSales.reduce((acc, r) => acc + displayed(r).receipts, 0);
+  const totalItems = registerSales.reduce((acc, r) => acc + displayed(r).items, 0);
+  const totalReturned = {
+    returnedAmount: registerSales.reduce((acc, r) => acc + r.returnedAmount, 0),
+    returnedReceipts: registerSales.reduce((acc, r) => acc + r.returnedReceipts, 0),
+    returnedItems: registerSales.reduce((acc, r) => acc + r.returnedItems, 0),
+  };
+
+  // "0" when nothing was returned; otherwise a compact "sum · N чек · N тов."
+  function returnSummary(r: { returnedAmount: number; returnedReceipts: number; returnedItems: number }): string {
+    if (r.returnedAmount === 0 && r.returnedReceipts === 0 && r.returnedItems === 0) return "0";
+    const parts = [money(r.returnedAmount)];
+    if (r.returnedReceipts > 0) parts.push(`${r.returnedReceipts} чек`);
+    if (r.returnedItems > 0) parts.push(`${r.returnedItems} тов.`);
+    return parts.join(" · ");
+  }
 
   // A missing cost anywhere in the set makes the whole sum's gross profit
   // unknown, rather than silently treating it as zero.
@@ -235,8 +292,8 @@ export default function SalesPage() {
         <h1 className="font-serif text-[28px] font-semibold m-0">Продажа</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
           Продажи по кассам из МойСклад — обновляются раз в сутки, здесь ничего не считается
-          в реальном времени. Возвраты уже вычтены из выручки и количества товара; число чеков
-          при этом не уменьшается — возврат считается изменением уже пробитого чека, а не новым.
+          в реальном времени. Возврат вычитается из дня, когда он произошёл: сумма и товар — всегда,
+          а сам чек — если в нём был только один товар.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -328,14 +385,28 @@ export default function SalesPage() {
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-        <div className="text-[15px] font-bold">Продажи по кассам</div>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-[15px] font-bold">
+            Продажи по кассам{" "}
+            <span className="text-muted font-normal text-[12.5px]">
+              ({showGross ? "без учёта возврата" : "с учётом возврата"})
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowGross((v) => !v)}
+            className="text-[12.5px] font-semibold text-muted px-3 py-1.5 rounded-md border border-border hover:bg-paper"
+          >
+            {showGross ? "Учитывать возврат" : "Без учёта возврата"}
+          </button>
+        </div>
         {loading ? (
           <div className="text-sm text-muted py-4">Загрузка…</div>
         ) : registerSales.length === 0 ? (
           <div className="text-sm text-muted py-4">Нет данных за этот период.</div>
         ) : (
           <>
-            <div className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+            <div className="grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Касса</div>
               <div>Город</div>
               <div>Выручка</div>
@@ -343,56 +414,111 @@ export default function SalesPage() {
               <div>Средний чек</div>
               <div>Кол-во товара</div>
               <div>Глубина чека</div>
-              <div>Валовая прибыль</div>
+              <div>Вал. прибыль</div>
+              <div>Возврат</div>
             </div>
             {visibleGroups.map((group) => {
-              const groupRevenue = group.rows.reduce((acc, r) => acc + r.revenue, 0);
-              const groupReceipts = group.rows.reduce((acc, r) => acc + r.receipts, 0);
-              const groupItems = group.rows.reduce((acc, r) => acc + r.items, 0);
+              const groupRevenue = group.rows.reduce((acc, r) => acc + displayed(r).revenue, 0);
+              const groupReceipts = group.rows.reduce((acc, r) => acc + displayed(r).receipts, 0);
+              const groupItems = group.rows.reduce((acc, r) => acc + displayed(r).items, 0);
+              const groupReturned = {
+                returnedAmount: group.rows.reduce((acc, r) => acc + r.returnedAmount, 0),
+                returnedReceipts: group.rows.reduce((acc, r) => acc + r.returnedReceipts, 0),
+                returnedItems: group.rows.reduce((acc, r) => acc + r.returnedItems, 0),
+              };
               const groupCost = sumCost(group.rows);
               return (
                 <div key={group.store ?? "none"}>
                   {group.rows.map((r) => {
-                    const avgCheck = r.receipts > 0 ? r.revenue / r.receipts : 0;
-                    const checkDepth = r.receipts > 0 ? r.items / r.receipts : 0;
+                    const d = displayed(r);
+                    const avgCheck = d.receipts > 0 ? d.revenue / d.receipts : 0;
+                    const checkDepth = d.receipts > 0 ? d.items / d.receipts : 0;
                     return (
                       <div
                         key={r.registerId}
-                        className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                        className="grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
                       >
                         <div className="font-semibold">{r.name}</div>
                         <div className="text-muted">{storeLabel(r.store)}</div>
-                        <div className="num">{money(r.revenue)}</div>
-                        <div className="num">{r.receipts}</div>
+                        <div className="num">
+                          {money(d.revenue)}
+                          {!showGross && r.returnedAmount > 0 && (
+                            <span className="text-mutedLight"> ({money(r.returnedAmount)})</span>
+                          )}
+                        </div>
+                        <div className="num">
+                          {d.receipts}
+                          {!showGross && r.returnedReceipts > 0 && (
+                            <span className="text-mutedLight"> ({r.returnedReceipts})</span>
+                          )}
+                        </div>
                         <div className="num">{money(avgCheck)}</div>
-                        <div className="num">{r.items.toLocaleString("ru-RU")}</div>
+                        <div className="num">
+                          {d.items.toLocaleString("ru-RU")}
+                          {!showGross && r.returnedItems > 0 && (
+                            <span className="text-mutedLight"> ({r.returnedItems})</span>
+                          )}
+                        </div>
                         <div className="num">{checkDepth.toFixed(3)}</div>
-                        <div className="num">{grossProfit(r.revenue, r.cost)}</div>
+                        <div className="num">{grossProfit(d.revenue, r.cost)}</div>
+                        <div className="num text-muted">{returnSummary(r)}</div>
                       </div>
                     );
                   })}
                   {group.rows.length > 1 && (
-                    <div className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 py-2 border-b border-borderSoft items-center text-[12.5px] font-bold bg-weekendTint">
+                    <div className="grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2 border-b border-borderSoft items-center text-[12.5px] font-bold bg-weekendTint">
                       <div className="col-span-2">Итого по {group.label}</div>
-                      <div className="num">{money(groupRevenue)}</div>
-                      <div className="num">{groupReceipts}</div>
+                      <div className="num">
+                        {money(groupRevenue)}
+                        {!showGross && groupReturned.returnedAmount > 0 && (
+                          <span className="text-mutedLight font-normal"> ({money(groupReturned.returnedAmount)})</span>
+                        )}
+                      </div>
+                      <div className="num">
+                        {groupReceipts}
+                        {!showGross && groupReturned.returnedReceipts > 0 && (
+                          <span className="text-mutedLight font-normal"> ({groupReturned.returnedReceipts})</span>
+                        )}
+                      </div>
                       <div className="num">{groupReceipts > 0 ? money(groupRevenue / groupReceipts) : "—"}</div>
-                      <div className="num">{groupItems.toLocaleString("ru-RU")}</div>
+                      <div className="num">
+                        {groupItems.toLocaleString("ru-RU")}
+                        {!showGross && groupReturned.returnedItems > 0 && (
+                          <span className="text-mutedLight font-normal"> ({groupReturned.returnedItems})</span>
+                        )}
+                      </div>
                       <div className="num">{groupReceipts > 0 ? (groupItems / groupReceipts).toFixed(3) : "—"}</div>
                       <div className="num">{grossProfit(groupRevenue, groupCost)}</div>
+                      <div className="num text-muted font-normal">{returnSummary(groupReturned)}</div>
                     </div>
                   )}
                 </div>
               );
             })}
-            <div className="grid grid-cols-[1.3fr_0.9fr_1fr_0.6fr_1fr_0.9fr_0.9fr_0.8fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
+            <div className="grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
               <div className="col-span-2">Итого</div>
-              <div className="num">{money(totalRevenue)}</div>
-              <div className="num">{totalReceipts}</div>
+              <div className="num">
+                {money(totalRevenue)}
+                {!showGross && totalReturned.returnedAmount > 0 && (
+                  <span className="text-mutedLight font-normal"> ({money(totalReturned.returnedAmount)})</span>
+                )}
+              </div>
+              <div className="num">
+                {totalReceipts}
+                {!showGross && totalReturned.returnedReceipts > 0 && (
+                  <span className="text-mutedLight font-normal"> ({totalReturned.returnedReceipts})</span>
+                )}
+              </div>
               <div className="num">{totalReceipts > 0 ? money(totalRevenue / totalReceipts) : "—"}</div>
-              <div className="num">{totalItems.toLocaleString("ru-RU")}</div>
+              <div className="num">
+                {totalItems.toLocaleString("ru-RU")}
+                {!showGross && totalReturned.returnedItems > 0 && (
+                  <span className="text-mutedLight font-normal"> ({totalReturned.returnedItems})</span>
+                )}
+              </div>
               <div className="num">{totalReceipts > 0 ? (totalItems / totalReceipts).toFixed(3) : "—"}</div>
               <div className="num">{grossProfit(totalRevenue, totalCost)}</div>
+              <div className="num text-muted font-normal">{returnSummary(totalReturned)}</div>
             </div>
           </>
         )}
