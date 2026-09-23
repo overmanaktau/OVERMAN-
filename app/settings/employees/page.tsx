@@ -713,6 +713,20 @@ export default function EmployeesPage() {
     setCityEdits({});
   }
 
+  const [savingAll, setSavingAll] = useState(false);
+  const [justSavedAll, setJustSavedAll] = useState(false);
+
+  async function handleSaveAll() {
+    setSavingAll(true);
+    try {
+      await saveAllDirty();
+      setJustSavedAll(true);
+      window.setTimeout(() => setJustSavedAll(false), 1200);
+    } finally {
+      setSavingAll(false);
+    }
+  }
+
   const { setGuard, requestNavigation } = useUnsavedChanges();
   const saveAllRef = useRef(saveAllDirty);
   saveAllRef.current = saveAllDirty;
@@ -755,6 +769,17 @@ export default function EmployeesPage() {
             {t === "employees" ? "Сотрудники" : t === "roles" ? "Роли доступа" : "Города"}
           </button>
         ))}
+        <div className="w-px h-5 bg-border mx-0.5" />
+        <button
+          type="button"
+          onClick={handleSaveAll}
+          disabled={!anyDirty || savingAll}
+          className={`text-[13px] font-bold rounded-md px-3.5 py-2 transition-colors ${
+            anyDirty && !savingAll ? "bg-accent text-paper" : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+          }`}
+        >
+          {savingAll ? "Сохраняем…" : justSavedAll ? "Сохранено" : "Сохранить"}
+        </button>
       </div>
 
       {loading ? (
