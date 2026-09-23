@@ -46,6 +46,7 @@ async function fetchAllPages<T>(path: string, filter: string): Promise<T[]> {
 }
 
 export type RetailDemand = {
+  meta?: { href?: string };
   moment: string; // "2026-09-21 14:32:00.000"
   sum: number; // total in kopecks
   // "retailStore" (точка продаж / касса) is what the business actually uses
@@ -75,12 +76,40 @@ export async function fetchRetailDemandsForDate(date: string): Promise<RetailDem
 }
 
 // A return (retailsalesreturn) always references the original sale via
-// "demand" — it's an adjustment to an existing check, never a check of its
-// own, so callers subtract its sum/items but leave the receipt count alone.
-export type RetailSalesReturn = RetailDemand;
+// "demand". It always adjusts revenue/items on the day the RETURN itself
+// happened (not the original sale's day) — a return processed today reduces
+// today's numbers, full stop. It additionally voids the receipt itself
+// (receipts_count -1) when the original check had exactly one item, since
+// returning it means that check no longer represents a completed sale; a
+// return from a multi-item check leaves the receipt counted, just smaller.
+export type RetailSalesReturn = {
+  sum: number; // kopecks
+  retailStore?: { name?: string; id?: string } | null;
+  positions?: { rows?: { quantity?: number }[] };
+  demand?: { meta?: { href?: string } } | null;
+};
 
 export async function fetchRetailSalesReturnsForDate(date: string): Promise<RetailSalesReturn[]> {
   const { from, to } = dayWindow(date);
   const filter = `moment>=${from};moment<${to}`;
   return fetchAllPages<RetailSalesReturn>("/entity/retailsalesreturn", filter);
+}
+
+// A return doesn't carry its original check's total item count — only what
+// was returned. Need one extra lookup per return (there are only ever a
+// handful per day) to tell "the whole check was a single item" from "this
+// was one item out of several".
+export async function fetchDemandItemCount(demandHref: string): Promise<number> {
+  const url = new URL(demandHref);
+  url.searchParams.set("expand", "positions");
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${getToken()}`, Accept: "application/json;charset=utf-8" },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`МойСклад API ${res.status}: ${body.slice(0, 500)}`);
+  }
+  const demand = await res.json();
+  const rows: { quantity?: number }[] = demand.positions?.rows ?? [];
+  return rows.reduce((acc, p) => acc + (p.quantity ?? 0), 0);
 }

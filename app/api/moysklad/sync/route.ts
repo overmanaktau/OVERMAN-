@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
-import { fetchRetailDemandsForDate, fetchRetailSalesReturnsForDate } from "@/lib/moysklad";
+import { fetchRetailDemandsForDate, fetchRetailSalesReturnsForDate, fetchDemandItemCount } from "@/lib/moysklad";
 
 // Confirmed with the business owner: these are the only live registers
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
@@ -46,10 +46,13 @@ async function runSync(date: string) {
     byRegister.set(id, agg);
   }
 
-  // A return always references an existing check (via "demand") — it's an
-  // adjustment to that sale, not a check of its own, so it subtracts from
-  // revenue and item count but never touches receipts_count.
+  // A return always subtracts from the day it happened on, not the day of
+  // the original sale — today's return reduces today's numbers, period. It
+  // also voids the receipt itself (receipts_count -1) when the original
+  // check was a single item, since there's no completed sale left; a return
+  // from a multi-item check just shrinks that receipt, it doesn't void it.
   let returnedAmount = 0;
+  let voidedReceipts = 0;
   for (const r of returns) {
     const id = r.retailStore?.id;
     const name = r.retailStore?.name;
@@ -57,11 +60,23 @@ async function runSync(date: string) {
     const agg = byRegister.get(id) ?? { name, revenue: 0, receipts: 0, items: 0 };
     agg.revenue -= (r.sum ?? 0) / 100;
     agg.items -= (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
-    byRegister.set(id, agg);
     returnedAmount += (r.sum ?? 0) / 100;
+
+    const demandHref = r.demand?.meta?.href;
+    if (demandHref) {
+      const originalItemCount = await fetchDemandItemCount(demandHref);
+      if (originalItemCount === 1) {
+        agg.receipts = Math.max(0, agg.receipts - 1);
+        voidedReceipts += 1;
+      }
+    }
+    byRegister.set(id, agg);
   }
 
-  const skipped = demands.length - [...byRegister.values()].reduce((acc, r) => acc + r.receipts, 0);
+  // Computed from receipts + voided (not the post-void byRegister totals),
+  // so a voided receipt is never miscounted as "skipped — inactive register".
+  const skipped =
+    demands.length - ([...byRegister.values()].reduce((acc, r) => acc + r.receipts, 0) + voidedReceipts);
 
   for (const [id, agg] of byRegister) {
     const { error: registerError } = await supabaseAdmin
@@ -88,6 +103,7 @@ async function runSync(date: string) {
     receipts: demands.length,
     returns: returns.length,
     returnedAmount,
+    voidedReceipts,
     skipped,
   };
 }
