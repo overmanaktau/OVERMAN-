@@ -1049,28 +1049,36 @@ export default function EmployeesPage() {
                   onChange={(e) => setCityEdits((prev) => ({ ...prev, [city.id]: e.target.value }))}
                   className="border border-border rounded-lg px-3 py-2 text-sm font-bold flex-1 max-w-sm disabled:opacity-50"
                 />
-                {canEdit && isCityDirty(city) ? (
+                {canEdit && (
                   <>
                     <button
                       type="button"
                       onClick={() => handleSaveCityEdit(city)}
-                      disabled={savingCityId === city.id}
-                      className="text-[13px] text-accent font-bold disabled:opacity-50"
+                      disabled={!isCityDirty(city) || savingCityId === city.id}
+                      className={`text-[13px] font-bold rounded-md px-3 py-1.5 transition-colors ${
+                        isCityDirty(city) && savingCityId !== city.id
+                          ? "bg-accent text-paper"
+                          : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+                      }`}
                     >
-                      {savingCityId === city.id ? "Сохраняем…" : "Сохранить"}
+                      {savingCityId === city.id ? "Сохраняем…" : justSavedCityId === city.id ? "Сохранено" : "Сохранить"}
                     </button>
-                    <button type="button" onClick={() => discardCityEdit(city.id)} className="text-[13px] text-muted">
-                      Отмена
-                    </button>
+                    {isCityDirty(city) ? (
+                      <button type="button" onClick={() => discardCityEdit(city.id)} className="text-[13px] text-muted">
+                        Отмена
+                      </button>
+                    ) : (
+                      justSavedCityId !== city.id && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCity(city)}
+                          className="text-[13px] text-[#A34B36] font-semibold"
+                        >
+                          Удалить город
+                        </button>
+                      )
+                    )}
                   </>
-                ) : canEdit && justSavedCityId === city.id ? (
-                  <span className="text-[13px] text-accent font-bold">Сохранено</span>
-                ) : (
-                  canEdit && (
-                    <button type="button" onClick={() => handleDeleteCity(city)} className="text-[13px] text-[#A34B36] font-semibold">
-                      Удалить город
-                    </button>
-                  )
                 )}
               </div>
             </div>
