@@ -385,19 +385,14 @@ export default function SalesPage() {
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-[15px] font-bold">
-            Продажи по кассам{" "}
-            <span className="text-muted font-normal text-[12.5px]">
-              ({showGross ? "без учёта возврата" : "с учётом возврата"})
-            </span>
-          </div>
+        <div className="text-[15px] font-bold">
+          Продажи по кассам{" "}
           <button
             type="button"
             onClick={() => setShowGross((v) => !v)}
-            className="text-[12.5px] font-semibold text-muted px-3 py-1.5 rounded-md border border-border hover:bg-paper"
+            className="text-muted font-normal text-[12.5px] hover:underline"
           >
-            {showGross ? "Учитывать возврат" : "Без учёта возврата"}
+            ({showGross ? "без учёта возврата" : "с учётом возврата"})
           </button>
         </div>
         {loading ? (
