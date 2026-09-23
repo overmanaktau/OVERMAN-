@@ -263,8 +263,16 @@ export default function SalesPage() {
     }
     return sum;
   }
-  function grossProfit(revenue: number, cost: number | null): string {
-    return cost !== null ? money(revenue - cost) : "—";
+  function grossProfit(revenue: number, cost: number | null) {
+    if (cost === null) return "—";
+    const profit = revenue - cost;
+    const margin = revenue !== 0 ? (profit / revenue) * 100 : 0;
+    return (
+      <>
+        {money(profit)}
+        <span className="text-mutedLight"> ({margin.toFixed(1)}%)</span>
+      </>
+    );
   }
   const totalCost = sumCost(registerSales);
 
