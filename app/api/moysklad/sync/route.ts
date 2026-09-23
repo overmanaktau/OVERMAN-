@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
-import { fetchRetailDemandsForDate, fetchRetailSalesReturnsForDate, fetchDemandItemCount } from "@/lib/moysklad";
+import {
+  fetchRetailDemandsForDate,
+  fetchRetailSalesReturnsForDate,
+  fetchDemandItemCount,
+  totalCostKopecks,
+} from "@/lib/moysklad";
 
 // Confirmed with the business owner: these are the only live registers
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
@@ -39,6 +44,7 @@ async function runSync(date: string) {
     revenue: number;
     receipts: number;
     items: number;
+    cost: number;
     returnedAmount: number;
     returnedReceipts: number;
     returnedItems: number;
@@ -53,6 +59,7 @@ async function runSync(date: string) {
       revenue: 0,
       receipts: 0,
       items: 0,
+      cost: 0,
       returnedAmount: 0,
       returnedReceipts: 0,
       returnedItems: 0,
@@ -60,6 +67,7 @@ async function runSync(date: string) {
     agg.revenue += (d.sum ?? 0) / 100;
     agg.receipts += 1;
     agg.items += (d.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
+    agg.cost += totalCostKopecks(d.positions?.rows) / 100;
     byRegister.set(id, agg);
   }
 
@@ -82,6 +90,7 @@ async function runSync(date: string) {
       revenue: 0,
       receipts: 0,
       items: 0,
+      cost: 0,
       returnedAmount: 0,
       returnedReceipts: 0,
       returnedItems: 0,
@@ -90,6 +99,7 @@ async function runSync(date: string) {
     const rItems = (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
     agg.revenue -= rSum;
     agg.items -= rItems;
+    agg.cost -= totalCostKopecks(r.positions?.rows) / 100;
     agg.returnedAmount += rSum;
     agg.returnedItems += rItems;
     returnedAmount += rSum;
@@ -124,6 +134,7 @@ async function runSync(date: string) {
         revenue: agg.revenue,
         receipts_count: agg.receipts,
         items_count: agg.items,
+        cost: agg.cost,
         returned_amount: agg.returnedAmount,
         returned_receipts: agg.returnedReceipts,
         returned_items: agg.returnedItems,

@@ -35,7 +35,12 @@ async function fetchAllPages<T>(path: string, filter: string): Promise<T[]> {
       filter,
       limit: String(limit),
       offset: String(offset),
-      expand: "retailStore,positions",
+      // Deep-expand so each position's assortment (and, for a variant —
+      // colour/size modification — its parent product) is fully embedded,
+      // not just a meta reference. Cost (buyPrice) lives on the product,
+      // never on the position itself, and a variant doesn't carry its own
+      // buyPrice — only the product it belongs to does.
+      expand: "retailStore,positions.assortment,positions.assortment.product",
     });
     const rows: T[] = page.rows ?? [];
     all.push(...rows);
@@ -43,6 +48,26 @@ async function fetchAllPages<T>(path: string, filter: string): Promise<T[]> {
     offset += limit;
   }
   return all;
+}
+
+type Money = { value: number } | null | undefined;
+export type PositionRow = {
+  quantity?: number;
+  assortment?: {
+    meta?: { type?: string };
+    buyPrice?: Money;
+    product?: { buyPrice?: Money };
+  };
+};
+
+// Себестоимость (buyPrice, закупочная цена) — per unit, in kopecks. Lives on
+// the product itself when the position's assortment IS a plain product, or
+// on assortment.product when it's a variant (a colour/size modification).
+export function totalCostKopecks(rows: PositionRow[] | undefined): number {
+  return (rows ?? []).reduce((acc, p) => {
+    const unitCost = p.assortment?.buyPrice?.value ?? p.assortment?.product?.buyPrice?.value ?? 0;
+    return acc + unitCost * (p.quantity ?? 0);
+  }, 0);
 }
 
 export type RetailDemand = {
@@ -53,7 +78,7 @@ export type RetailDemand = {
   // to tell registers apart — "store" (склад) is just the warehouse stock
   // gets deducted from, and doesn't carry the city in its name.
   retailStore?: { name?: string; id?: string } | null;
-  positions?: { rows?: { quantity?: number }[]; meta?: { size?: number } };
+  positions?: { rows?: PositionRow[]; meta?: { size?: number } };
 };
 
 // The business's "day" for a given date runs from that date's midnight
@@ -85,7 +110,7 @@ export async function fetchRetailDemandsForDate(date: string): Promise<RetailDem
 export type RetailSalesReturn = {
   sum: number; // kopecks
   retailStore?: { name?: string; id?: string } | null;
-  positions?: { rows?: { quantity?: number }[] };
+  positions?: { rows?: PositionRow[] };
   demand?: { meta?: { href?: string } } | null;
 };
 
