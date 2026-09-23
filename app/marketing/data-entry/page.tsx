@@ -103,6 +103,46 @@ function digitsOnlyKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
   if (!/^[0-9]$/.test(e.key)) e.preventDefault();
 }
 
+// Same as digitsOnlyKeyDown, but also allows one decimal marker (comma or
+// period, either types "," — matches ru-RU convention) — for expenses with
+// kopecks, e.g. "10 000,25". A second decimal marker is blocked.
+function amountKeyDown(currentText: string) {
+  return (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.ctrlKey || e.metaKey) return;
+    const allowed = ["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"];
+    if (allowed.includes(e.key)) return;
+    if ((e.key === "," || e.key === ".") && !currentText.includes(",")) return;
+    if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+  };
+}
+
+// Strips everything except digits and a single "," decimal marker (typed as
+// either "," or "."), and caps it to 2 decimal digits — applied on change so
+// paste/autofill can't sneak in anything else.
+function sanitizeAmountText(raw: string): string {
+  let s = raw.replace(/\./g, ",").replace(/[^\d,]/g, "");
+  const firstComma = s.indexOf(",");
+  if (firstComma !== -1) {
+    const intPart = s.slice(0, firstComma);
+    const decPart = s.slice(firstComma + 1).replace(/,/g, "").slice(0, 2);
+    s = `${intPart},${decPart}`;
+  }
+  return s;
+}
+
+function parseAmountText(text: string): number | "" {
+  if (text === "" || text === ",") return "";
+  const n = Number(text.replace(",", "."));
+  return Number.isNaN(n) ? "" : n;
+}
+
+// "0 000" grouping (ru-RU thousands separator) for display when a cell isn't
+// being actively typed into — up to 2 decimals for money, none for counts.
+function formatGrouped(n: number | "", maximumFractionDigits = 0): string {
+  if (n === "") return "";
+  return n.toLocaleString("ru-RU", { maximumFractionDigits });
+}
+
 function friendlyError(e: unknown): string {
   const message = getErrorMessage(e);
   if (/fetch|network|failed to fetch/i.test(message)) {
@@ -180,6 +220,13 @@ export default function DataEntryPage() {
 
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [originalExpenses, setOriginalExpenses] = useState<ExpenseRow[]>([]);
+
+  // While a numeric cell is focused, it shows exactly what's being typed
+  // (raw digits, or digits+comma for amounts) instead of the "0 000"
+  // grouped display — reformatting mid-edit would jump the cursor around.
+  // It snaps to the grouped format again on blur.
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [savingDays, setSavingDays] = useState(false);
@@ -344,6 +391,7 @@ export default function DataEntryPage() {
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], rawValue: string) {
     if (!canEditSection || !rows[index]) return;
     const value = rawValue.replace(/\D/g, ""); // digits only, even from paste/autofill
+    setEditingText(value);
     setRows((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value === "" ? "" : Number(value) };
@@ -353,13 +401,19 @@ export default function DataEntryPage() {
 
   function updateExpense(index: number, field: keyof Pick<ExpenseRow, "date" | "category" | "amount" | "comment">, rawValue: string) {
     if (!canEditSection || !expenses[index] || expenseEffectivelyLocked(expenses[index])) return;
-    const value = field === "amount" ? rawValue.replace(/\D/g, "") : rawValue; // digits only, even from paste
+    if (field === "amount") {
+      const text = sanitizeAmountText(rawValue); // digits + one "," decimal marker, even from paste
+      setEditingText(text);
+      setExpenses((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], amount: parseAmountText(text) };
+        return next;
+      });
+      return;
+    }
     setExpenses((prev) => {
       const next = [...prev];
-      next[index] = {
-        ...next[index],
-        [field]: field === "amount" ? (value === "" ? "" : Number(value)) : value,
-      };
+      next[index] = { ...next[index], [field]: rawValue };
       return next;
     });
   }
@@ -646,27 +700,36 @@ export default function DataEntryPage() {
                 >
                   <div className="text-[12.5px] text-muted">{row.date}</div>
                   <div className="text-[12.5px] text-mutedLight">{row.weekday}</div>
-                  {NUMERIC_FIELDS.map((field) => (
-                    <input
-                      key={field}
-                      type="text"
-                      inputMode="numeric"
-                      disabled={!canEditSection}
-                      value={row[field] === "" ? "" : (row[field] as number)}
-                      onChange={(e) => updateCell(i, field, e.target.value)}
-                      onKeyDown={digitsOnlyKeyDown}
-                      placeholder="0"
-                      className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-                    />
-                  ))}
+                  {NUMERIC_FIELDS.map((field) => {
+                    const cellKey = `day-${i}-${field}`;
+                    const isEditing = editingField === cellKey;
+                    return (
+                      <input
+                        key={field}
+                        type="text"
+                        inputMode="numeric"
+                        disabled={!canEditSection}
+                        value={isEditing ? editingText : formatGrouped(row[field])}
+                        onFocus={() => {
+                          setEditingField(cellKey);
+                          setEditingText(row[field] === "" ? "" : String(row[field]));
+                        }}
+                        onChange={(e) => updateCell(i, field, e.target.value)}
+                        onBlur={() => setEditingField(null)}
+                        onKeyDown={digitsOnlyKeyDown}
+                        placeholder="0"
+                        className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                      />
+                    );
+                  })}
                 </div>
               );
             })}
 
             <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
               <div className="col-span-2">Итого</div>
-              <div className="num">{totals.trafficPlan || 0}</div>
-              <div className="num">{totals.trafficFact || 0}</div>
+              <div className="num">{totals.trafficPlan.toLocaleString("ru-RU")}</div>
+              <div className="num">{totals.trafficFact.toLocaleString("ru-RU")}</div>
               <div className="num">{totals.instagram.toLocaleString("ru-RU")}</div>
               <div className="num">{totals.tiktok.toLocaleString("ru-RU")}</div>
               <div className="num">{totals.instagramPublic.toLocaleString("ru-RU")}</div>
@@ -747,16 +810,27 @@ export default function DataEntryPage() {
                     placeholder="Статья расхода"
                     className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
                   />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    disabled={!rowEditableInputs}
-                    value={e.amount === "" ? "" : e.amount}
-                    onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
-                    onKeyDown={digitsOnlyKeyDown}
-                    placeholder="0"
-                    className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-                  />
+                  {(() => {
+                    const cellKey = `expense-${i}-amount`;
+                    const isEditing = editingField === cellKey;
+                    return (
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        disabled={!rowEditableInputs}
+                        value={isEditing ? editingText : formatGrouped(e.amount, 2)}
+                        onFocus={() => {
+                          setEditingField(cellKey);
+                          setEditingText(e.amount === "" ? "" : String(e.amount).replace(".", ","));
+                        }}
+                        onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
+                        onBlur={() => setEditingField(null)}
+                        onKeyDown={amountKeyDown(editingText)}
+                        placeholder="0"
+                        className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                      />
+                    );
+                  })()}
                   <input
                     type="text"
                     disabled={!rowEditableInputs}
@@ -804,7 +878,7 @@ export default function DataEntryPage() {
 
             <div className="flex items-center justify-between pt-2.5 border-t border-borderSoft text-[13px] font-bold">
               <span>Общая сумма расходов</span>
-              <span className="num">{expensesTotal.toLocaleString("ru-RU")} ₸</span>
+              <span className="num">{expensesTotal.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₸</span>
             </div>
 
             <div className="flex items-center justify-end">
