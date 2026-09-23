@@ -43,6 +43,17 @@ const NUMERIC_FIELDS: (keyof Pick<
   "trafficPlan" | "trafficFact" | "instagram" | "tiktok" | "instagramPublic" | "flyer" | "twoGis"
 >)[] = ["trafficPlan", "trafficFact", "instagram", "tiktok", "instagramPublic", "flyer", "twoGis"];
 
+// trafficPlan/trafficFact are visitor counts — always whole numbers. The 5
+// channel fields are marketing spend (money) — same kopeck/decimal support
+// as expense amounts.
+const DECIMAL_FIELDS = new Set<(typeof NUMERIC_FIELDS)[number]>([
+  "instagram",
+  "tiktok",
+  "instagramPublic",
+  "flyer",
+  "twoGis",
+]);
+
 const DB_FIELD = {
   trafficPlan: "traffic_plan",
   trafficFact: "traffic_fact",
@@ -390,6 +401,16 @@ export default function DataEntryPage() {
 
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], rawValue: string) {
     if (!canEditSection || !rows[index]) return;
+    if (DECIMAL_FIELDS.has(field)) {
+      const text = sanitizeAmountText(rawValue); // digits + one "," decimal marker, even from paste
+      setEditingText(text);
+      setRows((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], [field]: parseAmountText(text) };
+        return next;
+      });
+      return;
+    }
     const value = rawValue.replace(/\D/g, ""); // digits only, even from paste/autofill
     setEditingText(value);
     setRows((prev) => {
@@ -703,20 +724,31 @@ export default function DataEntryPage() {
                   {NUMERIC_FIELDS.map((field) => {
                     const cellKey = `day-${i}-${field}`;
                     const isEditing = editingField === cellKey;
+                    const isDecimal = DECIMAL_FIELDS.has(field);
                     return (
                       <input
                         key={field}
                         type="text"
-                        inputMode="numeric"
+                        inputMode={isDecimal ? "decimal" : "numeric"}
                         disabled={!canEditSection}
-                        value={isEditing ? editingText : formatGrouped(row[field])}
+                        value={
+                          isEditing
+                            ? editingText
+                            : formatGrouped(row[field], isDecimal ? 2 : 0)
+                        }
                         onFocus={() => {
                           setEditingField(cellKey);
-                          setEditingText(row[field] === "" ? "" : String(row[field]));
+                          setEditingText(
+                            row[field] === ""
+                              ? ""
+                              : isDecimal
+                                ? String(row[field]).replace(".", ",")
+                                : String(row[field])
+                          );
                         }}
                         onChange={(e) => updateCell(i, field, e.target.value)}
                         onBlur={() => setEditingField(null)}
-                        onKeyDown={digitsOnlyKeyDown}
+                        onKeyDown={isDecimal ? amountKeyDown(editingText) : digitsOnlyKeyDown}
                         placeholder="0"
                         className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
                       />
@@ -730,17 +762,21 @@ export default function DataEntryPage() {
               <div className="col-span-2">Итого</div>
               <div className="num">{totals.trafficPlan.toLocaleString("ru-RU")}</div>
               <div className="num">{totals.trafficFact.toLocaleString("ru-RU")}</div>
-              <div className="num">{totals.instagram.toLocaleString("ru-RU")}</div>
-              <div className="num">{totals.tiktok.toLocaleString("ru-RU")}</div>
-              <div className="num">{totals.instagramPublic.toLocaleString("ru-RU")}</div>
-              <div className="num">{totals.flyer.toLocaleString("ru-RU")}</div>
-              <div className="num">{totals.twoGis.toLocaleString("ru-RU")}</div>
+              <div className="num">{totals.instagram.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+              <div className="num">{totals.tiktok.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+              <div className="num">
+                {totals.instagramPublic.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}
+              </div>
+              <div className="num">{totals.flyer.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+              <div className="num">{totals.twoGis.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
             </div>
 
             <div className="flex items-center justify-between pt-2 border-t border-borderSoft">
               <div className="text-[13px] text-muted">
                 Итого расходов на маркетинг за месяц (по каналам):{" "}
-                <span className="num text-ink font-bold">{channelTotal.toLocaleString("ru-RU")} ₸</span>
+                <span className="num text-ink font-bold">
+                  {channelTotal.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₸
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <button
