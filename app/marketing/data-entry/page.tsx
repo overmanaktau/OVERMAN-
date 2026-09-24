@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
+import { useSiteVersion } from "@/components/SiteVersion";
 import { getErrorMessage } from "@/lib/errors";
 import { DataTableCard } from "@/components/DataTableCard";
 
@@ -206,6 +207,7 @@ function minutesLeft(iso: string, nowMs: number) {
 
 export default function DataEntryPage() {
   const { isAdmin, permissions, stores, accessibleStoreCodes, fullName, email } = useAuth();
+  const { mobileLayout } = useSiteVersion();
   const canView = isAdmin || permissions["marketing.data_entry"].canView;
   const canEditSection = isAdmin || permissions["marketing.data_entry"].canEdit;
   const requesterLabel = fullName || email || "Пользователь";
@@ -640,7 +642,7 @@ export default function DataEntryPage() {
         )}
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-3 bg-surface border border-border rounded-card p-1.5">
           <button
             type="button"
@@ -700,80 +702,157 @@ export default function DataEntryPage() {
       >
         {(visibleRows) => (
           <>
-            <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-              <div>Дата</div>
-              <div>День</div>
-              <div>Трафик план</div>
-              <div>Трафик факт</div>
-              <div>Instagram</div>
-              <div>TikTok</div>
-              <div>Insta паблик</div>
-              <div>Флаер</div>
-              <div>2ГИС</div>
-            </div>
-
-            {visibleRows.map((row) => {
-              const i = rows.indexOf(row);
-              return (
-                <div
-                  key={row.entryDate}
-                  className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-borderSoft ${
-                    row.weekend ? "bg-weekendTint" : ""
-                  }`}
-                >
-                  <div className="text-[12.5px] text-muted">{row.date}</div>
-                  <div className="text-[12.5px] text-mutedLight">{row.weekday}</div>
-                  {NUMERIC_FIELDS.map((field) => {
-                    const cellKey = `day-${i}-${field}`;
-                    const isEditing = editingField === cellKey;
-                    const isDecimal = DECIMAL_FIELDS.has(field);
-                    return (
-                      <input
-                        key={field}
-                        type="text"
-                        inputMode={isDecimal ? "decimal" : "numeric"}
-                        disabled={!canEditSection}
-                        value={
-                          isEditing
-                            ? editingText
-                            : formatGrouped(row[field], isDecimal ? 2 : 0)
-                        }
-                        onFocus={() => {
-                          setEditingField(cellKey);
-                          setEditingText(
-                            row[field] === ""
-                              ? ""
-                              : isDecimal
-                                ? String(row[field]).replace(".", ",")
-                                : String(row[field])
+            {mobileLayout ? (
+              <div className="flex flex-col gap-2.5">
+                {visibleRows.map((row) => {
+                  const i = rows.indexOf(row);
+                  return (
+                    <div
+                      key={row.entryDate}
+                      className={`flex flex-col gap-2 rounded-lg border border-borderSoft p-3 ${
+                        row.weekend ? "bg-weekendTint" : ""
+                      }`}
+                    >
+                      <div className="text-[13px] font-semibold">
+                        {row.date} · {row.weekday}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {NUMERIC_FIELDS.map((field) => {
+                          const cellKey = `day-${i}-${field}`;
+                          const isEditing = editingField === cellKey;
+                          const isDecimal = DECIMAL_FIELDS.has(field);
+                          return (
+                            <label key={field} className="flex flex-col gap-0.5 min-w-0">
+                              <span className="text-[10.5px] text-mutedLight truncate">{FIELD_LABEL[field]}</span>
+                              <input
+                                type="text"
+                                inputMode={isDecimal ? "decimal" : "numeric"}
+                                disabled={!canEditSection}
+                                value={isEditing ? editingText : formatGrouped(row[field], isDecimal ? 2 : 0)}
+                                onFocus={() => {
+                                  setEditingField(cellKey);
+                                  setEditingText(
+                                    row[field] === ""
+                                      ? ""
+                                      : isDecimal
+                                        ? String(row[field]).replace(".", ",")
+                                        : String(row[field])
+                                  );
+                                }}
+                                onChange={(e) => updateCell(i, field, e.target.value)}
+                                onBlur={() => setEditingField(null)}
+                                onKeyDown={isDecimal ? amountKeyDown(editingText) : digitsOnlyKeyDown}
+                                placeholder="0"
+                                className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                              />
+                            </label>
                           );
-                        }}
-                        onChange={(e) => updateCell(i, field, e.target.value)}
-                        onBlur={() => setEditingField(null)}
-                        onKeyDown={isDecimal ? amountKeyDown(editingText) : digitsOnlyKeyDown}
-                        placeholder="0"
-                        className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })}
-
-            <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
-              <div className="col-span-2">Итого</div>
-              <div className="num">{totals.trafficPlan.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-              <div className="num">{totals.trafficFact.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-              <div className="num">{totals.instagram.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-              <div className="num">{totals.tiktok.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-              <div className="num">
-                {totals.instagramPublic.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="num">{totals.flyer.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-              <div className="num">{totals.twoGis.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-            </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                  <div>Дата</div>
+                  <div>День</div>
+                  <div>Трафик план</div>
+                  <div>Трафик факт</div>
+                  <div>Instagram</div>
+                  <div>TikTok</div>
+                  <div>Insta паблик</div>
+                  <div>Флаер</div>
+                  <div>2ГИС</div>
+                </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-borderSoft">
+                {visibleRows.map((row) => {
+                  const i = rows.indexOf(row);
+                  return (
+                    <div
+                      key={row.entryDate}
+                      className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-borderSoft ${
+                        row.weekend ? "bg-weekendTint" : ""
+                      }`}
+                    >
+                      <div className="text-[12.5px] text-muted">{row.date}</div>
+                      <div className="text-[12.5px] text-mutedLight">{row.weekday}</div>
+                      {NUMERIC_FIELDS.map((field) => {
+                        const cellKey = `day-${i}-${field}`;
+                        const isEditing = editingField === cellKey;
+                        const isDecimal = DECIMAL_FIELDS.has(field);
+                        return (
+                          <input
+                            key={field}
+                            type="text"
+                            inputMode={isDecimal ? "decimal" : "numeric"}
+                            disabled={!canEditSection}
+                            value={
+                              isEditing
+                                ? editingText
+                                : formatGrouped(row[field], isDecimal ? 2 : 0)
+                            }
+                            onFocus={() => {
+                              setEditingField(cellKey);
+                              setEditingText(
+                                row[field] === ""
+                                  ? ""
+                                  : isDecimal
+                                    ? String(row[field]).replace(".", ",")
+                                    : String(row[field])
+                              );
+                            }}
+                            onChange={(e) => updateCell(i, field, e.target.value)}
+                            onBlur={() => setEditingField(null)}
+                            onKeyDown={isDecimal ? amountKeyDown(editingText) : digitsOnlyKeyDown}
+                            placeholder="0"
+                            className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+
+                <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
+                  <div className="col-span-2">Итого</div>
+                  <div className="num">{totals.trafficPlan.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num">{totals.trafficFact.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num">{totals.instagram.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num">{totals.tiktok.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num">
+                    {totals.instagramPublic.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="num">{totals.flyer.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num">{totals.twoGis.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                </div>
+              </>
+            )}
+
+            {mobileLayout && (
+              <div className="rounded-lg border border-[#E4DFC8] p-3 flex flex-col gap-1 text-[12.5px] font-bold">
+                <div className="text-[10.5px] uppercase tracking-wide text-mutedLight font-normal">Итого за месяц</div>
+                {(
+                  [
+                    ["Трафик план", totals.trafficPlan],
+                    ["Трафик факт", totals.trafficFact],
+                    ["Instagram", totals.instagram],
+                    ["TikTok", totals.tiktok],
+                    ["Insta паблик", totals.instagramPublic],
+                    ["Флаер", totals.flyer],
+                    ["2ГИС", totals.twoGis],
+                  ] as [string, number][]
+                ).map(([label, value]) => (
+                  <div key={label} className="flex items-center justify-between gap-2">
+                    <span className="font-normal text-muted">{label}</span>
+                    <span className="num">{value.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3 flex-wrap pt-2 border-t border-borderSoft">
               <div className="text-[13px] text-muted">
                 Итого расходов на маркетинг за месяц (по каналам):{" "}
                 <span className="num text-ink font-bold">
@@ -814,92 +893,184 @@ export default function DataEntryPage() {
               сумма, комментарий.
             </div>
 
-            <div className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 pb-2.5 pt-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-              <div>Дата</div>
-              <div>Статья</div>
-              <div>Сумма</div>
-              <div>Комментарий</div>
-              <div>Строка</div>
-            </div>
+            {mobileLayout ? (
+              <div className="flex flex-col gap-2.5">
+                {visibleExpenses.map((e) => {
+                  const i = expenses.indexOf(e);
+                  const effectiveLocked = expenseEffectivelyLocked(e);
+                  const rowEditableInputs = canEditSection && !effectiveLocked;
+                  const showCountdown = !effectiveLocked && e.unlockExpiresAt;
+                  const cellKey = `expense-${i}-amount`;
+                  const isEditing = editingField === cellKey;
 
-            {visibleExpenses.map((e) => {
-              const i = expenses.indexOf(e);
-              const effectiveLocked = expenseEffectivelyLocked(e);
-              const rowEditableInputs = canEditSection && !effectiveLocked;
-              const showCountdown = !effectiveLocked && e.unlockExpiresAt;
+                  return (
+                    <div key={e.id ?? `new-${i}`} className="flex flex-col gap-2 rounded-lg border border-borderSoft p-3 text-[13px]">
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10.5px] text-mutedLight">Дата</span>
+                        <input
+                          type="date"
+                          disabled={!rowEditableInputs}
+                          value={e.date}
+                          onChange={(ev) => updateExpense(i, "date", ev.target.value)}
+                          className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10.5px] text-mutedLight">Статья (куда расход)</span>
+                        <input
+                          type="text"
+                          disabled={!rowEditableInputs}
+                          value={e.category}
+                          onChange={(ev) => updateExpense(i, "category", ev.target.value)}
+                          placeholder="Статья расхода"
+                          className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10.5px] text-mutedLight">Сумма расхода</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          disabled={!rowEditableInputs}
+                          value={isEditing ? editingText : formatGrouped(e.amount, 2)}
+                          onFocus={() => {
+                            setEditingField(cellKey);
+                            setEditingText(e.amount === "" ? "" : String(e.amount).replace(".", ","));
+                          }}
+                          onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
+                          onBlur={() => setEditingField(null)}
+                          onKeyDown={amountKeyDown(editingText)}
+                          placeholder="0"
+                          className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10.5px] text-mutedLight">Комментарий</span>
+                        <input
+                          type="text"
+                          disabled={!rowEditableInputs}
+                          value={e.comment}
+                          onChange={(ev) => updateExpense(i, "comment", ev.target.value)}
+                          placeholder="Комментарий"
+                          className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                        />
+                      </label>
+                      {(effectiveLocked || showCountdown) && (
+                        <div className="flex items-center justify-end gap-2">
+                          {effectiveLocked &&
+                            (e.requestPending ? (
+                              <span className="text-[11px] text-mutedLight italic">Ожидает</span>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={!canEditSection}
+                                onClick={() => requestExpenseUnlock(e)}
+                                className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
+                              >
+                                Запрос
+                              </button>
+                            ))}
+                          {showCountdown && (
+                            <span className="text-[9.5px] text-mutedLight italic">
+                              ещё {minutesLeft(e.unlockExpiresAt as string, nowTick)}м
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 pb-2.5 pt-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                  <div>Дата</div>
+                  <div>Статья</div>
+                  <div>Сумма</div>
+                  <div>Комментарий</div>
+                  <div>Строка</div>
+                </div>
 
-              return (
-                <div
-                  key={e.id ?? `new-${i}`}
-                  className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
-                >
-                  <input
-                    type="date"
-                    disabled={!rowEditableInputs}
-                    value={e.date}
-                    onChange={(ev) => updateExpense(i, "date", ev.target.value)}
-                    className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-                  />
-                  <input
-                    type="text"
-                    disabled={!rowEditableInputs}
-                    value={e.category}
-                    onChange={(ev) => updateExpense(i, "category", ev.target.value)}
-                    placeholder="Статья расхода"
-                    className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-                  />
-                  {(() => {
-                    const cellKey = `expense-${i}-amount`;
-                    const isEditing = editingField === cellKey;
-                    return (
+                {visibleExpenses.map((e) => {
+                  const i = expenses.indexOf(e);
+                  const effectiveLocked = expenseEffectivelyLocked(e);
+                  const rowEditableInputs = canEditSection && !effectiveLocked;
+                  const showCountdown = !effectiveLocked && e.unlockExpiresAt;
+
+                  return (
+                    <div
+                      key={e.id ?? `new-${i}`}
+                      className="grid grid-cols-[130px_220px_120px_1fr_110px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                    >
+                      <input
+                        type="date"
+                        disabled={!rowEditableInputs}
+                        value={e.date}
+                        onChange={(ev) => updateExpense(i, "date", ev.target.value)}
+                        className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                      />
                       <input
                         type="text"
-                        inputMode="decimal"
                         disabled={!rowEditableInputs}
-                        value={isEditing ? editingText : formatGrouped(e.amount, 2)}
-                        onFocus={() => {
-                          setEditingField(cellKey);
-                          setEditingText(e.amount === "" ? "" : String(e.amount).replace(".", ","));
-                        }}
-                        onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
-                        onBlur={() => setEditingField(null)}
-                        onKeyDown={amountKeyDown(editingText)}
-                        placeholder="0"
-                        className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                        value={e.category}
+                        onChange={(ev) => updateExpense(i, "category", ev.target.value)}
+                        placeholder="Статья расхода"
+                        className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
                       />
-                    );
-                  })()}
-                  <input
-                    type="text"
-                    disabled={!rowEditableInputs}
-                    value={e.comment}
-                    onChange={(ev) => updateExpense(i, "comment", ev.target.value)}
-                    placeholder="Комментарий"
-                    className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-                  />
-                  <div className="flex flex-col items-end gap-0.5">
-                    {effectiveLocked &&
-                      (e.requestPending ? (
-                        <span className="text-[11px] text-mutedLight italic">Ожидает</span>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={!canEditSection}
-                          onClick={() => requestExpenseUnlock(e)}
-                          className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
-                        >
-                          Запрос
-                        </button>
-                      ))}
-                    {showCountdown && (
-                      <span className="text-[9.5px] text-mutedLight italic">
-                        ещё {minutesLeft(e.unlockExpiresAt as string, nowTick)}м
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                      {(() => {
+                        const cellKey = `expense-${i}-amount`;
+                        const isEditing = editingField === cellKey;
+                        return (
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            disabled={!rowEditableInputs}
+                            value={isEditing ? editingText : formatGrouped(e.amount, 2)}
+                            onFocus={() => {
+                              setEditingField(cellKey);
+                              setEditingText(e.amount === "" ? "" : String(e.amount).replace(".", ","));
+                            }}
+                            onChange={(ev) => updateExpense(i, "amount", ev.target.value)}
+                            onBlur={() => setEditingField(null)}
+                            onKeyDown={amountKeyDown(editingText)}
+                            placeholder="0"
+                            className="w-full box-border text-right rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                          />
+                        );
+                      })()}
+                      <input
+                        type="text"
+                        disabled={!rowEditableInputs}
+                        value={e.comment}
+                        onChange={(ev) => updateExpense(i, "comment", ev.target.value)}
+                        placeholder="Комментарий"
+                        className="w-full box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12.5px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                      />
+                      <div className="flex flex-col items-end gap-0.5">
+                        {effectiveLocked &&
+                          (e.requestPending ? (
+                            <span className="text-[11px] text-mutedLight italic">Ожидает</span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={!canEditSection}
+                              onClick={() => requestExpenseUnlock(e)}
+                              className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
+                            >
+                              Запрос
+                            </button>
+                          ))}
+                        {showCountdown && (
+                          <span className="text-[9.5px] text-mutedLight italic">
+                            ещё {minutesLeft(e.unlockExpiresAt as string, nowTick)}м
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
 
             <button
               type="button"

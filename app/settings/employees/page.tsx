@@ -5,6 +5,7 @@ import { authFetch } from "@/lib/apiClient";
 import { supabase } from "@/lib/supabaseClient";
 import { SECTIONS, emptyPermissions, type Permissions } from "@/lib/permissions";
 import { useAuth } from "@/components/AuthGate";
+import { useSiteVersion } from "@/components/SiteVersion";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 
 const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
@@ -289,6 +290,7 @@ function EmployeeAccessPanel({
 
 export default function EmployeesPage() {
   const { email: myEmail, isAdmin, isOwner, permissions } = useAuth();
+  const { mobileLayout } = useSiteVersion();
   const canView = isAdmin || permissions["settings.employees"].canView;
   const canEdit = isAdmin || permissions["settings.employees"].canEdit;
   const [tab, setTab] = useState<"employees" | "roles" | "stores">("employees");
@@ -834,125 +836,165 @@ export default function EmployeesPage() {
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="text-[15px] font-bold">Список сотрудников</div>
             <div className="overflow-x-auto flex flex-col">
-            <div className="min-w-[640px] grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-              <div>Имя</div>
-              <div>Email</div>
-              <div>Города</div>
-              <div>Роль</div>
-              <div></div>
-            </div>
-            {employees.map((emp) => (
-              <Fragment key={emp.id}>
-                <div className="min-w-[640px] grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]">
-                  <div className="flex flex-col gap-1">
-                    <input
-                      type="text"
-                      value={getEditedFullName(emp)}
-                      placeholder="Без имени"
-                      disabled={!canEdit}
-                      onChange={(e) => updateEmployeeEdit(emp, { fullName: e.target.value })}
-                      className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
-                    />
-                    <div className="flex items-center gap-1.5 text-[10.5px] text-mutedLight pl-0.5">
-                      <span className={`w-1.5 h-1.5 rounded-full ${isOnline(emp) ? "bg-[#3E6B44]" : "bg-mutedLight"}`} />
-                      {isOnline(emp) ? "Онлайн" : "Оффлайн"}
-                    </div>
-                  </div>
-                  <input
-                    type="email"
-                    value={getEditedEmail(emp)}
-                    disabled={!canEdit}
-                    onChange={(e) => updateEmployeeEdit(emp, { email: e.target.value })}
-                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
-                  />
-                  <div className="text-muted text-[12px] truncate" title={resolveStoreLabel(emp, roles, cities)}>
-                    {resolveStoreLabel(emp, roles, cities)}
-                  </div>
-                  <select
-                    value={getEditedRoleChoice(emp)}
-                    onChange={(e) => updateEmployeeEdit(emp, { roleChoice: e.target.value })}
-                    disabled={emp.email === myEmail || !canEdit || (emp.role === "owner" && !isOwner)}
-                    className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50"
-                  >
-                    {(isOwner || emp.role === "owner") && <option value="owner">Владелец</option>}
-                    <option value="admin">Администратор</option>
-                    <option value="">Без роли</option>
-                    {sharedRoles.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                    {(() => {
-                      const current = emp.roleId ? roles.find((r) => r.id === emp.roleId) : null;
-                      return current?.is_personal ? (
-                        <option value={current.id}>Личный доступ</option>
-                      ) : null;
-                    })()}
-                  </select>
-                  <div className="flex flex-col gap-1">
-                    {isEmployeeDirty(emp) ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleSaveEmployeeEdit(emp)}
-                          disabled={savingEmployeeId === emp.id}
-                          className="text-[12px] text-accent font-bold text-left disabled:opacity-50"
-                        >
-                          {savingEmployeeId === emp.id ? "Сохраняем…" : "Сохранить"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => discardEmployeeEdit(emp)}
-                          className="text-[12px] text-muted text-left"
-                        >
-                          Отмена
-                        </button>
-                      </>
-                    ) : justSavedEmployeeId === emp.id ? (
-                      <span className="text-[12px] text-accent font-bold">Сохранено</span>
-                    ) : (
-                      <>
-                        {emp.role !== "owner" && (
-                          <button
-                            type="button"
-                            onClick={() => setAccessEditingId(accessEditingId === emp.id ? null : emp.id)}
-                            className="text-[12px] text-accent font-semibold text-left"
-                          >
-                            Права
-                          </button>
-                        )}
-                        {canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setResettingId(resettingId === emp.id ? null : emp.id);
-                              setResetPasswordValue("");
-                            }}
-                            className="text-[12px] text-accent font-semibold text-left"
-                          >
-                            Пароль
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => toggleLoginHistory(emp)}
-                          className="text-[12px] text-accent font-semibold text-left"
-                        >
-                          История входа
-                        </button>
-                        <button
-                          type="button"
-                          disabled={emp.email === myEmail || emp.role === "owner" || !canEdit}
-                          onClick={() => handleDeleteEmployee(emp)}
-                          title={emp.role === "owner" ? "Владельца нельзя удалить" : undefined}
-                          className="text-[12px] text-[#A34B36] font-semibold disabled:opacity-40 text-left"
-                        >
-                          Удалить
-                        </button>
-                      </>
-                    )}
-                  </div>
+            {!mobileLayout && (
+              <div className="min-w-[640px] grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                <div>Имя</div>
+                <div>Email</div>
+                <div>Города</div>
+                <div>Роль</div>
+                <div></div>
+              </div>
+            )}
+            {employees.map((emp) => {
+              const nameInput = (
+                <input
+                  type="text"
+                  value={getEditedFullName(emp)}
+                  placeholder="Без имени"
+                  disabled={!canEdit}
+                  onChange={(e) => updateEmployeeEdit(emp, { fullName: e.target.value })}
+                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50 w-full"
+                />
+              );
+              const onlineStatus = (
+                <div className="flex items-center gap-1.5 text-[10.5px] text-mutedLight pl-0.5">
+                  <span className={`w-1.5 h-1.5 rounded-full ${isOnline(emp) ? "bg-[#3E6B44]" : "bg-mutedLight"}`} />
+                  {isOnline(emp) ? "Онлайн" : "Оффлайн"}
                 </div>
+              );
+              const emailInput = (
+                <input
+                  type="email"
+                  value={getEditedEmail(emp)}
+                  disabled={!canEdit}
+                  onChange={(e) => updateEmployeeEdit(emp, { email: e.target.value })}
+                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50 w-full"
+                />
+              );
+              const roleSelect = (
+                <select
+                  value={getEditedRoleChoice(emp)}
+                  onChange={(e) => updateEmployeeEdit(emp, { roleChoice: e.target.value })}
+                  disabled={emp.email === myEmail || !canEdit || (emp.role === "owner" && !isOwner)}
+                  className="border border-border rounded-md px-2 py-1.5 text-[12.5px] disabled:opacity-50 w-full"
+                >
+                  {(isOwner || emp.role === "owner") && <option value="owner">Владелец</option>}
+                  <option value="admin">Администратор</option>
+                  <option value="">Без роли</option>
+                  {sharedRoles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                  {(() => {
+                    const current = emp.roleId ? roles.find((r) => r.id === emp.roleId) : null;
+                    return current?.is_personal ? (
+                      <option value={current.id}>Личный доступ</option>
+                    ) : null;
+                  })()}
+                </select>
+              );
+              const actions = isEmployeeDirty(emp) ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveEmployeeEdit(emp)}
+                    disabled={savingEmployeeId === emp.id}
+                    className="text-[12px] text-accent font-bold text-left disabled:opacity-50"
+                  >
+                    {savingEmployeeId === emp.id ? "Сохраняем…" : "Сохранить"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => discardEmployeeEdit(emp)}
+                    className="text-[12px] text-muted text-left"
+                  >
+                    Отмена
+                  </button>
+                </>
+              ) : justSavedEmployeeId === emp.id ? (
+                <span className="text-[12px] text-accent font-bold">Сохранено</span>
+              ) : (
+                <>
+                  {emp.role !== "owner" && (
+                    <button
+                      type="button"
+                      onClick={() => setAccessEditingId(accessEditingId === emp.id ? null : emp.id)}
+                      className="text-[12px] text-accent font-semibold text-left"
+                    >
+                      Права
+                    </button>
+                  )}
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResettingId(resettingId === emp.id ? null : emp.id);
+                        setResetPasswordValue("");
+                      }}
+                      className="text-[12px] text-accent font-semibold text-left"
+                    >
+                      Пароль
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => toggleLoginHistory(emp)}
+                    className="text-[12px] text-accent font-semibold text-left"
+                  >
+                    История входа
+                  </button>
+                  <button
+                    type="button"
+                    disabled={emp.email === myEmail || emp.role === "owner" || !canEdit}
+                    onClick={() => handleDeleteEmployee(emp)}
+                    title={emp.role === "owner" ? "Владельца нельзя удалить" : undefined}
+                    className="text-[12px] text-[#A34B36] font-semibold disabled:opacity-40 text-left"
+                  >
+                    Удалить
+                  </button>
+                </>
+              );
+              const cityLabel = resolveStoreLabel(emp, roles, cities);
+
+              return (
+              <Fragment key={emp.id}>
+                {mobileLayout ? (
+                  <div className="flex flex-col gap-2 py-3 border-b border-borderSoft text-[13px]">
+                    <div className="flex flex-col gap-1">
+                      {nameInput}
+                      {onlineStatus}
+                    </div>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10.5px] text-mutedLight">Email</span>
+                      {emailInput}
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10.5px] text-mutedLight">Города</span>
+                      <div className="text-muted text-[12px]" title={cityLabel}>
+                        {cityLabel}
+                      </div>
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10.5px] text-mutedLight">Роль</span>
+                      {roleSelect}
+                    </label>
+                    <div className="flex items-center gap-3 flex-wrap pt-1">{actions}</div>
+                  </div>
+                ) : (
+                  <div className="min-w-[640px] grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]">
+                    <div className="flex flex-col gap-1">
+                      {nameInput}
+                      {onlineStatus}
+                    </div>
+                    {emailInput}
+                    <div className="text-muted text-[12px] truncate" title={cityLabel}>
+                      {cityLabel}
+                    </div>
+                    {roleSelect}
+                    <div className="flex flex-col gap-1">{actions}</div>
+                  </div>
+                )}
                 {loginHistoryId === emp.id && (
                   <div className="pb-3 border-b border-borderSoft flex flex-col gap-1.5">
                     <div className="text-[11px] uppercase tracking-wide text-mutedLight">История входа</div>
@@ -1012,7 +1054,8 @@ export default function EmployeesPage() {
                   </div>
                 )}
               </Fragment>
-            ))}
+              );
+            })}
             </div>
           </div>
 
@@ -1118,7 +1161,7 @@ export default function EmployeesPage() {
         <div className="flex flex-col gap-4">
           {cities.map((city) => (
             <div key={city.id} className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <input
                   type="text"
                   value={cityEdits[city.id] ?? city.name}
@@ -1256,7 +1299,7 @@ function RoleCard({
 
   return (
     <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <input
           type="text"
           value={name}

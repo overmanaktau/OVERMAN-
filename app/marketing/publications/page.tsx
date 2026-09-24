@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
+import { useSiteVersion } from "@/components/SiteVersion";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { DataTableCard } from "@/components/DataTableCard";
@@ -84,6 +85,15 @@ function parseYmd(s: string): Date {
   return new Date(y, m - 1, day);
 }
 
+function StatField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-muted">{label}</span>
+      <span className="num text-muted">{value}</span>
+    </div>
+  );
+}
+
 function avg(nums: number[]): number {
   if (nums.length === 0) return 0;
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
@@ -91,6 +101,7 @@ function avg(nums: number[]): number {
 
 export default function PublicationsPage() {
   const { isAdmin, permissions, cities, stores, accessibleStoreCodes } = useAuth();
+  const { mobileLayout } = useSiteVersion();
   const canView = isAdmin || permissions["marketing.publications"].canView;
   const canEdit = isAdmin || permissions["marketing.publications"].canEdit;
 
@@ -393,29 +404,43 @@ export default function PublicationsPage() {
               toCsvRow={(r) => [r.label, r.count, r.reach, r.views, r.shares]}
               csvFilename="publications-by-weekday.csv"
             >
-              {(rows) => (
-                <>
-                  <div className="min-w-[520px] grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                    <div>День</div>
-                    <div>Постов</div>
-                    <div>Охват</div>
-                    <div>Просмотры</div>
-                    <div>Переслано</div>
+              {(rows) =>
+                mobileLayout ? (
+                  <div className="flex flex-col gap-2">
+                    {rows.map((r) => (
+                      <div key={r.label} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-2.5 text-[13px]">
+                        <div className="font-semibold">{r.label}</div>
+                        <StatField label="Постов" value={r.count} />
+                        <StatField label="Охват" value={r.reach.toLocaleString("ru-RU")} />
+                        <StatField label="Просмотры" value={r.views.toLocaleString("ru-RU")} />
+                        <StatField label="Переслано" value={r.shares.toLocaleString("ru-RU")} />
+                      </div>
+                    ))}
                   </div>
-                  {rows.map((r) => (
-                    <div
-                      key={r.label}
-                      className="min-w-[520px] grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
-                    >
-                      <div>{r.label}</div>
-                      <div className="num">{r.count}</div>
-                      <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
-                      <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
-                      <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
+                ) : (
+                  <>
+                    <div className="min-w-[520px] grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                      <div>День</div>
+                      <div>Постов</div>
+                      <div>Охват</div>
+                      <div>Просмотры</div>
+                      <div>Переслано</div>
                     </div>
-                  ))}
-                </>
-              )}
+                    {rows.map((r) => (
+                      <div
+                        key={r.label}
+                        className="min-w-[520px] grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
+                      >
+                        <div>{r.label}</div>
+                        <div className="num">{r.count}</div>
+                        <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
+                        <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
+                        <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
+                      </div>
+                    ))}
+                  </>
+                )
+              }
             </DataTableCard>
 
             <DataTableCard
@@ -429,6 +454,18 @@ export default function PublicationsPage() {
               {(rows) =>
                 rows.length === 0 ? (
                   <div className="text-sm text-muted py-4">Нет публикаций с указанным временем</div>
+                ) : mobileLayout ? (
+                  <div className="max-h-[320px] overflow-y-auto flex flex-col gap-2">
+                    {rows.map((r) => (
+                      <div key={r.hour} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-2.5 text-[13px]">
+                        <div className="font-semibold">{pad2(r.hour)}:00</div>
+                        <StatField label="Постов" value={r.count} />
+                        <StatField label="Охват" value={r.reach.toLocaleString("ru-RU")} />
+                        <StatField label="Просмотры" value={r.views.toLocaleString("ru-RU")} />
+                        <StatField label="Переслано" value={r.shares.toLocaleString("ru-RU")} />
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <>
                     <div className="min-w-[520px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
@@ -466,31 +503,46 @@ export default function PublicationsPage() {
             toCsvRow={(r) => [POST_TYPE_LABEL[r.type], r.count, r.reach, r.views, r.shares, r.reactions]}
             csvFilename="publications-by-type.csv"
           >
-            {(rows) => (
-              <>
-                <div className="min-w-[620px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                  <div>Тип</div>
-                  <div>Постов</div>
-                  <div>Охват</div>
-                  <div>Просмотры</div>
-                  <div>Переслано</div>
-                  <div>Реакции</div>
+            {(rows) =>
+              mobileLayout ? (
+                <div className="flex flex-col gap-2">
+                  {rows.map((r) => (
+                    <div key={r.type} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-2.5 text-[13px]">
+                      <div className="font-semibold">{POST_TYPE_LABEL[r.type]}</div>
+                      <StatField label="Постов" value={r.count} />
+                      <StatField label="Охват" value={r.reach.toLocaleString("ru-RU")} />
+                      <StatField label="Просмотры" value={r.views.toLocaleString("ru-RU")} />
+                      <StatField label="Переслано" value={r.shares.toLocaleString("ru-RU")} />
+                      <StatField label="Реакции" value={r.reactions.toLocaleString("ru-RU")} />
+                    </div>
+                  ))}
                 </div>
-                {rows.map((r) => (
-                  <div
-                    key={r.type}
-                    className="min-w-[620px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
-                  >
-                    <div className="font-semibold">{POST_TYPE_LABEL[r.type]}</div>
-                    <div className="num">{r.count}</div>
-                    <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
-                    <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
-                    <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
-                    <div className="num text-muted">{r.reactions.toLocaleString("ru-RU")}</div>
+              ) : (
+                <>
+                  <div className="min-w-[620px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                    <div>Тип</div>
+                    <div>Постов</div>
+                    <div>Охват</div>
+                    <div>Просмотры</div>
+                    <div>Переслано</div>
+                    <div>Реакции</div>
                   </div>
-                ))}
-              </>
-            )}
+                  {rows.map((r) => (
+                    <div
+                      key={r.type}
+                      className="min-w-[620px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
+                    >
+                      <div className="font-semibold">{POST_TYPE_LABEL[r.type]}</div>
+                      <div className="num">{r.count}</div>
+                      <div className="num text-muted">{r.reach.toLocaleString("ru-RU")}</div>
+                      <div className="num text-muted">{r.views.toLocaleString("ru-RU")}</div>
+                      <div className="num text-muted">{r.shares.toLocaleString("ru-RU")}</div>
+                      <div className="num text-muted">{r.reactions.toLocaleString("ru-RU")}</div>
+                    </div>
+                  ))}
+                </>
+              )
+            }
           </DataTableCard>
 
           <DataTableCard
@@ -530,6 +582,43 @@ export default function PublicationsPage() {
             {(rows) =>
               rows.length === 0 ? (
                 <div className="text-sm text-muted py-4">Нет публикаций за выбранный период</div>
+              ) : mobileLayout ? (
+                <div className="max-h-[520px] overflow-y-auto flex flex-col gap-2">
+                  {rows.map((e) => {
+                    const jsDay = new Date(`${e.entry_date}T00:00:00`).getDay();
+                    const weekdayLabel = WEEKDAY_LABELS[WEEKDAY_JS_ORDER.indexOf(jsDay)];
+                    return (
+                      <div key={e.id} className="flex flex-col gap-1.5 rounded-lg border border-borderSoft p-3 text-[13px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">
+                            {e.entry_date.slice(8, 10)}.{e.entry_date.slice(5, 7)} · {weekdayLabel}
+                            {e.entry_time ? ` · ${e.entry_time.slice(0, 5)}` : ""}
+                          </span>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(e.id)}
+                              className="text-[#A34B36] font-semibold text-[12px]"
+                            >
+                              Удалить
+                            </button>
+                          )}
+                        </div>
+                        <div className="text-muted text-[12px]">
+                          {POST_TYPE_LABEL[e.post_type]} · {SOURCE_LABEL[e.source]} · {storeName(e.store)}
+                        </div>
+                        {e.caption && <div className="text-muted">{e.caption}</div>}
+                        <div className="grid grid-cols-2 gap-1">
+                          <StatField label="Охват" value={e.reach.toLocaleString("ru-RU")} />
+                          <StatField label="Просмотры" value={e.views.toLocaleString("ru-RU")} />
+                          <StatField label="Лайки" value={e.likes.toLocaleString("ru-RU")} />
+                          <StatField label="Комменты" value={e.comments.toLocaleString("ru-RU")} />
+                          <StatField label="Переслано" value={e.shares.toLocaleString("ru-RU")} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
                 <div className="max-h-[520px] overflow-auto rounded-md">
                   <div className="min-w-[1320px]">

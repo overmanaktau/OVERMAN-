@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { authFetch } from "@/lib/apiClient";
 import { useAuth } from "@/components/AuthGate";
+import { useSiteVersion } from "@/components/SiteVersion";
 import PeriodFilterBar, { type PeriodMode } from "@/components/PeriodFilterBar";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -45,6 +46,7 @@ function formatDateTime(iso: string) {
 
 export default function RequestsPage() {
   const { isAdmin, permissions } = useAuth();
+  const { mobileLayout } = useSiteVersion();
   const canAct = isAdmin || permissions["requests"].canEdit;
   const [requests, setRequests] = useState<EditRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,6 +149,55 @@ export default function RequestsPage() {
           <div className="text-sm text-muted">Загрузка…</div>
         ) : visibleRequests.length === 0 ? (
           <div className="text-sm text-muted">{showHistory ? "За этот период запросов нет." : "Запросов пока нет."}</div>
+        ) : mobileLayout ? (
+          <div className="flex flex-col gap-2.5">
+            {visibleRequests.map((r) => (
+              <div key={r.id} className="flex flex-col gap-1.5 rounded-lg border border-borderSoft p-3 text-[13px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{TABLE_LABEL[r.table_name]}</span>
+                  <span
+                    className={`text-[11px] font-semibold uppercase tracking-wide rounded-full px-2.5 py-1 ${
+                      r.status === "pending"
+                        ? "bg-[#EDE8DC] text-muted"
+                        : r.status === "approved"
+                        ? "bg-[#DDEBD9] text-[#3E6B44]"
+                        : "bg-[#F2DCD5] text-[#A34B36]"
+                    }`}
+                  >
+                    {STATUS_LABEL[r.status]}
+                  </span>
+                </div>
+                <div className="text-muted">{r.context ?? "—"}</div>
+                <div className="text-mutedLight text-[11px]">{formatDateTime(r.created_at)}</div>
+                {r.status !== "pending" && r.reviewed_by_name && (
+                  <div className="text-[10.5px] text-mutedLight">
+                    {r.reviewed_by_name}
+                    {r.reviewed_at ? `, ${formatDateTime(r.reviewed_at)}` : ""}
+                  </div>
+                )}
+                {canAct && r.status === "pending" && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={actioning[r.id]}
+                      onClick={() => act(r.id, "approve")}
+                      className="text-[12.5px] font-bold text-paper bg-accent rounded-lg px-3 py-1.5 disabled:opacity-50"
+                    >
+                      Одобрить
+                    </button>
+                    <button
+                      type="button"
+                      disabled={actioning[r.id]}
+                      onClick={() => act(r.id, "deny")}
+                      className="text-[12.5px] font-semibold text-[#A34B36] border border-[#DDD6C8] rounded-lg px-3 py-1.5 disabled:opacity-50"
+                    >
+                      Отклонить
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="overflow-x-auto flex flex-col">
             <div

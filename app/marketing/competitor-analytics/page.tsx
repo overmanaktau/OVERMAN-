@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
+import { useSiteVersion } from "@/components/SiteVersion";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -132,6 +133,7 @@ function engagementScore(item: ContentItem, sortKey: SortKey): number {
 
 export default function CompetitorAnalyticsPage() {
   const { isAdmin, permissions, fullName, email } = useAuth();
+  const { mobileLayout } = useSiteVersion();
   const canView = isAdmin || permissions["marketing.competitor_analytics"].canView;
   const canEdit = isAdmin || permissions["marketing.competitor_analytics"].canEdit;
 
@@ -475,41 +477,81 @@ export default function CompetitorAnalyticsPage() {
                       {PLATFORM_LABEL[platform]}
                     </div>
                     <div className="flex flex-col">
-                      {rows.map((c) => (
-                        <div
-                          key={c.id}
-                          className={`grid grid-cols-[auto_1fr_1fr_auto] gap-3 items-center py-2 border-b border-borderSoft text-[13px] ${
-                            c.active ? "" : "opacity-50"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={c.active}
-                            disabled={!canEdit}
-                            onChange={() => toggleActive(c.id)}
-                            title={c.active ? "Отключить синхронизацию для этого конкурента" : "Включить синхронизацию для этого конкурента"}
-                            className="w-4 h-4 accent-accent"
-                          />
-                          <a
-                            href={competitorProfileUrl(c)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-semibold hover:underline"
+                      {rows.map((c) =>
+                        mobileLayout ? (
+                          <div
+                            key={c.id}
+                            className={`flex flex-col gap-1 py-2.5 border-b border-borderSoft text-[13px] ${
+                              c.active ? "" : "opacity-50"
+                            }`}
                           >
-                            @{c.handle}
-                          </a>
-                          <div className="text-muted">{c.display_name || "—"}</div>
-                          {canEdit && (
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(c.id)}
-                              className="text-[#A34B36] font-semibold text-left"
+                            <div className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={c.active}
+                                disabled={!canEdit}
+                                onChange={() => toggleActive(c.id)}
+                                title={c.active ? "Отключить синхронизацию для этого конкурента" : "Включить синхронизацию для этого конкурента"}
+                                className="w-4 h-4 accent-accent flex-none"
+                              />
+                              <a
+                                href={competitorProfileUrl(c)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-semibold hover:underline truncate min-w-0"
+                              >
+                                @{c.handle}
+                              </a>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 pl-6">
+                              <div className="text-muted truncate min-w-0">{c.display_name || "—"}</div>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(c.id)}
+                                  className="text-[#A34B36] font-semibold flex-none"
+                                >
+                                  Удалить
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            key={c.id}
+                            className={`grid grid-cols-[auto_1fr_1fr_auto] gap-3 items-center py-2 border-b border-borderSoft text-[13px] ${
+                              c.active ? "" : "opacity-50"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={c.active}
+                              disabled={!canEdit}
+                              onChange={() => toggleActive(c.id)}
+                              title={c.active ? "Отключить синхронизацию для этого конкурента" : "Включить синхронизацию для этого конкурента"}
+                              className="w-4 h-4 accent-accent"
+                            />
+                            <a
+                              href={competitorProfileUrl(c)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-semibold hover:underline truncate min-w-0"
                             >
-                              Удалить
-                            </button>
-                          )}
-                        </div>
-                      ))}
+                              @{c.handle}
+                            </a>
+                            <div className="text-muted truncate min-w-0">{c.display_name || "—"}</div>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(c.id)}
+                                className="text-[#A34B36] font-semibold text-left"
+                              >
+                                Удалить
+                              </button>
+                            )}
+                          </div>
+                        )
+                      )}
                     </div>
                   </div>
                 );
@@ -721,37 +763,51 @@ export default function CompetitorAnalyticsPage() {
                 {displayedTopContent.map((item, i) => {
                   const rate = item.views > 0 ? engagementRate(item) : null;
                   const likeConversion = item.views > 0 ? (item.likes / item.views) * 100 : null;
-                  return (
+                  const stats = (
+                    <>
+                      <div className="text-muted num">
+                        👁 {item.views} · ♥ {item.likes} · 💬 {item.comments} · ✈ {item.shares}
+                      </div>
+                      {rate !== null && (
+                        <div className="text-mutedLight text-[11px] num">
+                          Вовлечённость: {rate.toFixed(1)}%
+                          {likeConversion !== null && ` · лайки/просмотры: ${likeConversion.toFixed(1)}%`}
+                        </div>
+                      )}
+                    </>
+                  );
+                  const content = (
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <a
+                        href={item.post_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold truncate hover:underline"
+                      >
+                        @{item.tracked_competitors?.handle ?? "—"}
+                        {item.tracked_competitors?.display_name
+                          ? ` · ${item.tracked_competitors.display_name}`
+                          : ""}
+                      </a>
+                      {item.caption && <div className="text-muted truncate">{item.caption}</div>}
+                    </div>
+                  );
+                  return mobileLayout ? (
+                    <div key={item.id} className="flex flex-col gap-1.5 py-3 border-b border-borderSoft text-[13px]">
+                      <div className="flex items-start gap-3">
+                        <div className="text-mutedLight font-semibold w-5 flex-none">{i + 1}</div>
+                        {content}
+                      </div>
+                      <div className="flex flex-col gap-0.5 pl-8">{stats}</div>
+                    </div>
+                  ) : (
                     <div
                       key={item.id}
                       className="grid grid-cols-[auto_1fr_auto] gap-3 items-center py-3 border-b border-borderSoft text-[13px]"
                     >
                       <div className="text-mutedLight font-semibold w-5">{i + 1}</div>
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <a
-                          href={item.post_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-semibold truncate hover:underline"
-                        >
-                          @{item.tracked_competitors?.handle ?? "—"}
-                          {item.tracked_competitors?.display_name
-                            ? ` · ${item.tracked_competitors.display_name}`
-                            : ""}
-                        </a>
-                        {item.caption && <div className="text-muted truncate">{item.caption}</div>}
-                      </div>
-                      <div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
-                        <div className="text-muted num">
-                          👁 {item.views} · ♥ {item.likes} · 💬 {item.comments} · ✈ {item.shares}
-                        </div>
-                        {rate !== null && (
-                          <div className="text-mutedLight text-[11px] num">
-                            Вовлечённость: {rate.toFixed(1)}%
-                            {likeConversion !== null && ` · лайки/просмотры: ${likeConversion.toFixed(1)}%`}
-                          </div>
-                        )}
-                      </div>
+                      {content}
+                      <div className="flex flex-col items-end gap-0.5 whitespace-nowrap">{stats}</div>
                     </div>
                   );
                 })}

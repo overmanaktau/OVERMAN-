@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
+import { useSiteVersion } from "@/components/SiteVersion";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
@@ -81,6 +82,18 @@ type RegisterSalesRow = {
 // the returned amounts back — "what it looked like before the return came
 // in" — purely for display; nothing that sums across rows elsewhere in the
 // app ever uses this, only this page's own toggle.
+function SalesField({ label, value, extra }: { label: string; value: React.ReactNode; extra?: string | null }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-muted font-normal">{label}</span>
+      <span className="num">
+        {value}
+        {extra && <span className="text-mutedLight font-normal"> {extra}</span>}
+      </span>
+    </div>
+  );
+}
+
 function grossOf<T extends { revenue: number; receipts: number; items: number; returnedAmount: number; returnedReceipts: number; returnedItems: number }>(
   r: T
 ) {
@@ -93,6 +106,7 @@ function grossOf<T extends { revenue: number; receipts: number; items: number; r
 
 export default function SalesPage() {
   const { isAdmin, permissions, stores } = useAuth();
+  const { mobileLayout } = useSiteVersion();
   const { selected: selectedStores } = useStoreSelection();
   const canView = isAdmin || permissions["marketing.statistics"].canView;
 
@@ -407,9 +421,104 @@ export default function SalesPage() {
           <div className="text-sm text-muted py-4">Загрузка…</div>
         ) : registerSales.length === 0 ? (
           <div className="text-sm text-muted py-4">Нет данных за этот период.</div>
+        ) : mobileLayout ? (
+          <div className="flex flex-col gap-3">
+            {visibleGroups.map((group) => {
+              const groupRevenue = group.rows.reduce((acc, r) => acc + displayed(r).revenue, 0);
+              const groupReceipts = group.rows.reduce((acc, r) => acc + displayed(r).receipts, 0);
+              const groupItems = group.rows.reduce((acc, r) => acc + displayed(r).items, 0);
+              const groupReturned = {
+                returnedAmount: group.rows.reduce((acc, r) => acc + r.returnedAmount, 0),
+                returnedReceipts: group.rows.reduce((acc, r) => acc + r.returnedReceipts, 0),
+                returnedItems: group.rows.reduce((acc, r) => acc + r.returnedItems, 0),
+              };
+              const groupCost = sumCost(group.rows);
+              return (
+                <div key={group.store ?? "none"} className="flex flex-col gap-2">
+                  {group.rows.map((r) => {
+                    const d = displayed(r);
+                    const avgCheck = d.receipts > 0 ? d.revenue / d.receipts : 0;
+                    const checkDepth = d.receipts > 0 ? d.items / d.receipts : 0;
+                    return (
+                      <div key={r.registerId} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
+                        <div className="font-semibold">
+                          {r.name} <span className="text-muted font-normal">· {storeLabel(r.store)}</span>
+                        </div>
+                        <SalesField
+                          label="Выручка"
+                          value={money(d.revenue)}
+                          extra={!showGross && r.returnedAmount > 0 ? `(${money(r.returnedAmount)})` : null}
+                        />
+                        <SalesField
+                          label="Чеков"
+                          value={String(d.receipts)}
+                          extra={!showGross && r.returnedReceipts > 0 ? `(${r.returnedReceipts})` : null}
+                        />
+                        <SalesField label="Средний чек" value={money(avgCheck)} />
+                        <SalesField
+                          label="Кол-во товара"
+                          value={d.items.toLocaleString("ru-RU")}
+                          extra={!showGross && r.returnedItems > 0 ? `(${r.returnedItems})` : null}
+                        />
+                        <SalesField label="Глубина чека" value={checkDepth.toFixed(3)} />
+                        <SalesField label="Вал. прибыль" value={grossProfit(d.revenue, r.cost)} />
+                        <SalesField label="Возврат" value={returnSummary(r)} />
+                      </div>
+                    );
+                  })}
+                  {group.rows.length > 1 && (
+                    <div className="flex flex-col gap-1 rounded-lg border border-[#E4DFC8] bg-weekendTint p-3 text-[13px] font-bold">
+                      <div>Итого по {group.label}</div>
+                      <SalesField
+                        label="Выручка"
+                        value={money(groupRevenue)}
+                        extra={!showGross && groupReturned.returnedAmount > 0 ? `(${money(groupReturned.returnedAmount)})` : null}
+                      />
+                      <SalesField
+                        label="Чеков"
+                        value={String(groupReceipts)}
+                        extra={!showGross && groupReturned.returnedReceipts > 0 ? `(${groupReturned.returnedReceipts})` : null}
+                      />
+                      <SalesField label="Средний чек" value={groupReceipts > 0 ? money(groupRevenue / groupReceipts) : "—"} />
+                      <SalesField
+                        label="Кол-во товара"
+                        value={groupItems.toLocaleString("ru-RU")}
+                        extra={!showGross && groupReturned.returnedItems > 0 ? `(${groupReturned.returnedItems})` : null}
+                      />
+                      <SalesField label="Глубина чека" value={groupReceipts > 0 ? (groupItems / groupReceipts).toFixed(3) : "—"} />
+                      <SalesField label="Вал. прибыль" value={grossProfit(groupRevenue, groupCost)} />
+                      <SalesField label="Возврат" value={returnSummary(groupReturned)} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div className="flex flex-col gap-1 rounded-lg border border-[#E4DFC8] p-3 text-[13px] font-bold">
+              <div>Итого</div>
+              <SalesField
+                label="Выручка"
+                value={money(totalRevenue)}
+                extra={!showGross && totalReturned.returnedAmount > 0 ? `(${money(totalReturned.returnedAmount)})` : null}
+              />
+              <SalesField
+                label="Чеков"
+                value={String(totalReceipts)}
+                extra={!showGross && totalReturned.returnedReceipts > 0 ? `(${totalReturned.returnedReceipts})` : null}
+              />
+              <SalesField label="Средний чек" value={totalReceipts > 0 ? money(totalRevenue / totalReceipts) : "—"} />
+              <SalesField
+                label="Кол-во товара"
+                value={totalItems.toLocaleString("ru-RU")}
+                extra={!showGross && totalReturned.returnedItems > 0 ? `(${totalReturned.returnedItems})` : null}
+              />
+              <SalesField label="Глубина чека" value={totalReceipts > 0 ? (totalItems / totalReceipts).toFixed(3) : "—"} />
+              <SalesField label="Вал. прибыль" value={grossProfit(totalRevenue, totalCost)} />
+              <SalesField label="Возврат" value={returnSummary(totalReturned)} />
+            </div>
+          </div>
         ) : (
           <div className="overflow-x-auto">
-            <div className="min-w-[960px] min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+            <div className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Касса</div>
               <div>Город</div>
               <div>Выручка</div>

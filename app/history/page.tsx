@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { authFetch } from "@/lib/apiClient";
 import PeriodFilterBar, { type PeriodMode } from "@/components/PeriodFilterBar";
+import { useSiteVersion } from "@/components/SiteVersion";
 import { getErrorMessage } from "@/lib/errors";
 
 type EditHistoryRow = {
@@ -35,6 +36,7 @@ function formatDateTime(iso: string) {
 }
 
 export default function HistoryPage() {
+  const { mobileLayout } = useSiteVersion();
   const [rows, setRows] = useState<EditHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +146,19 @@ export default function HistoryPage() {
         ) : visibleRows.length === 0 ? (
           <div className="text-sm text-muted">
             {rows.length === 0 ? "Изменений пока нет." : "За выбранный период и сотрудника изменений нет."}
+          </div>
+        ) : mobileLayout ? (
+          <div className="flex flex-col gap-2.5">
+            {visibleRows.map((r) => (
+              <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{r.changed_by_name}</span>
+                  <span className="text-mutedLight text-[11px]">{formatDateTime(r.created_at)}</span>
+                </div>
+                <div className="text-mutedLight text-[11px] uppercase tracking-wide">{TABLE_LABEL[r.table_name]}</div>
+                <div className="text-muted">{r.summary}</div>
+              </div>
+            ))}
           </div>
         ) : (
           <div className="overflow-x-auto flex flex-col">
