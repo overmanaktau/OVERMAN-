@@ -446,6 +446,14 @@ export default function CompetitorAnalyticsPage() {
                     {savingSettings ? "Сохраняем…" : justSavedSettings ? "Сохранено" : "Сохранить"}
                   </button>
                 )}
+                <a
+                  href="https://console.apify.com/billing"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[13px] font-bold rounded-lg px-4 py-2.5 border border-border text-muted hover:text-ink"
+                >
+                  Оплатить Apify
+                </a>
               </div>
             </div>
             {settingsError && <div className="text-sm text-[#A34B36]">{settingsError}</div>}
