@@ -3,21 +3,22 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { fetchInstagramPosts } from "@/lib/apify";
 
-// Cost is per post scraped (~$0.0023 each on the Starter plan) — this caps
-// it at roughly $0.0023 * RESULTS_PER_COMPETITOR * competitor count * 30
-// days/month. At 30 competitors this is ~$12/month; raising it scales
-// linearly, so check the budget before bumping it.
-const RESULTS_PER_COMPETITOR = 6;
+// Cost is per post scraped (~$0.0023 each on the Starter plan) — roughly
+// $0.0023 * results_per_competitor * competitor count * 30 days/month.
+// results_per_competitor is editable on the Аналитика конкурентов page;
+// this is only the fallback if that setting is somehow missing.
+const DEFAULT_RESULTS_PER_COMPETITOR = 6;
 
 async function runSync() {
   const { data: settings } = await supabaseAdmin
     .from("competitor_sync_settings")
-    .select("enabled")
+    .select("enabled, results_per_competitor")
     .eq("id", 1)
     .maybeSingle();
   if (settings && !settings.enabled) {
     return { skipped: true, reason: "disabled", competitors: 0, posts: 0, upserted: 0 };
   }
+  const resultsPerCompetitor = settings?.results_per_competitor ?? DEFAULT_RESULTS_PER_COMPETITOR;
 
   const { data: competitors, error } = await supabaseAdmin
     .from("tracked_competitors")
@@ -30,7 +31,7 @@ async function runSync() {
   }
 
   const byHandle = new Map(competitors.map((c) => [c.handle.toLowerCase(), c.id]));
-  const posts = await fetchInstagramPosts(competitors.map((c) => c.handle), RESULTS_PER_COMPETITOR);
+  const posts = await fetchInstagramPosts(competitors.map((c) => c.handle), resultsPerCompetitor);
 
   let upserted = 0;
   const skippedHandles = new Set<string>();

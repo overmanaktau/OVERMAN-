@@ -148,6 +148,8 @@ export default function CompetitorAnalyticsPage() {
 
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [savedSyncEnabled, setSavedSyncEnabled] = useState(true);
+  const [resultsPerCompetitor, setResultsPerCompetitor] = useState(6);
+  const [savedResultsPerCompetitor, setSavedResultsPerCompetitor] = useState(6);
   const [savedActiveById, setSavedActiveById] = useState<Map<number, boolean>>(new Map());
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -174,7 +176,11 @@ export default function CompetitorAnalyticsPage() {
     try {
       const [competitorsRes, settingsRes] = await Promise.all([
         supabase.from("tracked_competitors").select("*").order("platform").order("handle"),
-        supabase.from("competitor_sync_settings").select("enabled").eq("id", 1).maybeSingle(),
+        supabase
+          .from("competitor_sync_settings")
+          .select("enabled, results_per_competitor")
+          .eq("id", 1)
+          .maybeSingle(),
       ]);
       if (competitorsRes.error) throw competitorsRes.error;
       if (settingsRes.error) throw settingsRes.error;
@@ -184,6 +190,9 @@ export default function CompetitorAnalyticsPage() {
       const enabled = settingsRes.data?.enabled ?? true;
       setSyncEnabled(enabled);
       setSavedSyncEnabled(enabled);
+      const results = settingsRes.data?.results_per_competitor ?? 6;
+      setResultsPerCompetitor(results);
+      setSavedResultsPerCompetitor(results);
     } catch (e) {
       setError(getErrorMessage(e));
     } finally {
@@ -303,7 +312,7 @@ export default function CompetitorAnalyticsPage() {
   }
 
   const competitorsDirty = competitors.some((c) => savedActiveById.get(c.id) !== c.active);
-  const settingsDirty = syncEnabled !== savedSyncEnabled;
+  const settingsDirty = syncEnabled !== savedSyncEnabled || resultsPerCompetitor !== savedResultsPerCompetitor;
   const anySettingsDirty = competitorsDirty || settingsDirty;
 
   async function handleSaveSettings() {
@@ -313,7 +322,11 @@ export default function CompetitorAnalyticsPage() {
       if (settingsDirty) {
         const { error } = await supabase
           .from("competitor_sync_settings")
-          .update({ enabled: syncEnabled, updated_at: new Date().toISOString() })
+          .update({
+            enabled: syncEnabled,
+            results_per_competitor: resultsPerCompetitor,
+            updated_at: new Date().toISOString(),
+          })
           .eq("id", 1);
         if (error) throw error;
       }
@@ -323,6 +336,7 @@ export default function CompetitorAnalyticsPage() {
         if (error) throw error;
       }
       setSavedSyncEnabled(syncEnabled);
+      setSavedResultsPerCompetitor(resultsPerCompetitor);
       setSavedActiveById(new Map(competitors.map((c) => [c.id, c.active])));
       setJustSavedSettings(true);
       setTimeout(() => setJustSavedSettings(false), 2000);
@@ -391,6 +405,22 @@ export default function CompetitorAnalyticsPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-[13px] text-muted">
+                  Постов с аккаунта
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={resultsPerCompetitor}
+                    disabled={!canEdit}
+                    onChange={(e) => {
+                      const v = Math.max(1, Math.min(30, Number(e.target.value) || 1));
+                      setResultsPerCompetitor(v);
+                      setJustSavedSettings(false);
+                    }}
+                    className="w-16 border border-border rounded-lg px-2 py-1.5 text-sm text-center disabled:opacity-50"
+                  />
+                </label>
                 <button
                   type="button"
                   disabled={!canEdit}
