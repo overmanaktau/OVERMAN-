@@ -43,10 +43,12 @@ const NUMERIC_FIELDS: (keyof Pick<
   "trafficPlan" | "trafficFact" | "instagram" | "tiktok" | "instagramPublic" | "flyer" | "twoGis"
 >)[] = ["trafficPlan", "trafficFact", "instagram", "tiktok", "instagramPublic", "flyer", "twoGis"];
 
-// trafficPlan/trafficFact are visitor counts — always whole numbers. The 5
-// channel fields are marketing spend (money) — same kopeck/decimal support
-// as expense amounts.
+// All 7 numeric fields accept a decimal now: the 5 channel fields are
+// marketing spend (money, kopecks), and trafficPlan/trafficFact can be a
+// half-visitor count too (e.g. a shared/ambiguous visit — "11,5 человек").
 const DECIMAL_FIELDS = new Set<(typeof NUMERIC_FIELDS)[number]>([
+  "trafficPlan",
+  "trafficFact",
   "instagram",
   "tiktok",
   "instagramPublic",
@@ -760,8 +762,8 @@ export default function DataEntryPage() {
 
             <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
               <div className="col-span-2">Итого</div>
-              <div className="num">{totals.trafficPlan.toLocaleString("ru-RU")}</div>
-              <div className="num">{totals.trafficFact.toLocaleString("ru-RU")}</div>
+              <div className="num">{totals.trafficPlan.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+              <div className="num">{totals.trafficFact.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
               <div className="num">{totals.instagram.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
               <div className="num">{totals.tiktok.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
               <div className="num">
