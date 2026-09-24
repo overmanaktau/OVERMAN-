@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
 import { useTheme } from "@/components/ThemeProvider";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
+import { useSiteVersion } from "@/components/SiteVersion";
 import AccountsModal from "@/components/AccountsModal";
 
 function IconSystem() {
@@ -52,6 +53,7 @@ export default function AccountMenu() {
   const router = useRouter();
   const { email, fullName, isAdmin, permissions } = useAuth();
   const { theme, setTheme } = useTheme();
+  const { mobileLayout, setVersion } = useSiteVersion();
   const { requestNavigation } = useUnsavedChanges();
   const [open, setOpen] = useState(false);
   const [showAccounts, setShowAccounts] = useState(false);
@@ -82,12 +84,14 @@ export default function AccountMenu() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 bg-surface border border-border rounded-full p-1 sm:pl-1.5 sm:pr-3 sm:py-1.5 shadow-md max-w-[240px]"
+        className={`flex items-center gap-2 bg-surface border border-border rounded-full shadow-md max-w-[240px] ${
+          mobileLayout ? "p-1" : "pl-1.5 pr-3 py-1.5"
+        }`}
       >
         <div className="w-7 h-7 rounded-full bg-accent text-paper text-[11px] font-bold flex items-center justify-center flex-none">
           {initials(fullName, email)}
         </div>
-        <div className="hidden sm:flex flex-col items-start min-w-0 leading-tight">
+        <div className={`${mobileLayout ? "hidden" : "flex"} flex-col items-start min-w-0 leading-tight`}>
           <span className="text-[12px] font-semibold text-ink truncate max-w-[160px]">{fullName || "Без имени"}</span>
           <span className="text-[10.5px] text-mutedLight truncate max-w-[160px]">{email}</span>
         </div>
@@ -123,19 +127,23 @@ export default function AccountMenu() {
             <div className="flex items-center gap-0.5 bg-paper rounded-md p-1">
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => setVersion("desktop")}
                 title="Версия для ПК"
-                className="flex-1 h-8 rounded-md text-[12.5px] font-semibold bg-accent text-paper"
+                className={`flex-1 h-8 rounded-md text-[12.5px] font-semibold ${
+                  !mobileLayout ? "bg-accent text-paper" : "text-muted hover:text-ink"
+                }`}
               >
                 Для ПК
               </button>
               <button
                 type="button"
-                disabled
-                title="Скоро"
-                className="flex-1 h-8 rounded-md text-[12.5px] text-mutedLight cursor-not-allowed"
+                onClick={() => setVersion("mobile")}
+                title="Мобильная версия"
+                className={`flex-1 h-8 rounded-md text-[12.5px] font-semibold ${
+                  mobileLayout ? "bg-accent text-paper" : "text-muted hover:text-ink"
+                }`}
               >
-                Мобильная (скоро)
+                Мобильная
               </button>
             </div>
           </div>

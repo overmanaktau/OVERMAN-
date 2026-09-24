@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
+import { useSiteVersion } from "@/components/SiteVersion";
 import AccountMenu from "@/components/AccountMenu";
 import { supabase } from "@/lib/supabaseClient";
 import type { SectionKey } from "@/lib/permissions";
@@ -137,6 +138,7 @@ export default function Sidebar() {
   );
   const canSeeRequests = isAdmin || permissions["requests"].canView || permissions["requests"].canEdit;
   const canSeeSales = isAdmin || permissions["marketing.statistics"].canView;
+  const { mobileLayout } = useSiteVersion();
 
   // RLS on edit_requests already scopes this to "my own requests" or "every
   // pending request" depending on whether the viewer has requests.view/edit —
@@ -167,6 +169,10 @@ export default function Sidebar() {
   }));
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  useEffect(() => {
+    if (!mobileLayout) setMobileOpen(false);
+  }, [mobileLayout]);
+
   function toggleGroup(key: string) {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   }
@@ -177,24 +183,27 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile top bar: the sidebar below is off-canvas under lg, so this is
-          the only nav chrome visible until the hamburger opens it. */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-sidebar border-b border-[#3A362E] z-40 flex items-center px-4 gap-3">
-        <button
-          type="button"
-          aria-label="Открыть меню"
-          onClick={() => setMobileOpen(true)}
-          className="w-9 h-9 -ml-1 rounded-md flex items-center justify-center text-sidebarText"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M3 6h18M3 12h18M3 18h18" />
-          </svg>
-        </button>
-        <div className="font-serif text-lg font-semibold tracking-wide text-sidebarText">OVERMAN</div>
-      </div>
+      {/* Mobile top bar: when mobileLayout is on, the sidebar below is
+          off-canvas, so this is the only nav chrome visible until the
+          hamburger opens it. */}
+      {mobileLayout && (
+        <div className="fixed top-0 left-0 right-0 h-14 bg-sidebar border-b border-[#3A362E] z-40 flex items-center px-4 gap-3">
+          <button
+            type="button"
+            aria-label="Открыть меню"
+            onClick={() => setMobileOpen(true)}
+            className="w-9 h-9 -ml-1 rounded-md flex items-center justify-center text-sidebarText"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M3 6h18M3 12h18M3 18h18" />
+            </svg>
+          </button>
+          <div className="font-serif text-lg font-semibold tracking-wide text-sidebarText">OVERMAN</div>
+        </div>
+      )}
 
-      {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/50 z-40" onClick={closeMobile} />
+      {mobileLayout && mobileOpen && (
+        <div className="fixed inset-0 bg-black/50 z-40" onClick={closeMobile} />
       )}
 
       {/* Rendered outside the (transformed) drawer div on purpose: a
@@ -206,9 +215,13 @@ export default function Sidebar() {
       </div>
 
       <div
-        className={`w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6 fixed inset-y-0 left-0 z-50 overflow-y-auto transition-transform duration-200 ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
-        } lg:static lg:translate-x-0`}
+        className={`w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6 overflow-y-auto ${
+          mobileLayout
+            ? `fixed inset-y-0 left-0 z-50 transition-transform duration-200 ${
+                mobileOpen ? "translate-x-0" : "-translate-x-full"
+              }`
+            : "static translate-x-0"
+        }`}
       >
       <div className="flex flex-col gap-0.5 px-2">
         <div className="font-serif text-2xl font-semibold tracking-wide">OVERMAN</div>
