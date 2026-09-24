@@ -258,7 +258,7 @@ function EmployeeAccessPanel({
 
   return (
     <div className="pb-4 border-b border-borderSoft flex flex-col gap-3">
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div className="flex flex-col gap-2">
           <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Разделы портала</div>
           <PermissionsGrid value={permissions} onChange={setPermissions} disabled={!canEdit} />
@@ -801,7 +801,7 @@ export default function EmployeesPage() {
         {error && <p className="text-sm text-[#A34B36]">{error}</p>}
       </div>
 
-      <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+      <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit">
         {(["employees", "roles", "stores"] as const).map((t) => (
           <button
             key={t}
@@ -833,7 +833,8 @@ export default function EmployeesPage() {
         <div className="flex flex-col gap-4">
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="text-[15px] font-bold">Список сотрудников</div>
-            <div className="grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+            <div className="overflow-x-auto flex flex-col">
+            <div className="min-w-[640px] grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Имя</div>
               <div>Email</div>
               <div>Города</div>
@@ -842,7 +843,7 @@ export default function EmployeesPage() {
             </div>
             {employees.map((emp) => (
               <Fragment key={emp.id}>
-                <div className="grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]">
+                <div className="min-w-[640px] grid grid-cols-[1fr_1fr_1fr_150px_150px] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]">
                   <div className="flex flex-col gap-1">
                     <input
                       type="text"
@@ -1012,6 +1013,7 @@ export default function EmployeesPage() {
                 )}
               </Fragment>
             ))}
+            </div>
           </div>
 
           {canEdit && (
@@ -1020,7 +1022,7 @@ export default function EmployeesPage() {
             className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
           >
             <div className="text-[15px] font-bold">Добавить сотрудника</div>
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <input
                 type="text"
                 placeholder="Имя (необязательно)"
@@ -1282,7 +1284,7 @@ function RoleCard({
           </>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div className="flex flex-col gap-2">
           <div className="text-[12px] font-semibold text-muted uppercase tracking-wide">Разделы портала</div>
           <PermissionsGrid value={permissions} onChange={setPermissions} disabled={!canEdit} />

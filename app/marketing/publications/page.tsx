@@ -268,7 +268,7 @@ export default function PublicationsPage() {
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit relative">
+        <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit relative">
           {PERIODS.map((p, i) => (
             <button
               key={p}
@@ -365,7 +365,7 @@ export default function PublicationsPage() {
         <div className="text-sm text-muted">Загрузка…</div>
       ) : (
         <>
-          <div className="grid grid-cols-4 gap-3.5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
             <div className="bg-surface border border-border rounded-card px-[18px] py-4 flex flex-col gap-2">
               <div className="text-xs text-muted">Публикаций</div>
               <div className="font-serif text-[26px] font-semibold num">{totalCount}</div>
@@ -384,7 +384,7 @@ export default function PublicationsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <DataTableCard
               title="По дню недели"
               rows={weekdayRows}
@@ -395,7 +395,7 @@ export default function PublicationsPage() {
             >
               {(rows) => (
                 <>
-                  <div className="grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                  <div className="min-w-[520px] grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
                     <div>День</div>
                     <div>Постов</div>
                     <div>Охват</div>
@@ -405,7 +405,7 @@ export default function PublicationsPage() {
                   {rows.map((r) => (
                     <div
                       key={r.label}
-                      className="grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
+                      className="min-w-[520px] grid grid-cols-[1.3fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
                     >
                       <div>{r.label}</div>
                       <div className="num">{r.count}</div>
@@ -431,7 +431,7 @@ export default function PublicationsPage() {
                   <div className="text-sm text-muted py-4">Нет публикаций с указанным временем</div>
                 ) : (
                   <>
-                    <div className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                    <div className="min-w-[520px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
                       <div>Час</div>
                       <div>Постов</div>
                       <div>Охват</div>
@@ -442,7 +442,7 @@ export default function PublicationsPage() {
                       {rows.map((r) => (
                         <div
                           key={r.hour}
-                          className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
+                          className="min-w-[520px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
                         >
                           <div>{pad2(r.hour)}</div>
                           <div className="num">{r.count}</div>
@@ -468,7 +468,7 @@ export default function PublicationsPage() {
           >
             {(rows) => (
               <>
-                <div className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                <div className="min-w-[620px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
                   <div>Тип</div>
                   <div>Постов</div>
                   <div>Охват</div>
@@ -479,7 +479,7 @@ export default function PublicationsPage() {
                 {rows.map((r) => (
                   <div
                     key={r.type}
-                    className="grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
+                    className="min-w-[620px] grid grid-cols-[1fr_0.8fr_1fr_1fr_1fr_1fr] gap-2 py-1.5 border-b border-borderSoft text-[13px] items-center"
                   >
                     <div className="font-semibold">{POST_TYPE_LABEL[r.type]}</div>
                     <div className="num">{r.count}</div>

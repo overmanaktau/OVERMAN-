@@ -557,7 +557,7 @@ export default function PasswordsPage() {
                           return (
                             <div
                               key={p.id}
-                              className="grid grid-cols-[1fr_1fr_1fr_1fr_1fr_auto] gap-2 items-center py-2 border-b border-borderSoft text-[13px] bg-paper rounded-lg px-2"
+                              className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto] gap-2 items-center py-2 border-b border-borderSoft text-[13px] bg-paper rounded-lg px-2"
                             >
                               <select
                                 value={editNetworkId}
@@ -622,7 +622,7 @@ export default function PasswordsPage() {
                         return (
                           <div
                             key={p.id}
-                            className="grid grid-cols-[1fr_1fr_auto_auto_auto] gap-3 items-center py-2 border-b border-borderSoft text-[13px]"
+                            className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 sm:gap-3 items-start sm:items-center py-2 border-b border-borderSoft text-[13px]"
                           >
                             <div className="font-semibold truncate">
                               {p.login}
@@ -683,7 +683,7 @@ export default function PasswordsPage() {
                 <div className="text-sm text-muted">Сначала добавьте хотя бы одну соцсеть выше.</div>
               ) : (
                 <>
-                  <div className="grid grid-cols-[160px_1fr_1fr_1fr_140px] gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[160px_1fr_1fr_1fr_140px] gap-3">
                     <select
                       required
                       value={newNetworkId}

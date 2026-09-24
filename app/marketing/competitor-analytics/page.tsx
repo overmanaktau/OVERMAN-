@@ -376,7 +376,7 @@ export default function CompetitorAnalyticsPage() {
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+      <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit">
         {(["top", "ads", "competitors"] as const).map((t) => (
           <button
             key={t}
@@ -523,7 +523,7 @@ export default function CompetitorAnalyticsPage() {
               className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5"
             >
               <div className="text-[15px] font-bold">Добавить конкурента</div>
-              <div className="grid grid-cols-[140px_1fr_1fr] gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr_1fr] gap-3">
                 <select
                   value={newPlatform}
                   onChange={(e) => setNewPlatform(e.target.value as Competitor["platform"])}
@@ -560,7 +560,7 @@ export default function CompetitorAnalyticsPage() {
         </div>
       ) : tab === "top" ? (
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit relative">
+          <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit relative">
             {TOP_PERIODS.map(({ key, label }) => (
               <button
                 key={key}
@@ -638,7 +638,7 @@ export default function CompetitorAnalyticsPage() {
           </div>
 
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+            <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit">
               {SORT_OPTIONS.map(({ key, label }) => (
                 <button
                   key={key}
@@ -653,7 +653,7 @@ export default function CompetitorAnalyticsPage() {
               ))}
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+              <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit">
                 {TOP_LIMITS.map(({ key, label }) => (
                   <button
                     key={label}
@@ -667,7 +667,7 @@ export default function CompetitorAnalyticsPage() {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit">
+              <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit">
                 {([
                   [false, "Лидеры"],
                   [true, "Аутсайдеры"],

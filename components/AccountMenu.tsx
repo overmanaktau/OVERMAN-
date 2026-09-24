@@ -82,12 +82,12 @@ export default function AccountMenu() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 bg-surface border border-border rounded-full pl-1.5 pr-3 py-1.5 shadow-md max-w-[240px]"
+        className="flex items-center gap-2 bg-surface border border-border rounded-full p-1 sm:pl-1.5 sm:pr-3 sm:py-1.5 shadow-md max-w-[240px]"
       >
         <div className="w-7 h-7 rounded-full bg-accent text-paper text-[11px] font-bold flex items-center justify-center flex-none">
           {initials(fullName, email)}
         </div>
-        <div className="flex flex-col items-start min-w-0 leading-tight">
+        <div className="hidden sm:flex flex-col items-start min-w-0 leading-tight">
           <span className="text-[12px] font-semibold text-ink truncate max-w-[160px]">{fullName || "Без имени"}</span>
           <span className="text-[10.5px] text-mutedLight truncate max-w-[160px]">{email}</span>
         </div>

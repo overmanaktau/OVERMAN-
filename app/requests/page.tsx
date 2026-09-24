@@ -148,9 +148,9 @@ export default function RequestsPage() {
         ) : visibleRequests.length === 0 ? (
           <div className="text-sm text-muted">{showHistory ? "За этот период запросов нет." : "Запросов пока нет."}</div>
         ) : (
-          <div className="flex flex-col">
+          <div className="overflow-x-auto flex flex-col">
             <div
-              className={`grid ${
+              className={`min-w-[640px] grid ${
                 canAct ? "grid-cols-[130px_150px_1fr_120px_170px]" : "grid-cols-[130px_150px_1fr_120px]"
               } gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border`}
             >
@@ -163,7 +163,7 @@ export default function RequestsPage() {
             {visibleRequests.map((r) => (
               <div
                 key={r.id}
-                className={`grid ${
+                className={`min-w-[640px] grid ${
                   canAct ? "grid-cols-[130px_150px_1fr_120px_170px]" : "grid-cols-[130px_150px_1fr_120px]"
                 } gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]`}
               >

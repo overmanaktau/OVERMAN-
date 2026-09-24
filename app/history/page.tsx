@@ -146,8 +146,8 @@ export default function HistoryPage() {
             {rows.length === 0 ? "Изменений пока нет." : "За выбранный период и сотрудника изменений нет."}
           </div>
         ) : (
-          <div className="flex flex-col">
-            <div className="grid grid-cols-[130px_150px_150px_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+          <div className="overflow-x-auto flex flex-col">
+            <div className="min-w-[640px] grid grid-cols-[130px_150px_150px_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Дата</div>
               <div>Кто</div>
               <div>Раздел</div>
@@ -156,7 +156,7 @@ export default function HistoryPage() {
             {visibleRows.map((r) => (
               <div
                 key={r.id}
-                className="grid grid-cols-[130px_150px_150px_1fr] gap-3 py-2.5 border-b border-borderSoft items-start text-[13px]"
+                className="min-w-[640px] grid grid-cols-[130px_150px_150px_1fr] gap-3 py-2.5 border-b border-borderSoft items-start text-[13px]"
               >
                 <div className="text-muted">{formatDateTime(r.created_at)}</div>
                 <div className="font-semibold">{r.changed_by_name}</div>

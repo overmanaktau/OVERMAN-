@@ -155,7 +155,7 @@ export function DataTableCard<T>({
           <div className="text-[15px] font-bold text-ink">{title}</div>
           {toolbar}
         </div>
-        {!collapsed && children(filtered)}
+        {!collapsed && <div className="overflow-x-auto">{children(filtered)}</div>}
       </div>
 
       {expanded && (
@@ -174,7 +174,7 @@ export function DataTableCard<T>({
                 <IconClose />
               </button>
             </div>
-            {children(filtered)}
+            <div className="overflow-x-auto">{children(filtered)}</div>
           </div>
         </div>
       )}

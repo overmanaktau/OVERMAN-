@@ -29,7 +29,17 @@ const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] =
   { label: "История", href: "/history", section: "history" },
 ];
 
-function GuardedLink({ href, className, children }: { href: string; className?: string; children: React.ReactNode }) {
+function GuardedLink({
+  href,
+  className,
+  onNavigate,
+  children,
+}: {
+  href: string;
+  className?: string;
+  onNavigate?: () => void;
+  children: React.ReactNode;
+}) {
   const router = useRouter();
   const { isDirty, requestNavigation } = useUnsavedChanges();
   return (
@@ -37,9 +47,12 @@ function GuardedLink({ href, className, children }: { href: string; className?: 
       href={href}
       className={className}
       onClick={(e) => {
-        if (!isDirty) return;
-        e.preventDefault();
-        requestNavigation(() => router.push(href));
+        if (isDirty) {
+          e.preventDefault();
+          requestNavigation(() => router.push(href));
+          return;
+        }
+        onNavigate?.();
       }}
     >
       {children}
@@ -152,16 +165,51 @@ export default function Sidebar() {
     marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),
     settings: SETTINGS_SUBMENU.some((item) => pathname === item.href),
   }));
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   function toggleGroup(key: string) {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
+  function closeMobile() {
+    setMobileOpen(false);
+  }
+
   return (
-    <div className="w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6">
+    <>
+      {/* Mobile top bar: the sidebar below is off-canvas under lg, so this is
+          the only nav chrome visible until the hamburger opens it. */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-sidebar border-b border-[#3A362E] z-40 flex items-center px-4 gap-3">
+        <button
+          type="button"
+          aria-label="Открыть меню"
+          onClick={() => setMobileOpen(true)}
+          className="w-9 h-9 -ml-1 rounded-md flex items-center justify-center text-sidebarText"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 6h18M3 12h18M3 18h18" />
+          </svg>
+        </button>
+        <div className="font-serif text-lg font-semibold tracking-wide text-sidebarText">OVERMAN</div>
+      </div>
+
+      {mobileOpen && (
+        <div className="lg:hidden fixed inset-0 bg-black/50 z-40" onClick={closeMobile} />
+      )}
+
+      {/* Rendered outside the (transformed) drawer div on purpose: a
+          `transform` on an ancestor makes it the containing block for any
+          `fixed` descendant, which would otherwise pin this to the drawer's
+          own box instead of the viewport's top-right corner. */}
       <div className="fixed top-4 right-4 z-[100] flex items-center gap-2">
         <AccountMenu />
       </div>
+
+      <div
+        className={`w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6 fixed inset-y-0 left-0 z-50 overflow-y-auto transition-transform duration-200 ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        } lg:static lg:translate-x-0`}
+      >
       <div className="flex flex-col gap-0.5 px-2">
         <div className="font-serif text-2xl font-semibold tracking-wide">OVERMAN</div>
         <div className="text-xs text-sidebarMuted tracking-wider uppercase">Портал бизнеса</div>
@@ -183,6 +231,7 @@ export default function Sidebar() {
             {i === 0 && canSeeSales && (
               <GuardedLink
                 href="/sales"
+                onNavigate={closeMobile}
                 className={`block px-3 py-2.5 rounded-lg text-sm font-semibold ${
                   pathname === "/sales" ? "bg-accent text-paper" : "text-sidebarText hover:text-sidebarText"
                 }`}
@@ -211,6 +260,7 @@ export default function Sidebar() {
                     <GuardedLink
                       key={item.href}
                       href={item.href}
+                      onNavigate={closeMobile}
                       className={`px-3 py-2 rounded-md text-[13px] ${
                         active
                           ? "bg-accent text-paper font-semibold"
@@ -229,6 +279,7 @@ export default function Sidebar() {
         {canSeeRequests && (
           <GuardedLink
             href="/requests"
+            onNavigate={closeMobile}
             className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm mt-1 ${
               pathname === "/requests"
                 ? "bg-accent text-paper font-semibold"
@@ -269,6 +320,7 @@ export default function Sidebar() {
                     <GuardedLink
                       key={item.href}
                       href={item.href}
+                      onNavigate={closeMobile}
                       className={`px-3 py-2 rounded-md text-[13px] ${
                         active
                           ? "bg-accent text-paper font-semibold"
@@ -284,6 +336,7 @@ export default function Sidebar() {
           </div>
         )}
       </nav>
-    </div>
+      </div>
+    </>
   );
 }

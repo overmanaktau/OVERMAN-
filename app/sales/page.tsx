@@ -313,7 +313,7 @@ export default function SalesPage() {
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 bg-surface border border-border rounded-card p-1.5 w-fit relative">
+      <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit relative">
         {PERIODS.map((p, i) => (
           <button
             key={p}
@@ -408,8 +408,8 @@ export default function SalesPage() {
         ) : registerSales.length === 0 ? (
           <div className="text-sm text-muted py-4">Нет данных за этот период.</div>
         ) : (
-          <>
-            <div className="grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+          <div className="overflow-x-auto">
+            <div className="min-w-[960px] min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Касса</div>
               <div>Город</div>
               <div>Выручка</div>
@@ -439,7 +439,7 @@ export default function SalesPage() {
                     return (
                       <div
                         key={r.registerId}
-                        className="grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                        className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
                       >
                         <div className="font-semibold">{r.name}</div>
                         <div className="text-muted">{storeLabel(r.store)}</div>
@@ -469,7 +469,7 @@ export default function SalesPage() {
                     );
                   })}
                   {group.rows.length > 1 && (
-                    <div className="grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2 border-b border-borderSoft items-center text-[12.5px] font-bold bg-weekendTint">
+                    <div className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2 border-b border-borderSoft items-center text-[12.5px] font-bold bg-weekendTint">
                       <div className="col-span-2">Итого по {group.label}</div>
                       <div className="num">
                         {money(groupRevenue)}
@@ -498,7 +498,7 @@ export default function SalesPage() {
                 </div>
               );
             })}
-            <div className="grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
+            <div className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
               <div className="col-span-2">Итого</div>
               <div className="num">
                 {money(totalRevenue)}
@@ -523,7 +523,7 @@ export default function SalesPage() {
               <div className="num">{grossProfit(totalRevenue, totalCost)}</div>
               <div className="num text-muted font-normal">{returnSummary(totalReturned)}</div>
             </div>
-          </>
+          </div>
         )}
       </div>
     </>
