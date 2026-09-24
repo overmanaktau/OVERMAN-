@@ -14,6 +14,7 @@ type Competitor = {
   notes: string | null;
   created_by_name: string | null;
   created_at: string;
+  active: boolean;
 };
 
 const PLATFORM_LABEL: Record<Competitor["platform"], string> = {
@@ -145,6 +146,13 @@ export default function CompetitorAnalyticsPage() {
   const [newDisplayName, setNewDisplayName] = useState("");
   const [adding, setAdding] = useState(false);
 
+  const [syncEnabled, setSyncEnabled] = useState(true);
+  const [savedSyncEnabled, setSavedSyncEnabled] = useState(true);
+  const [savedActiveById, setSavedActiveById] = useState<Map<number, boolean>>(new Map());
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [justSavedSettings, setJustSavedSettings] = useState(false);
+
   const [topPeriod, setTopPeriod] = useState<TopPeriod>("7d");
   const [activeCustomTop, setActiveCustomTop] = useState<{ start: string; end: string } | null>(null);
   const [showTopCustomPicker, setShowTopCustomPicker] = useState(false);
@@ -164,13 +172,18 @@ export default function CompetitorAnalyticsPage() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from("tracked_competitors")
-        .select("*")
-        .order("platform")
-        .order("handle");
-      if (error) throw error;
-      setCompetitors((data ?? []) as Competitor[]);
+      const [competitorsRes, settingsRes] = await Promise.all([
+        supabase.from("tracked_competitors").select("*").order("platform").order("handle"),
+        supabase.from("competitor_sync_settings").select("enabled").eq("id", 1).maybeSingle(),
+      ]);
+      if (competitorsRes.error) throw competitorsRes.error;
+      if (settingsRes.error) throw settingsRes.error;
+      const rows = (competitorsRes.data ?? []) as Competitor[];
+      setCompetitors(rows);
+      setSavedActiveById(new Map(rows.map((c) => [c.id, c.active])));
+      const enabled = settingsRes.data?.enabled ?? true;
+      setSyncEnabled(enabled);
+      setSavedSyncEnabled(enabled);
     } catch (e) {
       setError(getErrorMessage(e));
     } finally {
@@ -274,8 +287,49 @@ export default function CompetitorAnalyticsPage() {
       const { error } = await supabase.from("tracked_competitors").delete().eq("id", id);
       if (error) throw error;
       setCompetitors((prev) => prev.filter((c) => c.id !== id));
+      setSavedActiveById((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
     } catch (e) {
       setError(getErrorMessage(e));
+    }
+  }
+
+  function toggleActive(id: number) {
+    setCompetitors((prev) => prev.map((c) => (c.id === id ? { ...c, active: !c.active } : c)));
+    setJustSavedSettings(false);
+  }
+
+  const competitorsDirty = competitors.some((c) => savedActiveById.get(c.id) !== c.active);
+  const settingsDirty = syncEnabled !== savedSyncEnabled;
+  const anySettingsDirty = competitorsDirty || settingsDirty;
+
+  async function handleSaveSettings() {
+    setSavingSettings(true);
+    setSettingsError(null);
+    try {
+      if (settingsDirty) {
+        const { error } = await supabase
+          .from("competitor_sync_settings")
+          .update({ enabled: syncEnabled, updated_at: new Date().toISOString() })
+          .eq("id", 1);
+        if (error) throw error;
+      }
+      const changed = competitors.filter((c) => savedActiveById.get(c.id) !== c.active);
+      for (const c of changed) {
+        const { error } = await supabase.from("tracked_competitors").update({ active: c.active }).eq("id", c.id);
+        if (error) throw error;
+      }
+      setSavedSyncEnabled(syncEnabled);
+      setSavedActiveById(new Map(competitors.map((c) => [c.id, c.active])));
+      setJustSavedSettings(true);
+      setTimeout(() => setJustSavedSettings(false), 2000);
+    } catch (e) {
+      setSettingsError(getErrorMessage(e));
+    } finally {
+      setSavingSettings(false);
     }
   }
 
@@ -327,6 +381,46 @@ export default function CompetitorAnalyticsPage() {
         <div className="text-sm text-muted">Загрузка…</div>
       ) : tab === "competitors" ? (
         <div className="flex flex-col gap-4">
+          <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex flex-col gap-0.5">
+                <div className="text-[15px] font-bold">Автосинхронизация контента конкурентов</div>
+                <div className="text-xs text-muted max-w-md">
+                  Ежедневная выгрузка постов через Apify. Выключение остановит только новые загрузки —
+                  уже собранные данные останутся. Отдельного конкурента можно исключить галочкой ниже.
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => {
+                    setSyncEnabled((v) => !v);
+                    setJustSavedSettings(false);
+                  }}
+                  className={`text-[13px] font-bold rounded-lg px-4 py-2.5 disabled:opacity-50 ${
+                    syncEnabled ? "bg-accent text-paper" : "bg-paper text-muted border border-border"
+                  }`}
+                >
+                  {syncEnabled ? "Включена" : "Выключена"}
+                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={handleSaveSettings}
+                    disabled={!anySettingsDirty || savingSettings}
+                    className={`text-[13px] font-bold rounded-lg px-[18px] py-2.5 disabled:opacity-50 ${
+                      anySettingsDirty ? "bg-accent text-paper" : "bg-paper text-mutedLight border border-border"
+                    }`}
+                  >
+                    {savingSettings ? "Сохраняем…" : justSavedSettings ? "Сохранено" : "Сохранить"}
+                  </button>
+                )}
+              </div>
+            </div>
+            {settingsError && <div className="text-sm text-[#A34B36]">{settingsError}</div>}
+          </div>
+
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="text-[15px] font-bold">Отслеживаемые аккаунты</div>
             {competitors.length === 0 ? (
@@ -346,8 +440,18 @@ export default function CompetitorAnalyticsPage() {
                       {rows.map((c) => (
                         <div
                           key={c.id}
-                          className="grid grid-cols-[1fr_1fr_auto] gap-3 items-center py-2 border-b border-borderSoft text-[13px]"
+                          className={`grid grid-cols-[auto_1fr_1fr_auto] gap-3 items-center py-2 border-b border-borderSoft text-[13px] ${
+                            c.active ? "" : "opacity-50"
+                          }`}
                         >
+                          <input
+                            type="checkbox"
+                            checked={c.active}
+                            disabled={!canEdit}
+                            onChange={() => toggleActive(c.id)}
+                            title={c.active ? "Отключить синхронизацию для этого конкурента" : "Включить синхронизацию для этого конкурента"}
+                            className="w-4 h-4 accent-accent"
+                          />
                           <a
                             href={competitorProfileUrl(c)}
                             target="_blank"

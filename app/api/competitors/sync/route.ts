@@ -10,10 +10,20 @@ import { fetchInstagramPosts } from "@/lib/apify";
 const RESULTS_PER_COMPETITOR = 6;
 
 async function runSync() {
+  const { data: settings } = await supabaseAdmin
+    .from("competitor_sync_settings")
+    .select("enabled")
+    .eq("id", 1)
+    .maybeSingle();
+  if (settings && !settings.enabled) {
+    return { skipped: true, reason: "disabled", competitors: 0, posts: 0, upserted: 0 };
+  }
+
   const { data: competitors, error } = await supabaseAdmin
     .from("tracked_competitors")
     .select("id, handle")
-    .eq("platform", "instagram");
+    .eq("platform", "instagram")
+    .eq("active", true);
   if (error) throw error;
   if (!competitors || competitors.length === 0) {
     return { competitors: 0, posts: 0, upserted: 0 };
