@@ -9,6 +9,7 @@ export const SECTIONS = [
   { key: "accounts", label: "Аккаунты" },
   { key: "profile.rename", label: "Смена имени сотрудника" },
   { key: "settings.employees", label: "Сотрудники и доступы" },
+  { key: "settings.passwords", label: "Пароли" },
 ] as const;
 
 export type SectionKey = (typeof SECTIONS)[number]["key"];

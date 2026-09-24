@@ -289,6 +289,7 @@ function EmployeeAccessPanel({
 
 export default function EmployeesPage() {
   const { email: myEmail, isAdmin, isOwner, permissions } = useAuth();
+  const canView = isAdmin || permissions["settings.employees"].canView;
   const canEdit = isAdmin || permissions["settings.employees"].canEdit;
   const [tab, setTab] = useState<"employees" | "roles" | "stores">("employees");
 
@@ -778,6 +779,14 @@ export default function EmployeesPage() {
   function changeTab(t: "employees" | "roles" | "stores") {
     if (t === tab) return;
     requestNavigation(() => setTab(t));
+  }
+
+  if (!canView) {
+    return (
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
+        <p className="text-sm text-muted">У вас нет доступа к разделу «Сотрудники и доступы».</p>
+      </div>
+    );
   }
 
   return (

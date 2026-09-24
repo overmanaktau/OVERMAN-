@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import AccountMenu from "@/components/AccountMenu";
+import { supabase } from "@/lib/supabaseClient";
 import type { SectionKey } from "@/lib/permissions";
 
 const TOP_LEVEL: { label: string; soon: boolean }[] = [
@@ -24,6 +25,7 @@ const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] 
 
 const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "Сотрудники и доступы", href: "/settings/employees", section: "settings.employees" },
+  { label: "Пароли", href: "/settings/passwords", section: "settings.passwords" },
   { label: "История", href: "/history", section: "history" },
 ];
 
@@ -123,6 +125,29 @@ export default function Sidebar() {
   const canSeeRequests = isAdmin || permissions["requests"].canView || permissions["requests"].canEdit;
   const canSeeSales = isAdmin || permissions["marketing.statistics"].canView;
 
+  // RLS on edit_requests already scopes this to "my own requests" or "every
+  // pending request" depending on whether the viewer has requests.view/edit —
+  // same rule the /requests page itself relies on — so this count is never
+  // wider than what that person could already see by opening the page.
+  const [pendingRequests, setPendingRequests] = useState(0);
+  useEffect(() => {
+    if (!canSeeRequests) return;
+    let cancelled = false;
+    async function loadCount() {
+      const { count } = await supabase
+        .from("edit_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending");
+      if (!cancelled) setPendingRequests(count ?? 0);
+    }
+    loadCount();
+    const interval = setInterval(loadCount, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [canSeeRequests]);
+
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
     marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),
     settings: SETTINGS_SUBMENU.some((item) => pathname === item.href),
@@ -204,13 +229,18 @@ export default function Sidebar() {
         {canSeeRequests && (
           <GuardedLink
             href="/requests"
-            className={`px-3 py-2.5 rounded-lg text-sm mt-1 ${
+            className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm mt-1 ${
               pathname === "/requests"
                 ? "bg-accent text-paper font-semibold"
                 : "text-sidebarText font-semibold hover:text-sidebarText"
             }`}
           >
-            Запросы
+            <span>Запросы</span>
+            {pendingRequests > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-[#A34B36] text-white text-[10px] font-bold px-1">
+                {pendingRequests}
+              </span>
+            )}
           </GuardedLink>
         )}
 
