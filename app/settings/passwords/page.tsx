@@ -81,6 +81,9 @@ export default function PasswordsPage() {
 
   const [newNetworkName, setNewNetworkName] = useState("");
   const [addingNetwork, setAddingNetwork] = useState(false);
+  const [editingNetworkId, setEditingNetworkId] = useState<number | null>(null);
+  const [editNetworkName, setEditNetworkName] = useState("");
+  const [savingNetwork, setSavingNetwork] = useState(false);
 
   const [newNetworkId, setNewNetworkId] = useState<string>("");
   const [newLogin, setNewLogin] = useState("");
@@ -185,6 +188,7 @@ export default function PasswordsPage() {
     try {
       const { error } = await supabase.from("social_networks").delete().eq("id", id);
       if (error) throw error;
+      setEditingNetworkId(null);
       await load();
     } catch (e) {
       setError(
@@ -192,6 +196,28 @@ export default function PasswordsPage() {
           ? "Сначала удалите все аккаунты этой соцсети."
           : getErrorMessage(e)
       );
+    }
+  }
+
+  function startEditNetwork(n: SocialNetwork) {
+    setEditingNetworkId(n.id);
+    setEditNetworkName(n.name);
+  }
+
+  async function saveNetworkName(id: number) {
+    const name = editNetworkName.trim();
+    if (!name) return;
+    setSavingNetwork(true);
+    setError(null);
+    try {
+      const { error } = await supabase.from("social_networks").update({ name }).eq("id", id);
+      if (error) throw error;
+      setEditingNetworkId(null);
+      await load();
+    } catch (e) {
+      setError(/duplicate key|unique/i.test(getErrorMessage(e)) ? "Такая соцсеть уже есть в списке." : getErrorMessage(e));
+    } finally {
+      setSavingNetwork(false);
     }
   }
 
@@ -386,24 +412,65 @@ export default function PasswordsPage() {
               <div className="text-sm text-muted">Список пуст — добавьте соцсеть ниже.</div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {networks.map((n) => (
-                  <div
-                    key={n.id}
-                    className="flex items-center gap-2 bg-paper border border-border rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
-                  >
-                    {n.name}
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteNetwork(n.id)}
-                        className="text-mutedLight hover:text-[#A34B36]"
-                        title="Удалить соцсеть"
+                {networks.map((n) => {
+                  const isEditingNetwork = editingNetworkId === n.id;
+                  if (isEditingNetwork) {
+                    return (
+                      <div
+                        key={n.id}
+                        className="flex items-center gap-1.5 bg-paper border border-accent rounded-full px-2 py-1"
                       >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                ))}
+                        <input
+                          type="text"
+                          autoFocus
+                          value={editNetworkName}
+                          onChange={(e) => setEditNetworkName(e.target.value)}
+                          className="border border-border rounded-md px-2 py-1 text-[13px] w-32"
+                        />
+                        <button
+                          type="button"
+                          disabled={savingNetwork || !editNetworkName.trim()}
+                          onClick={() => saveNetworkName(n.id)}
+                          className="text-[12px] font-bold text-paper bg-accent rounded-md px-2 py-1 disabled:opacity-50"
+                        >
+                          Сохранить
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingNetworkId(null)}
+                          className="text-[12px] font-semibold text-muted px-1"
+                        >
+                          Отмена
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteNetwork(n.id)}
+                          className="text-[12px] font-semibold text-[#A34B36] px-1"
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div
+                      key={n.id}
+                      className="flex items-center gap-2 bg-paper border border-border rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+                    >
+                      {n.name}
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => startEditNetwork(n)}
+                          className="text-mutedLight font-semibold hover:text-ink"
+                          title="Изменить соцсеть"
+                        >
+                          Изменить
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {canEdit && (
