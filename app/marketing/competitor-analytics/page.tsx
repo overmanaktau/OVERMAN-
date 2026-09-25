@@ -112,7 +112,6 @@ const SORT_OPTIONS = [
   { key: "likes", label: "По лайкам" },
   { key: "views", label: "По просмотрам" },
   { key: "comments", label: "По комментариям" },
-  { key: "shares", label: "По репостам" },
 ] as const;
 type SortKey = (typeof SORT_OPTIONS)[number]["key"];
 
@@ -134,7 +133,6 @@ function engagementScore(item: ContentItem, sortKey: SortKey): number {
   if (sortKey === "likes") return item.likes;
   if (sortKey === "views") return item.views;
   if (sortKey === "comments") return item.comments;
-  if (sortKey === "shares") return item.shares;
   return item.likes + item.comments + item.shares;
 }
 
@@ -773,7 +771,7 @@ export default function CompetitorAnalyticsPage() {
                   const stats = (
                     <>
                       <div className="text-muted num">
-                        👁 {item.views} · ♥ {item.likes} · 💬 {item.comments} · ✈ {item.shares}
+                        👁 {item.views} · ♥ {item.likes} · 💬 {item.comments}
                       </div>
                       {rate !== null && (
                         <div className="text-mutedLight text-[11px] num">
