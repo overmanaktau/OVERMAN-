@@ -6,8 +6,8 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
-const PERIODS = ["7 дней", "30 дней", "90 дней", "С начала месяца", "Прошлый месяц", "Всё время"];
-const DEFAULT_PERIOD = 2; // "90 дней"
+const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
+const DEFAULT_PERIOD = 3; // "С начала месяца"
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -28,9 +28,14 @@ type Range = { start: Date; end: Date };
 
 function getPeriodRange(index: number, today: Date): Range {
   const d = stripTime(today);
-  if (index === 0) return { start: addDays(d, -6), end: d }; // 7 дней
-  if (index === 1) return { start: addDays(d, -29), end: d }; // 30 дней
-  if (index === 2) return { start: addDays(d, -89), end: d }; // 90 дней
+  const dow = d.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  const thisMonday = addDays(d, mondayOffset);
+  const thisSunday = addDays(thisMonday, 6);
+
+  if (index === 0) return { start: addDays(d, -1), end: addDays(d, -1) }; // Вчера
+  if (index === 1) return { start: addDays(thisMonday, -7), end: addDays(thisSunday, -7) };
+  if (index === 2) return { start: thisMonday, end: thisSunday };
   if (index === 3) return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: d }; // С начала месяца
   if (index === 4) {
     // Прошлый месяц
