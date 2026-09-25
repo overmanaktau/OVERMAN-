@@ -386,9 +386,9 @@ export default function ObzorPage() {
             <Kpi label="Выручка" value={money(totalRevenue)} />
             <Kpi label="Чеков" value={totalReceipts.toLocaleString("ru-RU")} />
             <Kpi label="Средний чек" value={money(avgCheck)} />
-            <Kpi label="Вещей в чеке" value={itemsPerReceipt.toFixed(2)} />
+            <Kpi label="Глубина чека" value={itemsPerReceipt.toFixed(2)} />
             <Kpi
-              label="Маржа"
+              label="Валовая прибыль"
               value={margin !== null ? money(margin) : "—"}
               suffix={
                 marginPct !== null && (
