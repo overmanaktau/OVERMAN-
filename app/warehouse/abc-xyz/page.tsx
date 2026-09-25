@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
+import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -185,6 +186,7 @@ function MultiSelectFilter({
 export default function AbcXyzPage() {
   const { isAdmin, permissions } = useAuth();
   const { mobileLayout } = useSiteVersion();
+  const { selected: selectedStores } = useStoreSelection();
   const canView = isAdmin || permissions["warehouse.stock"].canView;
 
   const [loading, setLoading] = useState(true);
@@ -214,7 +216,7 @@ export default function AbcXyzPage() {
         days_with_sales: number;
       };
       const raw = await fetchAllRows<Raw>((from_, to_) =>
-        supabase.rpc("product_sales_summary", { p_from: from, p_to: to }).range(from_, to_)
+        supabase.rpc("product_sales_summary", { p_from: from, p_to: to, p_stores: selectedStores }).range(from_, to_)
       );
 
       // Only products with real net revenue in the window get classified —
@@ -253,7 +255,8 @@ export default function AbcXyzPage() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStores.join(",")]);
 
   useEffect(() => {
     load();

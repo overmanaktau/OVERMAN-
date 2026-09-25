@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
+import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -52,14 +53,81 @@ async function fetchAllRows<T>(
   return all;
 }
 
+type StaleRawRow = { product_ms_id: string; product_name: string; stock: number; money: number; days_since_last_sale: number | null };
+
+function mapStaleRows(raw: StaleRawRow[]): StaleRow[] {
+  return raw
+    .map((r) => ({
+      id: r.product_ms_id,
+      name: r.product_name,
+      stock: r.stock,
+      money: r.money,
+      daysSinceLastSale: r.days_since_last_sale,
+    }))
+    .sort((a, b) => b.money - a.money);
+}
+
+function StaleTable({ rows, mobileLayout, emptyText }: { rows: StaleRow[]; mobileLayout: boolean; emptyText: string }) {
+  if (rows.length === 0) return <div className="text-sm text-muted py-4">{emptyText}</div>;
+  if (mobileLayout) {
+    return (
+      <div className="flex flex-col gap-3">
+        {rows.map((r) => (
+          <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
+            <div className="font-semibold">{r.name}</div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted">Остаток</span>
+              <span className="num">{r.stock.toLocaleString("ru-RU")}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted">Деньги</span>
+              <span className="num">{money(r.money)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted">Без продаж</span>
+              <span className="num">{r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[680px] grid grid-cols-[1.6fr_0.6fr_0.9fr_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+        <div>Товар</div>
+        <div>Остаток</div>
+        <div>Деньги</div>
+        <div>Без продаж</div>
+      </div>
+      {rows.map((r) => (
+        <div
+          key={r.id}
+          className="min-w-[680px] grid grid-cols-[1.6fr_0.6fr_0.9fr_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+        >
+          <div className="font-semibold">{r.name}</div>
+          <div className="num">{r.stock.toLocaleString("ru-RU")}</div>
+          <div className="num">{money(r.money)}</div>
+          <div className="num text-muted">{r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function StaleInventoryPage() {
   const { isAdmin, permissions } = useAuth();
   const { mobileLayout } = useSiteVersion();
+  const { selected: selectedStores } = useStoreSelection();
   const canView = isAdmin || permissions["warehouse.stock"].canView;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<StaleRow[]>([]);
+  // "Заморозка" (written-off-for-now stock, held back for next season) is
+  // its own bucket the business tracks on purpose — always shown, never
+  // folded into the city-filtered list above or affected by "Все города".
+  const [frozenRows, setFrozenRows] = useState<StaleRow[]>([]);
 
   const loadSeq = useRef(0);
 
@@ -68,31 +136,38 @@ export default function StaleInventoryPage() {
     setLoading(true);
     setError(null);
     try {
-      type Raw = { product_ms_id: string; product_name: string; stock: number; money: number; days_since_last_sale: number | null };
-      const raw = await fetchAllRows<Raw>((from, to) =>
-        supabase.rpc("stale_inventory", { p_stale_days: STALE_DAYS }).order("product_ms_id", { ascending: true }).range(from, to)
-      );
-
-      const mapped: StaleRow[] = raw
-        .map((r) => ({
-          id: r.product_ms_id,
-          name: r.product_name,
-          stock: r.stock,
-          money: r.money,
-          daysSinceLastSale: r.days_since_last_sale,
-        }))
-        .sort((a, b) => b.money - a.money);
+      const [raw, rawFrozen] = await Promise.all([
+        fetchAllRows<StaleRawRow>((from, to) =>
+          supabase
+            .rpc("stale_inventory", { p_stale_days: STALE_DAYS, p_stores: selectedStores })
+            .order("product_ms_id", { ascending: true })
+            .range(from, to)
+        ),
+        // -1 rather than STALE_DAYS: "заморозка" isn't about staleness, it's
+        // stock the business deliberately set aside — show all of it, not
+        // just what's also been sitting 60+ days. (current_date - last_sale)
+        // is never negative, so "> -1" always passes.
+        fetchAllRows<StaleRawRow>((from, to) =>
+          supabase
+            .rpc("stale_inventory", { p_stale_days: -1, p_stores: ["frozen"] })
+            .order("product_ms_id", { ascending: true })
+            .range(from, to)
+        ),
+      ]);
 
       if (seq !== loadSeq.current) return;
-      setRows(mapped);
+      setRows(mapStaleRows(raw));
+      setFrozenRows(mapStaleRows(rawFrozen));
     } catch (e) {
       if (seq !== loadSeq.current) return;
       setError(friendlyError(e));
       setRows([]);
+      setFrozenRows([]);
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStores.join(",")]);
 
   useEffect(() => {
     load();
@@ -107,6 +182,7 @@ export default function StaleInventoryPage() {
   }
 
   const totalMoney = rows.reduce((acc, r) => acc + r.money, 0);
+  const totalFrozenMoney = frozenRows.reduce((acc, r) => acc + r.money, 0);
 
   return (
     <>
@@ -143,49 +219,29 @@ export default function StaleInventoryPage() {
           </div>
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            {rows.length === 0 ? (
-              <div className="text-sm text-muted py-4">Нет зависших остатков — всё продаётся вовремя.</div>
-            ) : mobileLayout ? (
-              <div className="flex flex-col gap-3">
-                {rows.map((r) => (
-                  <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
-                    <div className="font-semibold">{r.name}</div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted">Остаток</span>
-                      <span className="num">{r.stock.toLocaleString("ru-RU")}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted">Деньги</span>
-                      <span className="num">{money(r.money)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted">Без продаж</span>
-                      <span className="num">{r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <div className="min-w-[680px] grid grid-cols-[1.6fr_0.6fr_0.9fr_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                  <div>Товар</div>
-                  <div>Остаток</div>
-                  <div>Деньги</div>
-                  <div>Без продаж</div>
-                </div>
-                {rows.map((r) => (
-                  <div
-                    key={r.id}
-                    className="min-w-[680px] grid grid-cols-[1.6fr_0.6fr_0.9fr_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
-                  >
-                    <div className="font-semibold">{r.name}</div>
-                    <div className="num">{r.stock.toLocaleString("ru-RU")}</div>
-                    <div className="num">{money(r.money)}</div>
-                    <div className="num text-muted">{r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`}</div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <StaleTable rows={rows} mobileLayout={mobileLayout} emptyText="Нет зависших остатков — всё продаётся вовремя." />
+          </div>
+
+          <div className="flex flex-col gap-1 mt-2">
+            <h2 className="font-serif text-[20px] font-semibold m-0">Заморозка</h2>
+            <p className="text-sm text-muted max-w-2xl">
+              Товар на складах заморозки — отдельно от городов, ждёт следующего сезона.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-2 gap-4 max-w-xl">
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xs text-muted">Моделей в заморозке</div>
+              <div className="font-serif text-[26px] font-semibold num">{frozenRows.length.toLocaleString("ru-RU")}</div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xs text-muted">Денег в них</div>
+              <div className="font-serif text-[26px] font-semibold num">{money(totalFrozenMoney)}</div>
+            </div>
+          </div>
+
+          <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+            <StaleTable rows={frozenRows} mobileLayout={mobileLayout} emptyText="В заморозке ничего нет." />
           </div>
         </>
       )}

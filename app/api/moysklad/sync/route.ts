@@ -8,6 +8,7 @@ import {
   totalCostKopecks,
   fetchAllProducts,
   fetchStockAll,
+  fetchStockByStore,
   fetchProfitByProductForDate,
 } from "@/lib/moysklad";
 
@@ -20,6 +21,22 @@ const REGISTER_STORE: Record<string, string> = {
   "d3f209de-4da2-11f0-0a80-027a0003cde2": "point_1", // Saya Park
   "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Overman Актобе
   "111827a0-a440-11f1-0a80-0dcb003111ce": "point_3", // Актобе скидка
+};
+
+// Warehouses (entity/store — where stock physically sits, distinct from the
+// retailstore/касса ids above) mapped to the same city codes. Confirmed with
+// the business owner: "Кайнар" is empty and not worth tracking, so it (and
+// anything else not listed here) is simply skipped by the sync. The two
+// "заморозка"/frozen warehouses hold written-off-for-now stock the business
+// tracks on purpose as its own bucket, held back until next season — never
+// folded into a city's live total.
+const WAREHOUSE_STORE: Record<string, string> = {
+  "109ed308-b012-11f0-0a80-110900247319": "point_1", // Overman
+  "fe3b03d3-4da1-11f0-0a80-18910004c37d": "point_1", // Saya Park
+  "bb935bd2-93e9-11f1-0a80-1f560022775d": "point_3", // Aktobe OVERMAN
+  "2ca9443b-a440-11f1-0a80-03ac00324d3c": "point_3", // Актобе скидка
+  "14352a86-5e96-11f1-0a80-1cbd00149396": "frozen", // заморозка 03.06.2026
+  "554d7479-2728-11f0-0a80-15980025a3f6": "frozen", // Заморозка 24.02.2026
 };
 
 function yesterdayInAlmaty(): string {
@@ -192,29 +209,61 @@ async function runSync(date: string) {
     if (employeeSalesError) throw employeeSalesError;
   }
 
-  const productAggs = await fetchProfitByProductForDate(date);
-  for (const batch of chunk(productAggs, 500)) {
-    const { error: productSalesError } = await supabaseAdmin.from("moysklad_product_sales_daily").upsert(
-      batch.map((p) => ({
-        product_ms_id: p.productMsId,
-        product_name: p.name,
-        sale_date: date,
-        revenue: p.revenue,
-        quantity: p.quantity,
-        cost: p.cost,
-        returned_amount: p.returnedAmount,
-        returned_quantity: p.returnedQuantity,
-      })),
-      { onConflict: "product_ms_id,sale_date" }
-    );
+  // One /report/profit/byproduct call per склад (МойСклад's store filter
+  // only ever accepts a single value — see fetchProfitByProductForDate),
+  // then summed into this day's city/frozen buckets — several склады can
+  // resolve to the same bucket (e.g. Overman + Saya Park → point_1).
+  // Sequential, not Promise.all: МойСклад rate-limits concurrent requests
+  // (confirmed live — 6 parallel calls tripped a 429 "too many concurrent
+  // requests"), so this trades a bit of wall-clock time for not failing.
+  type ProductAgg = { name: string; revenue: number; quantity: number; cost: number; returnedAmount: number; returnedQuantity: number };
+  const byProduct = new Map<string, ProductAgg>(); // key: `${productMsId}|${store}`
+  const warehouseIds = Object.keys(WAREHOUSE_STORE);
+  const perWarehouse: Awaited<ReturnType<typeof fetchProfitByProductForDate>>[] = [];
+  for (const whId of warehouseIds) {
+    perWarehouse.push(await fetchProfitByProductForDate(date, whId));
+  }
+  let productRows = 0;
+  for (let i = 0; i < warehouseIds.length; i++) {
+    const store = WAREHOUSE_STORE[warehouseIds[i]];
+    for (const p of perWarehouse[i]) {
+      const key = `${p.productMsId}|${store}`;
+      const agg = byProduct.get(key) ?? { name: p.name, revenue: 0, quantity: 0, cost: 0, returnedAmount: 0, returnedQuantity: 0 };
+      agg.revenue += p.revenue;
+      agg.quantity += p.quantity;
+      agg.cost += p.cost;
+      agg.returnedAmount += p.returnedAmount;
+      agg.returnedQuantity += p.returnedQuantity;
+      byProduct.set(key, agg);
+    }
+  }
+  const productRowsToUpsert = [...byProduct.entries()].map(([key, agg]) => {
+    const sep = key.lastIndexOf("|");
+    return {
+      product_ms_id: key.slice(0, sep),
+      product_name: agg.name,
+      sale_date: date,
+      store: key.slice(sep + 1),
+      revenue: agg.revenue,
+      quantity: agg.quantity,
+      cost: agg.cost,
+      returned_amount: agg.returnedAmount,
+      returned_quantity: agg.returnedQuantity,
+    };
+  });
+  for (const batch of chunk(productRowsToUpsert, 500)) {
+    const { error: productSalesError } = await supabaseAdmin
+      .from("moysklad_product_sales_daily")
+      .upsert(batch, { onConflict: "product_ms_id,sale_date,store" });
     if (productSalesError) throw productSalesError;
   }
+  productRows = productRowsToUpsert.length;
 
   return {
     date,
     registers: byRegister.size,
     employees: byEmployee.size,
-    products: productAggs.length,
+    products: productRows,
     receipts: demands.length,
     returns: returns.length,
     returnedAmount,
@@ -244,24 +293,43 @@ async function syncCatalogAndStock() {
     if (error) throw error;
   }
 
-  const stock = await fetchStockAll();
+  // /report/stock/all gives one summed-across-everything number per product
+  // plus its name/price/category; /report/stock/bystore gives the same
+  // product split by склад but without name/price/category — combine them,
+  // resolving each склад to a city/frozen bucket via WAREHOUSE_STORE
+  // (anything unmapped, e.g. "Кайнар", is dropped rather than guessed at).
+  const [stockAll, stockByStore] = await Promise.all([fetchStockAll(), fetchStockByStore()]);
   const seenIds = new Set(products.map((p) => p.id));
-  // /report/stock/all can include ids (e.g. bundles/services) that never
-  // showed up in /entity/product — skip those, the FK would reject them.
-  const stockRows = stock.filter((s) => seenIds.has(s.productMsId));
-  for (const batch of chunk(stockRows, 500)) {
-    const { error } = await supabaseAdmin.from("moysklad_product_stock").upsert(
-      batch.map((s) => ({
-        product_ms_id: s.productMsId,
-        product_name: s.name,
-        category: s.category,
-        stock: s.stock,
-        buy_price: s.buyPrice,
-        stock_days: s.stockDays,
+  const infoById = new Map(stockAll.map((s) => [s.productMsId, s]));
+
+  const byStock = new Map<string, { productMsId: string; store: string; stock: number }>();
+  for (const row of stockByStore) {
+    const store = WAREHOUSE_STORE[row.warehouseId];
+    if (!store || !seenIds.has(row.productMsId)) continue;
+    const key = `${row.productMsId}|${store}`;
+    const existing = byStock.get(key);
+    if (existing) existing.stock += row.stock;
+    else byStock.set(key, { productMsId: row.productMsId, store, stock: row.stock });
+  }
+
+  const stockRows = [...byStock.values()].flatMap(({ productMsId, store, stock }) => {
+    const info = infoById.get(productMsId);
+    if (!info || stock <= 0) return [];
+    return [
+      {
+        product_ms_id: productMsId,
+        product_name: info.name,
+        category: info.category,
+        store,
+        stock,
+        buy_price: info.buyPrice,
+        stock_days: info.stockDays,
         synced_at: now,
-      })),
-      { onConflict: "product_ms_id" }
-    );
+      },
+    ];
+  });
+  for (const batch of chunk(stockRows, 500)) {
+    const { error } = await supabaseAdmin.from("moysklad_product_stock").upsert(batch, { onConflict: "product_ms_id,store" });
     if (error) throw error;
   }
 

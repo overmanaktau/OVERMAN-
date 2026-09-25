@@ -248,10 +248,56 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
   return all;
 }
 
+// Per-warehouse stock breakdown — /report/stock/all gives one number per
+// product (summed across every склад); this instead gives each склад's own
+// quantity, which is what lets "Зависшие остатки" and АВС/XYZ be filtered
+// by city. Name/price/category aren't in this report's rows at all (only
+// each nested store's own name) — callers cross-reference fetchStockAll()
+// for those, keyed by product id.
+export type StoreStockRow = {
+  productMsId: string;
+  warehouseId: string;
+  stock: number;
+};
+
+export async function fetchStockByStore(): Promise<StoreStockRow[]> {
+  const limit = 100;
+  let offset = 0;
+  const all: StoreStockRow[] = [];
+  for (;;) {
+    const page = await moyskladFetch("/report/stock/bystore", {
+      limit: String(limit),
+      offset: String(offset),
+    });
+    type Raw = {
+      meta?: { href?: string };
+      stockByStore?: { meta?: { href?: string }; stock?: number }[];
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      const href = r.meta?.href ?? "";
+      const productId = href.split("/").pop()?.split("?")[0] ?? "";
+      if (!productId) continue;
+      for (const w of r.stockByStore ?? []) {
+        const whHref = w.meta?.href ?? "";
+        const warehouseId = whHref.split("/").pop()?.split("?")[0] ?? "";
+        if (!warehouseId || !w.stock) continue; // 0/undefined stock at that склад — nothing to track
+        all.push({ productMsId: productId, warehouseId, stock: w.stock });
+      }
+    }
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
 // Per-product revenue/cost/quantity for one business day, straight from
 // МойСклад's own profit report — it already nets sales against returns and
 // computes cost server-side (no need to walk positions.rows ourselves, the
-// way the register/employee aggregation above does).
+// way the register/employee aggregation above does). МойСклад's "store"
+// filter only accepts one value per call (confirmed live — a second store=
+// errors, and comma-joining silently keeps only the last one), so a
+// per-warehouse breakdown means one call per склад, not one call total.
 export type ProductDayAgg = {
   productMsId: string;
   name: string;
@@ -262,7 +308,7 @@ export type ProductDayAgg = {
   returnedQuantity: number;
 };
 
-export async function fetchProfitByProductForDate(date: string): Promise<ProductDayAgg[]> {
+export async function fetchProfitByProductForDate(date: string, warehouseId?: string): Promise<ProductDayAgg[]> {
   const { from, to } = dayWindow(date);
   const limit = 100;
   let offset = 0;
@@ -273,6 +319,7 @@ export async function fetchProfitByProductForDate(date: string): Promise<Product
       momentTo: to,
       limit: String(limit),
       offset: String(offset),
+      ...(warehouseId ? { filter: `store=${BASE_URL}/entity/store/${warehouseId}` } : {}),
     });
     type Raw = {
       assortment?: { meta?: { href?: string }; name?: string };
