@@ -116,41 +116,26 @@ const SORT_OPTIONS = [
 ] as const;
 type SortKey = (typeof SORT_OPTIONS)[number]["key"];
 
-// "Вовлечённость" — доля аудитории, реально провзаимодействовавшей с постом
-// (лайки+комментарии+репосты относительно охвата), а не просто сумма счётчиков,
-// которую иначе полностью забивают просмотры (они на порядки больше остального).
-// Shown as-is next to each post — this is the plain, easy-to-read percentage.
+// Shown next to each post as a plain, easy-to-read percentage — informational
+// only, not what "по вовлечённости" sorts by (see engagementScore below).
 function engagementRate(item: ContentItem): number {
   return item.views > 0 ? ((item.likes + item.comments + item.shares) / item.views) * 100 : 0;
 }
 
-// Ranking by the plain rate above lets a post with e.g. 14 likes on 424
-// views (3.8%) outrank one with 4000+ likes on 170k views (2.4%) — a tiny
-// view count makes the ratio statistically noisy, so one lucky post can
-// "win" on almost no engagement at all. The Wilson score lower bound (the
-// same technique Reddit uses to rank comments) treats the rate as an
-// estimate with a margin of error that shrinks as views grow, so a
-// well-viewed post with a strong ratio properly outranks a barely-viewed
-// post with a lucky one. Used only for sorting — the displayed percentage
-// next to each post is still the plain rate above.
-function wilsonScore(item: ContentItem): number {
-  if (item.views <= 0) return 0;
-  const n = item.views;
-  const engaged = item.likes + item.comments + item.shares;
-  const phat = engaged / n;
-  const z = 1.96; // ~95% confidence
-  const z2 = z * z;
-  const numerator = phat + z2 / (2 * n) - z * Math.sqrt((phat * (1 - phat) + z2 / (4 * n)) / n);
-  const denominator = 1 + z2 / n;
-  return Math.max(0, numerator / denominator) * 100;
-}
-
+// "По вовлечённости" ranks by raw engagement volume (likes+comments+shares),
+// not a ratio to views. A ratio rewards tiny, barely-viewed posts whenever
+// they get a lucky percentage — e.g. 14 likes on 424 views (3.8%) would
+// otherwise outrank 4000+ likes on 170k views (2.4%), even though the
+// second post is the actual hit by every real-world measure. The owner
+// wants the biggest, most successful posts on top; raw totals do that
+// directly, since a post can't rack up thousands of likes without real
+// reach behind it.
 function engagementScore(item: ContentItem, sortKey: SortKey): number {
   if (sortKey === "likes") return item.likes;
   if (sortKey === "views") return item.views;
   if (sortKey === "comments") return item.comments;
   if (sortKey === "shares") return item.shares;
-  return wilsonScore(item);
+  return item.likes + item.comments + item.shares;
 }
 
 export default function CompetitorAnalyticsPage() {
