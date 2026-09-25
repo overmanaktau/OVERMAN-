@@ -6,7 +6,8 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
-const WINDOW_DAYS = 90;
+const PERIODS = ["7 дней", "30 дней", "90 дней", "С начала месяца", "Прошлый месяц", "Всё время"];
+const DEFAULT_PERIOD = 2; // "90 дней"
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -22,6 +23,27 @@ function addDays(d: Date, n: number) {
 function stripTime(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
+
+type Range = { start: Date; end: Date };
+
+function getPeriodRange(index: number, today: Date): Range {
+  const d = stripTime(today);
+  if (index === 0) return { start: addDays(d, -6), end: d }; // 7 дней
+  if (index === 1) return { start: addDays(d, -29), end: d }; // 30 дней
+  if (index === 2) return { start: addDays(d, -89), end: d }; // 90 дней
+  if (index === 3) return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: d }; // С начала месяца
+  if (index === 4) {
+    // Прошлый месяц
+    return { start: new Date(d.getFullYear(), d.getMonth() - 1, 1), end: new Date(d.getFullYear(), d.getMonth(), 0) };
+  }
+  return { start: new Date(2000, 0, 1), end: d }; // Всё время
+}
+
+function parseYmd(s: string): Date {
+  const [y, m, day] = s.split("-").map(Number);
+  return new Date(y, m - 1, day);
+}
+
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
@@ -133,9 +155,17 @@ export default function ObzorPage() {
   const { selected: selectedStores } = useStoreSelection();
   const canView = isAdmin || permissions["marketing.statistics"].canView;
 
+  const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
+  const [activeCustom, setActiveCustom] = useState<{ start: string; end: string } | null>(null);
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const customPickerRef = useRef<HTMLDivElement>(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dayRows, setDayRows] = useState<{ date: string; revenue: number; receipts: number; items: number; cost: number | null }[]>([]);
+  const [range, setRange] = useState<Range>(() => getPeriodRange(DEFAULT_PERIOD, new Date()));
 
   // selectedStores starts empty and updates a moment later once the store
   // list finishes loading, firing a second load() call right behind the
@@ -149,13 +179,14 @@ export default function ObzorPage() {
     setLoading(true);
     setError(null);
     try {
-      const today = stripTime(new Date());
-      const start = addDays(today, -(WINDOW_DAYS - 1));
+      const { start, end } = activeCustom
+        ? { start: parseYmd(activeCustom.start), end: parseYmd(activeCustom.end) }
+        : getPeriodRange(periodIndex, new Date());
       const { data, error: err } = await supabase
         .from("moysklad_sales_daily")
         .select("sale_date, revenue, receipts_count, items_count, cost, moysklad_registers(store)")
         .gte("sale_date", ymd(start))
-        .lte("sale_date", ymd(today));
+        .lte("sale_date", ymd(end));
       if (err) throw err;
 
       type Row = {
@@ -183,6 +214,7 @@ export default function ObzorPage() {
         .sort((a, b) => a.date.localeCompare(b.date));
       if (seq !== loadSeq.current) return; // a newer load() has since started — drop this stale result
       setDayRows(rows);
+      setRange({ start, end });
     } catch (e) {
       if (seq !== loadSeq.current) return;
       setError(friendlyError(e));
@@ -191,7 +223,22 @@ export default function ObzorPage() {
       if (seq === loadSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStores.join(",")]);
+  }, [periodIndex, activeCustom?.start, activeCustom?.end, selectedStores.join(",")]);
+
+  useEffect(() => {
+    if (!showCustomPicker) return;
+    function onClick(e: MouseEvent) {
+      if (customPickerRef.current && !customPickerRef.current.contains(e.target as Node)) setShowCustomPicker(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showCustomPicker]);
+
+  function applyCustomRange() {
+    if (!customStart || !customEnd || customStart > customEnd) return;
+    setActiveCustom({ start: customStart, end: customEnd });
+    setShowCustomPicker(false);
+  }
 
   useEffect(() => {
     load();
@@ -207,11 +254,12 @@ export default function ObzorPage() {
 
   const today = stripTime(new Date());
   const byDateMap = new Map(dayRows.map((r) => [r.date, r]));
-  // Fill every day in the window, even ones with no sales, so the chart's
+  // Fill every day in the range, even ones with no sales, so the chart's
   // x-axis is an even daily grid instead of skipping gaps.
+  const dayCount = Math.round((range.end.getTime() - range.start.getTime()) / 86400000) + 1;
   const points: DayPoint[] = [];
-  for (let i = WINDOW_DAYS - 1; i >= 0; i--) {
-    const d = addDays(today, -i);
+  for (let i = 0; i < dayCount; i++) {
+    const d = addDays(range.start, i);
     const date = ymd(d);
     const row = byDateMap.get(date);
     points.push({ date, label: `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}`, revenue: row?.revenue ?? 0 });
@@ -239,8 +287,8 @@ export default function ObzorPage() {
         <div className="text-xs text-mutedLight">Общее</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Обзор</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Сводка по продажам за последние {WINDOW_DAYS} дней — те же данные из МойСклад, что и на
-          странице «Продажа», просто в одном экране.
+          Сводка по продажам за выбранный период — те же данные из МойСклад, что и на странице
+          «Продажа», просто в одном экране.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -250,6 +298,84 @@ export default function ObzorPage() {
             </button>
           </div>
         )}
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit relative">
+        {PERIODS.map((p, i) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => {
+              setPeriodIndex(i);
+              setActiveCustom(null);
+            }}
+            disabled={loading}
+            className={`font-sans text-[13px] rounded-md px-3.5 py-2 disabled:opacity-60 ${
+              periodIndex === i && !activeCustom ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+        <div className="w-px h-5 bg-border mx-0.5" />
+        <div ref={customPickerRef} className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              if (!showCustomPicker) {
+                setCustomStart(activeCustom?.start ?? ymd(addDays(new Date(), -6)));
+                setCustomEnd(activeCustom?.end ?? ymd(new Date()));
+              }
+              setShowCustomPicker((v) => !v);
+            }}
+            className={`text-[13px] rounded-md px-3.5 py-2 ${
+              activeCustom ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+            }`}
+          >
+            {activeCustom ? `${activeCustom.start} — ${activeCustom.end}` : "Свой период"}
+          </button>
+          {showCustomPicker && (
+            <div className="absolute right-0 top-full mt-2 z-50 bg-surface border border-border rounded-lg shadow-lg p-3.5 flex flex-col gap-2.5 w-[230px]">
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                С
+                <input
+                  type="date"
+                  value={customStart}
+                  max={customEnd || undefined}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                По
+                <input
+                  type="date"
+                  value={customEnd}
+                  min={customStart || undefined}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                />
+              </label>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowCustomPicker(false)}
+                  className="text-[12.5px] font-semibold text-muted px-2.5 py-1.5 rounded-md hover:bg-paper"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={applyCustomRange}
+                  disabled={!customStart || !customEnd || customStart > customEnd}
+                  className="text-[12.5px] font-bold text-paper bg-accent rounded-md px-3 py-1.5 disabled:opacity-50"
+                >
+                  Применить
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {loading ? (
