@@ -11,10 +11,7 @@ import AccountMenu from "@/components/AccountMenu";
 import { supabase } from "@/lib/supabaseClient";
 import type { SectionKey } from "@/lib/permissions";
 
-const TOP_LEVEL: { label: string; soon: boolean }[] = [
-  { label: "Обзор", soon: true },
-  { label: "Склад", soon: true },
-];
+const TOP_LEVEL: { label: string; soon: boolean }[] = [{ label: "Склад", soon: true }];
 
 const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "Статистика", href: "/marketing/statistics", section: "marketing.statistics" },
@@ -138,6 +135,7 @@ export default function Sidebar() {
   );
   const canSeeRequests = isAdmin || permissions["requests"].canView || permissions["requests"].canEdit;
   const canSeeSales = isAdmin || permissions["marketing.statistics"].canView;
+  const canSeeOverview = isAdmin || permissions["marketing.statistics"].canView;
   const { mobileLayout } = useSiteVersion();
 
   // RLS on edit_requests already scopes this to "my own requests" or "every
@@ -231,7 +229,36 @@ export default function Sidebar() {
       <StorePicker />
 
       <nav className="flex flex-col gap-1">
-        {TOP_LEVEL.map((item, i) => (
+        <div>
+          {canSeeOverview ? (
+            <GuardedLink
+              href="/obzor"
+              onNavigate={closeMobile}
+              className={`block px-3 py-2.5 rounded-lg text-sm font-semibold ${
+                pathname === "/obzor" ? "bg-accent text-paper" : "text-sidebarText hover:text-sidebarText"
+              }`}
+            >
+              Обзор
+            </GuardedLink>
+          ) : (
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium">
+              <span>Обзор</span>
+            </div>
+          )}
+          {canSeeSales && (
+            <GuardedLink
+              href="/sales"
+              onNavigate={closeMobile}
+              className={`block px-3 py-2.5 rounded-lg text-sm font-semibold ${
+                pathname === "/sales" ? "bg-accent text-paper" : "text-sidebarText hover:text-sidebarText"
+              }`}
+            >
+              Продажа
+            </GuardedLink>
+          )}
+        </div>
+
+        {TOP_LEVEL.map((item) => (
           <div key={item.label}>
             <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium">
               <span>{item.label}</span>
@@ -241,17 +268,6 @@ export default function Sidebar() {
                 </span>
               )}
             </div>
-            {i === 0 && canSeeSales && (
-              <GuardedLink
-                href="/sales"
-                onNavigate={closeMobile}
-                className={`block px-3 py-2.5 rounded-lg text-sm font-semibold ${
-                  pathname === "/sales" ? "bg-accent text-paper" : "text-sidebarText hover:text-sidebarText"
-                }`}
-              >
-                Продажа
-              </GuardedLink>
-            )}
           </div>
         ))}
 

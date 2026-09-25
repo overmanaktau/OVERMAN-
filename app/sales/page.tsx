@@ -135,7 +135,15 @@ export default function SalesPage() {
   const [employeeSales, setEmployeeSales] = useState<EmployeeSalesRow[]>([]);
   const [showGross, setShowGross] = useState(false);
 
+  // selectedStores starts empty and updates a moment later once the store
+  // list finishes loading, firing a second load() call right behind the
+  // first — without this guard, whichever of the two happens to resolve
+  // last wins, so the correct (non-empty-filter) result could get clobbered
+  // by the earlier call's empty-selection result landing after it.
+  const loadSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -228,6 +236,7 @@ export default function SalesPage() {
           returnedItems: a.returnedItems,
         }))
         .sort((a, b) => b.revenue - a.revenue);
+      if (seq !== loadSeq.current) return; // a newer load() has since started — drop this stale result
       setRegisterSales(rows);
 
       type EmployeeAgg = {
@@ -297,11 +306,12 @@ export default function SalesPage() {
         .sort((a, b) => b.revenue - a.revenue);
       setEmployeeSales(employeeRows);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       setError(friendlyError(e));
       setRegisterSales([]);
       setEmployeeSales([]);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodIndex, activeCustom?.start, activeCustom?.end, selectedStores.join(",")]);
