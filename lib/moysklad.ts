@@ -40,7 +40,7 @@ async function fetchAllPages<T>(path: string, filter: string): Promise<T[]> {
       // not just a meta reference. Cost (buyPrice) lives on the product,
       // never on the position itself, and a variant doesn't carry its own
       // buyPrice — only the product it belongs to does.
-      expand: "retailStore,positions.assortment,positions.assortment.product",
+      expand: "retailStore,owner,positions.assortment,positions.assortment.product",
     });
     const rows: T[] = page.rows ?? [];
     all.push(...rows);
@@ -78,6 +78,9 @@ export type RetailDemand = {
   // to tell registers apart — "store" (склад) is just the warehouse stock
   // gets deducted from, and doesn't carry the city in its name.
   retailStore?: { name?: string; id?: string } | null;
+  // The employee who actually rang up the sale (МойСклад's "ответственный") —
+  // confirmed live to vary by real cashier, not a generic API/admin user.
+  owner?: { name?: string; id?: string } | null;
   positions?: { rows?: PositionRow[]; meta?: { size?: number } };
 };
 
@@ -110,6 +113,7 @@ export async function fetchRetailDemandsForDate(date: string): Promise<RetailDem
 export type RetailSalesReturn = {
   sum: number; // kopecks
   retailStore?: { name?: string; id?: string } | null;
+  owner?: { name?: string; id?: string } | null;
   positions?: { rows?: PositionRow[] };
   demand?: { meta?: { href?: string } } | null;
 };

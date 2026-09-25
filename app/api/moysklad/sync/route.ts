@@ -49,26 +49,39 @@ async function runSync(date: string) {
     returnedReceipts: number;
     returnedItems: number;
   };
+  type EmployeeAgg = RegisterAgg & { store: string };
   const byRegister = new Map<string, RegisterAgg>();
+  // Keyed by `${employeeId}|${store}` — an employee normally sells at one
+  // store, but keeping store in the key means a rare cross-store shift
+  // shows up as two honest rows instead of getting attributed to whichever
+  // store happened to sync last.
+  const byEmployee = new Map<string, EmployeeAgg>();
+  function emptyAgg(): RegisterAgg {
+    return { name: "", revenue: 0, receipts: 0, items: 0, cost: 0, returnedAmount: 0, returnedReceipts: 0, returnedItems: 0 };
+  }
   for (const d of demands) {
     const id = d.retailStore?.id;
     const name = d.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue; // not a live retail register
-    const agg = byRegister.get(id) ?? {
-      name,
-      revenue: 0,
-      receipts: 0,
-      items: 0,
-      cost: 0,
-      returnedAmount: 0,
-      returnedReceipts: 0,
-      returnedItems: 0,
-    };
+    const agg = byRegister.get(id) ?? { ...emptyAgg(), name };
     agg.revenue += (d.sum ?? 0) / 100;
     agg.receipts += 1;
     agg.items += (d.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
     agg.cost += totalCostKopecks(d.positions?.rows) / 100;
     byRegister.set(id, agg);
+
+    const employeeId = d.owner?.id;
+    const employeeName = d.owner?.name;
+    if (employeeId && employeeName) {
+      const store = REGISTER_STORE[id];
+      const key = `${employeeId}|${store}`;
+      const eAgg = byEmployee.get(key) ?? { ...emptyAgg(), name: employeeName, store };
+      eAgg.revenue += (d.sum ?? 0) / 100;
+      eAgg.receipts += 1;
+      eAgg.items += (d.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
+      eAgg.cost += totalCostKopecks(d.positions?.rows) / 100;
+      byEmployee.set(key, eAgg);
+    }
   }
 
   // A return always subtracts from the day it happened on, not the day of
@@ -85,16 +98,7 @@ async function runSync(date: string) {
     const id = r.retailStore?.id;
     const name = r.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue;
-    const agg = byRegister.get(id) ?? {
-      name,
-      revenue: 0,
-      receipts: 0,
-      items: 0,
-      cost: 0,
-      returnedAmount: 0,
-      returnedReceipts: 0,
-      returnedItems: 0,
-    };
+    const agg = byRegister.get(id) ?? { ...emptyAgg(), name };
     const rSum = (r.sum ?? 0) / 100;
     const rItems = (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
     agg.revenue -= rSum;
@@ -104,6 +108,7 @@ async function runSync(date: string) {
     agg.returnedItems += rItems;
     returnedAmount += rSum;
 
+    let voidedThisReturn = false;
     const demandHref = r.demand?.meta?.href;
     if (demandHref) {
       const originalItemCount = await fetchDemandItemCount(demandHref);
@@ -111,9 +116,28 @@ async function runSync(date: string) {
         agg.receipts = Math.max(0, agg.receipts - 1);
         agg.returnedReceipts += 1;
         voidedReceipts += 1;
+        voidedThisReturn = true;
       }
     }
     byRegister.set(id, agg);
+
+    const employeeId = r.owner?.id;
+    const employeeName = r.owner?.name;
+    if (employeeId && employeeName) {
+      const store = REGISTER_STORE[id];
+      const key = `${employeeId}|${store}`;
+      const eAgg = byEmployee.get(key) ?? { ...emptyAgg(), name: employeeName, store };
+      eAgg.revenue -= rSum;
+      eAgg.items -= rItems;
+      eAgg.cost -= totalCostKopecks(r.positions?.rows) / 100;
+      eAgg.returnedAmount += rSum;
+      eAgg.returnedItems += rItems;
+      if (voidedThisReturn) {
+        eAgg.receipts = Math.max(0, eAgg.receipts - 1);
+        eAgg.returnedReceipts += 1;
+      }
+      byEmployee.set(key, eAgg);
+    }
   }
 
   // Computed from receipts + voided (not the post-void byRegister totals),
@@ -144,9 +168,31 @@ async function runSync(date: string) {
     if (salesError) throw salesError;
   }
 
+  for (const [key, agg] of byEmployee) {
+    const employeeId = key.slice(0, key.lastIndexOf("|"));
+    const { error: employeeSalesError } = await supabaseAdmin.from("moysklad_employee_sales_daily").upsert(
+      {
+        employee_ms_id: employeeId,
+        employee_name: agg.name,
+        sale_date: date,
+        store: agg.store,
+        revenue: agg.revenue,
+        receipts_count: agg.receipts,
+        items_count: agg.items,
+        cost: agg.cost,
+        returned_amount: agg.returnedAmount,
+        returned_receipts: agg.returnedReceipts,
+        returned_items: agg.returnedItems,
+      },
+      { onConflict: "employee_ms_id,sale_date,store" }
+    );
+    if (employeeSalesError) throw employeeSalesError;
+  }
+
   return {
     date,
     registers: byRegister.size,
+    employees: byEmployee.size,
     receipts: demands.length,
     returns: returns.length,
     returnedAmount,

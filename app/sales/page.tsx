@@ -78,6 +78,19 @@ type RegisterSalesRow = {
   returnedItems: number;
 };
 
+type EmployeeSalesRow = {
+  employeeId: string;
+  name: string;
+  store: string | null;
+  revenue: number;
+  receipts: number;
+  items: number;
+  cost: number | null;
+  returnedAmount: number;
+  returnedReceipts: number;
+  returnedItems: number;
+};
+
 // revenue/receipts/items on a row are already net of returns. "Gross" adds
 // the returned amounts back — "what it looked like before the return came
 // in" — purely for display; nothing that sums across rows elsewhere in the
@@ -119,6 +132,7 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [registerSales, setRegisterSales] = useState<RegisterSalesRow[]>([]);
+  const [employeeSales, setEmployeeSales] = useState<EmployeeSalesRow[]>([]);
   const [showGross, setShowGross] = useState(false);
 
   const load = useCallback(async () => {
@@ -128,14 +142,24 @@ export default function SalesPage() {
       const r = activeCustom
         ? { start: parseYmd(activeCustom.start), end: parseYmd(activeCustom.end) }
         : getPeriodRange(periodIndex, new Date());
-      const { data, error: registerError } = await supabase
-        .from("moysklad_sales_daily")
-        .select(
-          "register_id, revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items, moysklad_registers(name, store)"
-        )
-        .gte("sale_date", ymd(r.start))
-        .lte("sale_date", ymd(r.end));
+      const [{ data, error: registerError }, { data: employeeData, error: employeeError }] = await Promise.all([
+        supabase
+          .from("moysklad_sales_daily")
+          .select(
+            "register_id, revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items, moysklad_registers(name, store)"
+          )
+          .gte("sale_date", ymd(r.start))
+          .lte("sale_date", ymd(r.end)),
+        supabase
+          .from("moysklad_employee_sales_daily")
+          .select(
+            "employee_ms_id, employee_name, store, revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items"
+          )
+          .gte("sale_date", ymd(r.start))
+          .lte("sale_date", ymd(r.end)),
+      ]);
       if (registerError) throw registerError;
+      if (employeeError) throw employeeError;
 
       type Agg = {
         registerId: string;
@@ -205,9 +229,77 @@ export default function SalesPage() {
         }))
         .sort((a, b) => b.revenue - a.revenue);
       setRegisterSales(rows);
+
+      type EmployeeAgg = {
+        employeeId: string;
+        name: string;
+        store: string | null;
+        revenue: number;
+        receipts: number;
+        items: number;
+        costSum: number;
+        costMissing: boolean;
+        returnedAmount: number;
+        returnedReceipts: number;
+        returnedItems: number;
+      };
+      const byEmployee = new Map<string, EmployeeAgg>();
+      for (const row of (employeeData ?? []) as unknown as {
+        employee_ms_id: string;
+        employee_name: string;
+        store: string | null;
+        revenue: number;
+        receipts_count: number;
+        items_count: number;
+        cost: number | null;
+        returned_amount: number | null;
+        returned_receipts: number | null;
+        returned_items: number | null;
+      }[]) {
+        const key = `${row.employee_ms_id}|${row.store ?? ""}`;
+        const agg = byEmployee.get(key) ?? {
+          employeeId: row.employee_ms_id,
+          name: row.employee_name,
+          store: row.store,
+          revenue: 0,
+          receipts: 0,
+          items: 0,
+          costSum: 0,
+          costMissing: false,
+          returnedAmount: 0,
+          returnedReceipts: 0,
+          returnedItems: 0,
+        };
+        agg.revenue += row.revenue ?? 0;
+        agg.receipts += row.receipts_count ?? 0;
+        agg.items += row.items_count ?? 0;
+        agg.returnedAmount += row.returned_amount ?? 0;
+        agg.returnedReceipts += row.returned_receipts ?? 0;
+        agg.returnedItems += row.returned_items ?? 0;
+        if (row.cost === null) agg.costMissing = true;
+        else agg.costSum += row.cost;
+        byEmployee.set(key, agg);
+      }
+      const employeeRows: EmployeeSalesRow[] = [...byEmployee.values()]
+        .filter((a) => !a.store || selectedStores.includes(a.store))
+        .map((a) => ({
+          employeeId: a.employeeId,
+          name: a.name,
+          store: a.store,
+          revenue: a.revenue,
+          receipts: a.receipts,
+          items: a.items,
+          cost: a.costMissing ? null : a.costSum,
+          returnedAmount: a.returnedAmount,
+          returnedReceipts: a.returnedReceipts,
+          returnedItems: a.returnedItems,
+        }))
+        .sort((a, b) => b.revenue - a.revenue);
+      setEmployeeSales(employeeRows);
     } catch (e) {
       setError(friendlyError(e));
       setRegisterSales([]);
+      setEmployeeSales([]);
     } finally {
       setLoading(false);
     }
@@ -245,7 +337,7 @@ export default function SalesPage() {
   // showGross is on, this adds the returned amounts back for display only —
   // every sum here and below is derived from this, so nothing outside this
   // page (Статистика, KPIs, etc.) is ever affected by the toggle.
-  function displayed(r: RegisterSalesRow) {
+  function displayed(r: { revenue: number; receipts: number; items: number; returnedAmount: number; returnedReceipts: number; returnedItems: number }) {
     return showGross ? grossOf(r) : { revenue: r.revenue, receipts: r.receipts, items: r.items };
   }
 
@@ -269,7 +361,7 @@ export default function SalesPage() {
 
   // A missing cost anywhere in the set makes the whole sum's gross profit
   // unknown, rather than silently treating it as zero.
-  function sumCost(rows: RegisterSalesRow[]): number | null {
+  function sumCost(rows: { cost: number | null }[]): number | null {
     let sum = 0;
     for (const r of rows) {
       if (r.cost === null) return null;
@@ -306,6 +398,16 @@ export default function SalesPage() {
     group.rows.push(r);
   }
   const visibleGroups = cityGroups.filter((g) => g.rows.length > 0);
+
+  const totalEmployeeRevenue = employeeSales.reduce((acc, r) => acc + displayed(r).revenue, 0);
+  const totalEmployeeReceipts = employeeSales.reduce((acc, r) => acc + displayed(r).receipts, 0);
+  const totalEmployeeItems = employeeSales.reduce((acc, r) => acc + displayed(r).items, 0);
+  const totalEmployeeReturned = {
+    returnedAmount: employeeSales.reduce((acc, r) => acc + r.returnedAmount, 0),
+    returnedReceipts: employeeSales.reduce((acc, r) => acc + r.returnedReceipts, 0),
+    returnedItems: employeeSales.reduce((acc, r) => acc + r.returnedItems, 0),
+  };
+  const totalEmployeeCost = sumCost(employeeSales);
 
   return (
     <>
@@ -631,6 +733,141 @@ export default function SalesPage() {
               <div className="num">{totalReceipts > 0 ? (totalItems / totalReceipts).toFixed(3) : "—"}</div>
               <div className="num">{grossProfit(totalRevenue, totalCost)}</div>
               <div className="num text-muted font-normal">{returnSummary(totalReturned)}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+        <div className="text-[15px] font-bold">Продажи по сотрудникам</div>
+        {loading ? (
+          <div className="text-sm text-muted py-4">Загрузка…</div>
+        ) : employeeSales.length === 0 ? (
+          <div className="text-sm text-muted py-4">Нет данных за этот период.</div>
+        ) : mobileLayout ? (
+          <div className="flex flex-col gap-2">
+            {employeeSales.map((r) => (
+              <div key={`${r.employeeId}|${r.store ?? ""}`} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
+                <div className="font-semibold">
+                  {r.name} <span className="text-muted font-normal">· {storeLabel(r.store)}</span>
+                </div>
+                <SalesField
+                  label="Выручка"
+                  value={money(displayed(r).revenue)}
+                  extra={!showGross && r.returnedAmount > 0 ? `(${money(r.returnedAmount)})` : null}
+                />
+                <SalesField
+                  label="Чеков"
+                  value={String(displayed(r).receipts)}
+                  extra={!showGross && r.returnedReceipts > 0 ? `(${r.returnedReceipts})` : null}
+                />
+                <SalesField
+                  label="Средний чек"
+                  value={displayed(r).receipts > 0 ? money(displayed(r).revenue / displayed(r).receipts) : "—"}
+                />
+                <SalesField
+                  label="Кол-во товара"
+                  value={displayed(r).items.toLocaleString("ru-RU")}
+                  extra={!showGross && r.returnedItems > 0 ? `(${r.returnedItems})` : null}
+                />
+                <SalesField label="Вал. прибыль" value={grossProfit(displayed(r).revenue, r.cost)} />
+                <SalesField label="Возврат" value={returnSummary(r)} />
+              </div>
+            ))}
+            <div className="flex flex-col gap-1 rounded-lg border border-[#E4DFC8] p-3 text-[13px] font-bold">
+              <div>Итого</div>
+              <SalesField
+                label="Выручка"
+                value={money(totalEmployeeRevenue)}
+                extra={!showGross && totalEmployeeReturned.returnedAmount > 0 ? `(${money(totalEmployeeReturned.returnedAmount)})` : null}
+              />
+              <SalesField
+                label="Чеков"
+                value={String(totalEmployeeReceipts)}
+                extra={!showGross && totalEmployeeReturned.returnedReceipts > 0 ? `(${totalEmployeeReturned.returnedReceipts})` : null}
+              />
+              <SalesField
+                label="Средний чек"
+                value={totalEmployeeReceipts > 0 ? money(totalEmployeeRevenue / totalEmployeeReceipts) : "—"}
+              />
+              <SalesField
+                label="Кол-во товара"
+                value={totalEmployeeItems.toLocaleString("ru-RU")}
+                extra={!showGross && totalEmployeeReturned.returnedItems > 0 ? `(${totalEmployeeReturned.returnedItems})` : null}
+              />
+              <SalesField label="Вал. прибыль" value={grossProfit(totalEmployeeRevenue, totalEmployeeCost)} />
+              <SalesField label="Возврат" value={returnSummary(totalEmployeeReturned)} />
+            </div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <div className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.8fr_1.1fr_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+              <div>Сотрудник</div>
+              <div>Город</div>
+              <div>Выручка</div>
+              <div>Чеков</div>
+              <div>Средний чек</div>
+              <div>Кол-во товара</div>
+              <div>Вал. прибыль</div>
+              <div>Возврат</div>
+            </div>
+            {employeeSales.map((r) => {
+              const d = displayed(r);
+              const avgCheck = d.receipts > 0 ? d.revenue / d.receipts : 0;
+              return (
+                <div
+                  key={`${r.employeeId}|${r.store ?? ""}`}
+                  className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.8fr_1.1fr_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                >
+                  <div className="font-semibold">{r.name}</div>
+                  <div className="text-muted">{storeLabel(r.store)}</div>
+                  <div className="num">
+                    {money(d.revenue)}
+                    {!showGross && r.returnedAmount > 0 && (
+                      <span className="text-mutedLight"> ({money(r.returnedAmount)})</span>
+                    )}
+                  </div>
+                  <div className="num">
+                    {d.receipts}
+                    {!showGross && r.returnedReceipts > 0 && (
+                      <span className="text-mutedLight"> ({r.returnedReceipts})</span>
+                    )}
+                  </div>
+                  <div className="num">{money(avgCheck)}</div>
+                  <div className="num">
+                    {d.items.toLocaleString("ru-RU")}
+                    {!showGross && r.returnedItems > 0 && (
+                      <span className="text-mutedLight"> ({r.returnedItems})</span>
+                    )}
+                  </div>
+                  <div className="num">{grossProfit(d.revenue, r.cost)}</div>
+                  <div className="num text-muted">{returnSummary(r)}</div>
+                </div>
+              );
+            })}
+            <div className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.8fr_1.1fr_1fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
+              <div className="col-span-2">Итого</div>
+              <div className="num">
+                {money(totalEmployeeRevenue)}
+                {!showGross && totalEmployeeReturned.returnedAmount > 0 && (
+                  <span className="text-mutedLight font-normal"> ({money(totalEmployeeReturned.returnedAmount)})</span>
+                )}
+              </div>
+              <div className="num">
+                {totalEmployeeReceipts}
+                {!showGross && totalEmployeeReturned.returnedReceipts > 0 && (
+                  <span className="text-mutedLight font-normal"> ({totalEmployeeReturned.returnedReceipts})</span>
+                )}
+              </div>
+              <div className="num">{totalEmployeeReceipts > 0 ? money(totalEmployeeRevenue / totalEmployeeReceipts) : "—"}</div>
+              <div className="num">
+                {totalEmployeeItems.toLocaleString("ru-RU")}
+                {!showGross && totalEmployeeReturned.returnedItems > 0 && (
+                  <span className="text-mutedLight font-normal"> ({totalEmployeeReturned.returnedItems})</span>
+                )}
+              </div>
+              <div className="num">{grossProfit(totalEmployeeRevenue, totalEmployeeCost)}</div>
+              <div className="num text-muted font-normal">{returnSummary(totalEmployeeReturned)}</div>
             </div>
           </div>
         )}
