@@ -6,9 +6,12 @@ import { useSiteVersion } from "@/components/SiteVersion";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
-// МойСклад's own "оборачиваемость, дней" (stockDays) — how long the current
-// stock of an item has been sitting without moving. Threshold matches the
-// page's own title; not user-adjustable.
+// Products currently in stock with zero recorded sales in this many days —
+// computed from our own synced sales history (moysklad_product_sales_daily),
+// not МойСклад's "оборачиваемость" metric, which measures days-of-supply at
+// the recent sales pace and can stay low even for something that hasn't
+// actually sold in months. Threshold matches the page's own title; not
+// user-adjustable.
 const STALE_DAYS = 60;
 
 function money(n: number) {
@@ -27,7 +30,7 @@ type StaleRow = {
   name: string;
   stock: number;
   money: number;
-  stockDays: number;
+  daysSinceLastSale: number | null; // null = no recorded sale at all in our synced history
 };
 
 // Paginates past PostgREST's default row cap — this list alone can run into
@@ -65,15 +68,9 @@ export default function StaleInventoryPage() {
     setLoading(true);
     setError(null);
     try {
-      type Raw = { product_ms_id: string; product_name: string; stock: number; buy_price: number | null; stock_days: number | null };
+      type Raw = { product_ms_id: string; product_name: string; stock: number; money: number; days_since_last_sale: number | null };
       const raw = await fetchAllRows<Raw>((from, to) =>
-        supabase
-          .from("moysklad_product_stock")
-          .select("product_ms_id, product_name, stock, buy_price, stock_days")
-          .gt("stock", 0)
-          .gt("stock_days", STALE_DAYS)
-          .order("product_ms_id", { ascending: true })
-          .range(from, to)
+        supabase.rpc("stale_inventory", { p_stale_days: STALE_DAYS }).order("product_ms_id", { ascending: true }).range(from, to)
       );
 
       const mapped: StaleRow[] = raw
@@ -81,8 +78,8 @@ export default function StaleInventoryPage() {
           id: r.product_ms_id,
           name: r.product_name,
           stock: r.stock,
-          money: r.stock * (r.buy_price ?? 0),
-          stockDays: r.stock_days ?? 0,
+          money: r.money,
+          daysSinceLastSale: r.days_since_last_sale,
         }))
         .sort((a, b) => b.money - a.money);
 
@@ -117,8 +114,8 @@ export default function StaleInventoryPage() {
         <div className="text-xs text-mutedLight">Склад</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Зависшие остатки</h1>
         <p className="text-sm text-muted max-w-2xl mt-1">
-          Товары, которые лежат на складе дольше {STALE_DAYS} дней без движения — по данным
-          МойСклад («оборачиваемость, дней»).
+          Товары в наличии, которые не продавались {STALE_DAYS}+ дней (или ни разу за всё время
+          синхронизации).
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -161,24 +158,30 @@ export default function StaleInventoryPage() {
                       <span className="text-muted">Деньги</span>
                       <span className="num">{money(r.money)}</span>
                     </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted">Без продаж</span>
+                      <span className="num">{r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`}</span>
+                    </div>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <div className="min-w-[560px] grid grid-cols-[1.6fr_0.6fr_0.9fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                <div className="min-w-[680px] grid grid-cols-[1.6fr_0.6fr_0.9fr_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
                   <div>Товар</div>
                   <div>Остаток</div>
                   <div>Деньги</div>
+                  <div>Без продаж</div>
                 </div>
                 {rows.map((r) => (
                   <div
                     key={r.id}
-                    className="min-w-[560px] grid grid-cols-[1.6fr_0.6fr_0.9fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                    className="min-w-[680px] grid grid-cols-[1.6fr_0.6fr_0.9fr_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
                   >
                     <div className="font-semibold">{r.name}</div>
                     <div className="num">{r.stock.toLocaleString("ru-RU")}</div>
                     <div className="num">{money(r.money)}</div>
+                    <div className="num text-muted">{r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`}</div>
                   </div>
                 ))}
               </div>

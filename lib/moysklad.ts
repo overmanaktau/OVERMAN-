@@ -154,13 +154,19 @@ export type ProductCatalogRow = {
   archived: boolean;
 };
 
-export async function fetchAllProducts(): Promise<ProductCatalogRow[]> {
+// МойСклад's default /entity/product listing silently excludes archived
+// products (confirmed live: no filter and filter=archived=false return the
+// same count) — an archived item can still have real leftover stock sitting
+// on a shelf, which is exactly what "Зависшие остатки" needs to catch, so
+// this fetches both and merges them rather than trusting the default.
+async function fetchProductPage(archived: boolean): Promise<ProductCatalogRow[]> {
   const limit = 100;
   let offset = 0;
   const all: ProductCatalogRow[] = [];
   for (;;) {
     const page = await moyskladFetch("/entity/product", {
       expand: "productFolder",
+      filter: `archived=${archived}`,
       limit: String(limit),
       offset: String(offset),
     });
@@ -185,6 +191,11 @@ export async function fetchAllProducts(): Promise<ProductCatalogRow[]> {
     offset += limit;
   }
   return all;
+}
+
+export async function fetchAllProducts(): Promise<ProductCatalogRow[]> {
+  const [active, archived] = await Promise.all([fetchProductPage(false), fetchProductPage(true)]);
+  return [...active, ...archived];
 }
 
 // Current stock snapshot — МойСклад's own /report/stock/all, which already
