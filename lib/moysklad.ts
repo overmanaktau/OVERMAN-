@@ -142,3 +142,153 @@ export async function fetchDemandItemCount(demandHref: string): Promise<number> 
   const rows: { quantity?: number }[] = demand.positions?.rows ?? [];
   return rows.reduce((acc, p) => acc + (p.quantity ?? 0), 0);
 }
+
+// Full product catalog (name + category/productFolder + cost) — used to
+// label and categorize the daily per-product sales and the stock snapshot
+// below. ~5-6k rows; paginated at 100/page like everything else here.
+export type ProductCatalogRow = {
+  id: string;
+  name: string;
+  category: string | null;
+  buyPrice: number | null; // tenge (already /100 from kopecks)
+  archived: boolean;
+};
+
+export async function fetchAllProducts(): Promise<ProductCatalogRow[]> {
+  const limit = 100;
+  let offset = 0;
+  const all: ProductCatalogRow[] = [];
+  for (;;) {
+    const page = await moyskladFetch("/entity/product", {
+      expand: "productFolder",
+      limit: String(limit),
+      offset: String(offset),
+    });
+    type Raw = {
+      id: string;
+      name: string;
+      archived?: boolean;
+      productFolder?: { name?: string };
+      buyPrice?: Money;
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const p of rows) {
+      all.push({
+        id: p.id,
+        name: p.name,
+        category: p.productFolder?.name ?? null,
+        buyPrice: p.buyPrice?.value != null ? p.buyPrice.value / 100 : null,
+        archived: p.archived ?? false,
+      });
+    }
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
+// Current stock snapshot — МойСклад's own /report/stock/all, which already
+// includes "stockDays" (оборачиваемость: how many days this item's current
+// stock has been sitting without moving), so "Зависшие остатки" doesn't need
+// any historical tracking of our own — it's a live read of this report.
+export type StockReportRow = {
+  productMsId: string;
+  name: string;
+  category: string | null;
+  stock: number;
+  buyPrice: number | null; // tenge — "price" field in the report is cost, not sale price
+  stockDays: number | null;
+};
+
+export async function fetchStockAll(): Promise<StockReportRow[]> {
+  const limit = 100;
+  let offset = 0;
+  const all: StockReportRow[] = [];
+  for (;;) {
+    const page = await moyskladFetch("/report/stock/all", {
+      limit: String(limit),
+      offset: String(offset),
+    });
+    type Raw = {
+      meta?: { href?: string };
+      name: string;
+      stock?: number;
+      price?: number; // kopecks, cost basis
+      stockDays?: number;
+      folder?: { name?: string };
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      const href = r.meta?.href ?? "";
+      const id = href.split("/").pop()?.split("?")[0] ?? "";
+      if (!id) continue;
+      all.push({
+        productMsId: id,
+        name: r.name,
+        category: r.folder?.name ?? null,
+        stock: r.stock ?? 0,
+        buyPrice: r.price != null ? r.price / 100 : null,
+        stockDays: r.stockDays ?? null,
+      });
+    }
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
+// Per-product revenue/cost/quantity for one business day, straight from
+// МойСклад's own profit report — it already nets sales against returns and
+// computes cost server-side (no need to walk positions.rows ourselves, the
+// way the register/employee aggregation above does).
+export type ProductDayAgg = {
+  productMsId: string;
+  name: string;
+  revenue: number; // tenge, net of returns
+  quantity: number; // net of returns
+  cost: number; // tenge
+  returnedAmount: number;
+  returnedQuantity: number;
+};
+
+export async function fetchProfitByProductForDate(date: string): Promise<ProductDayAgg[]> {
+  const { from, to } = dayWindow(date);
+  const limit = 100;
+  let offset = 0;
+  const all: ProductDayAgg[] = [];
+  for (;;) {
+    const page = await moyskladFetch("/report/profit/byproduct", {
+      momentFrom: from,
+      momentTo: to,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    type Raw = {
+      assortment?: { meta?: { href?: string }; name?: string };
+      sellSum?: number;
+      sellQuantity?: number;
+      sellCostSum?: number;
+      returnSum?: number;
+      returnQuantity?: number;
+      returnCostSum?: number;
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      const href = r.assortment?.meta?.href ?? "";
+      const id = href.split("/").pop()?.split("?")[0] ?? "";
+      if (!id || !r.assortment?.name) continue;
+      all.push({
+        productMsId: id,
+        name: r.assortment.name,
+        revenue: ((r.sellSum ?? 0) - (r.returnSum ?? 0)) / 100,
+        quantity: (r.sellQuantity ?? 0) - (r.returnQuantity ?? 0),
+        cost: ((r.sellCostSum ?? 0) - (r.returnCostSum ?? 0)) / 100,
+        returnedAmount: (r.returnSum ?? 0) / 100,
+        returnedQuantity: r.returnQuantity ?? 0,
+      });
+    }
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}

@@ -11,7 +11,10 @@ import AccountMenu from "@/components/AccountMenu";
 import { supabase } from "@/lib/supabaseClient";
 import type { SectionKey } from "@/lib/permissions";
 
-const TOP_LEVEL: { label: string; soon: boolean }[] = [{ label: "Склад", soon: true }];
+const WAREHOUSE_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
+  { label: "АВС/XYZ анализ", href: "/warehouse/abc-xyz", section: "warehouse.stock" },
+  { label: "Зависшие остатки", href: "/warehouse/stale", section: "warehouse.stock" },
+];
 
 const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "Статистика", href: "/marketing/statistics", section: "marketing.statistics" },
@@ -127,6 +130,9 @@ function StorePicker() {
 export default function Sidebar() {
   const pathname = usePathname();
   const { isAdmin, permissions } = useAuth();
+  const visibleWarehouse = WAREHOUSE_SUBMENU.filter(
+    (item) => isAdmin || permissions[item.section]?.canView
+  );
   const visibleMarketing = MARKETING_SUBMENU.filter(
     (item) => isAdmin || permissions[item.section]?.canView
   );
@@ -162,6 +168,7 @@ export default function Sidebar() {
   }, [canSeeRequests]);
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
+    warehouse: WAREHOUSE_SUBMENU.some((item) => pathname === item.href),
     marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),
     settings: SETTINGS_SUBMENU.some((item) => pathname === item.href),
   }));
@@ -258,18 +265,43 @@ export default function Sidebar() {
           )}
         </div>
 
-        {TOP_LEVEL.map((item) => (
-          <div key={item.label}>
-            <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium">
-              <span>{item.label}</span>
-              {item.soon && (
-                <span className="text-[10px] tracking-wide uppercase text-sidebarMuted border border-[#3A362E] rounded-full px-2 py-0.5">
-                  скоро
-                </span>
-              )}
-            </div>
+        {visibleWarehouse.length > 0 ? (
+          <div className="flex flex-col gap-0.5 mt-1">
+            <button
+              type="button"
+              onClick={() => toggleGroup("warehouse")}
+              className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold"
+            >
+              <span>Склад</span>
+              <span className="text-sidebarMuted text-[10px]">{openGroups.warehouse ? "▲" : "▼"}</span>
+            </button>
+            {openGroups.warehouse && (
+              <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
+                {visibleWarehouse.map((item) => {
+                  const active = pathname === item.href;
+                  return (
+                    <GuardedLink
+                      key={item.href}
+                      href={item.href}
+                      onNavigate={closeMobile}
+                      className={`px-3 py-2 rounded-md text-[13px] ${
+                        active
+                          ? "bg-accent text-paper font-semibold"
+                          : "text-[#A39D8E] font-medium hover:text-sidebarText"
+                      }`}
+                    >
+                      {item.label}
+                    </GuardedLink>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        ))}
+        ) : (
+          <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium">
+            <span>Склад</span>
+          </div>
+        )}
 
         {visibleMarketing.length > 0 && (
           <div className="flex flex-col gap-0.5 mt-1">

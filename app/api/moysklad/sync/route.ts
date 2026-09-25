@@ -6,6 +6,9 @@ import {
   fetchRetailSalesReturnsForDate,
   fetchDemandItemCount,
   totalCostKopecks,
+  fetchAllProducts,
+  fetchStockAll,
+  fetchProfitByProductForDate,
 } from "@/lib/moysklad";
 
 // Confirmed with the business owner: these are the only live registers
@@ -189,16 +192,80 @@ async function runSync(date: string) {
     if (employeeSalesError) throw employeeSalesError;
   }
 
+  const productAggs = await fetchProfitByProductForDate(date);
+  for (const batch of chunk(productAggs, 500)) {
+    const { error: productSalesError } = await supabaseAdmin.from("moysklad_product_sales_daily").upsert(
+      batch.map((p) => ({
+        product_ms_id: p.productMsId,
+        product_name: p.name,
+        sale_date: date,
+        revenue: p.revenue,
+        quantity: p.quantity,
+        cost: p.cost,
+        returned_amount: p.returnedAmount,
+        returned_quantity: p.returnedQuantity,
+      })),
+      { onConflict: "product_ms_id,sale_date" }
+    );
+    if (productSalesError) throw productSalesError;
+  }
+
   return {
     date,
     registers: byRegister.size,
     employees: byEmployee.size,
+    products: productAggs.length,
     receipts: demands.length,
     returns: returns.length,
     returnedAmount,
     voidedReceipts,
     skipped,
   };
+}
+
+// Product catalog + current stock snapshot — not date-scoped (always
+// "right now"), so this runs once per sync call regardless of which day's
+// aggregates it's also pulling. moysklad_product_sales_daily.product_ms_id
+// has an FK to moysklad_products, so the catalog upsert has to happen first.
+function chunk<T>(rows: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
+  return out;
+}
+
+async function syncCatalogAndStock() {
+  const products = await fetchAllProducts();
+  const now = new Date().toISOString();
+  for (const batch of chunk(products, 500)) {
+    const { error } = await supabaseAdmin.from("moysklad_products").upsert(
+      batch.map((p) => ({ id: p.id, name: p.name, category: p.category, buy_price: p.buyPrice, archived: p.archived, synced_at: now })),
+      { onConflict: "id" }
+    );
+    if (error) throw error;
+  }
+
+  const stock = await fetchStockAll();
+  const seenIds = new Set(products.map((p) => p.id));
+  // /report/stock/all can include ids (e.g. bundles/services) that never
+  // showed up in /entity/product — skip those, the FK would reject them.
+  const stockRows = stock.filter((s) => seenIds.has(s.productMsId));
+  for (const batch of chunk(stockRows, 500)) {
+    const { error } = await supabaseAdmin.from("moysklad_product_stock").upsert(
+      batch.map((s) => ({
+        product_ms_id: s.productMsId,
+        product_name: s.name,
+        category: s.category,
+        stock: s.stock,
+        buy_price: s.buyPrice,
+        stock_days: s.stockDays,
+        synced_at: now,
+      })),
+      { onConflict: "product_ms_id" }
+    );
+    if (error) throw error;
+  }
+
+  return { products: products.length, stockRows: stockRows.length };
 }
 
 async function handle(request: Request) {
@@ -213,14 +280,19 @@ async function handle(request: Request) {
 
   const url = new URL(request.url);
   const date = url.searchParams.get("date") ?? yesterdayInAlmaty();
+  // Catalog + stock are a full-account snapshot (not date-scoped), so a
+  // multi-date backfill only needs to pay for it once — every other call in
+  // the loop passes this to skip straight to that date's aggregates.
+  const skipCatalog = url.searchParams.get("skipCatalog") === "1";
 
   try {
+    const catalog = skipCatalog ? null : await syncCatalogAndStock();
     const result = await runSync(date);
     await supabaseAdmin
       .from("moysklad_sync_state")
       .update({ last_synced_at: new Date().toISOString(), last_status: "ok", last_error: null })
       .eq("id", true);
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, ...result, catalog });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await supabaseAdmin
