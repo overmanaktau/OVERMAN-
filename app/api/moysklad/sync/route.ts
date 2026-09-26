@@ -11,6 +11,7 @@ import {
   fetchStockByStore,
   fetchAllSupplies,
   fetchProfitByProductForDate,
+  deriveArticle,
 } from "@/lib/moysklad";
 
 // Confirmed with the business owner: these are the only live registers
@@ -243,6 +244,7 @@ async function runSync(date: string) {
     return {
       product_ms_id: key.slice(0, sep),
       product_name: agg.name,
+      article: deriveArticle(agg.name),
       sale_date: date,
       store: key.slice(sep + 1),
       revenue: agg.revenue,
@@ -324,6 +326,7 @@ async function syncCatalogAndStock() {
         store,
         stock,
         buy_price: info.buyPrice,
+        sale_price: info.salePrice,
         stock_days: info.stockDays,
         synced_at: now,
       },

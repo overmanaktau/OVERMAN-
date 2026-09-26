@@ -60,8 +60,13 @@ function friendlyError(e: unknown): string {
   return `Не удалось выполнить операцию: ${message}`;
 }
 
+// Grouped by "артикул" (model/style), not by individual МойСклад product —
+// this account has no working article field, so every colour and size is
+// its own product; classifying at that grain made XYZ meaningless (a single
+// size in one colour almost never sells daily). See deriveArticle in
+// lib/moysklad.ts for how the grouping key itself is derived.
 type ProductRow = {
-  id: string;
+  id: string; // the derived article string, doubles as the row key
   name: string;
   category: string;
   revenue: number;
@@ -207,8 +212,7 @@ export default function AbcXyzPage() {
       const from = ymd(addDays(today, -(WINDOW_DAYS - 1)));
       const to = ymd(today);
       type Raw = {
-        product_ms_id: string;
-        product_name: string;
+        article: string;
         category: string | null;
         revenue: number;
         quantity: number;
@@ -216,12 +220,12 @@ export default function AbcXyzPage() {
         days_with_sales: number;
       };
       const raw = await fetchAllRows<Raw>((from_, to_) =>
-        supabase.rpc("product_sales_summary", { p_from: from, p_to: to, p_stores: selectedStores }).range(from_, to_)
+        supabase.rpc("product_sales_summary_by_article", { p_from: from, p_to: to, p_stores: selectedStores }).range(from_, to_)
       );
 
-      // Only products with real net revenue in the window get classified —
-      // a product with zero (or return-only) sales here has nothing to rank
-      // by ABC and belongs to the separate "Зависшие остатки" page instead.
+      // Only articles with real net revenue in the window get classified —
+      // one with zero (or return-only) sales here has nothing to rank by
+      // ABC and belongs to the separate "Зависшие остатки" page instead.
       const withRevenue = raw.filter((r) => r.revenue > 0);
       withRevenue.sort((a, b) => b.revenue - a.revenue);
       const totalRevenue = withRevenue.reduce((acc, r) => acc + r.revenue, 0);
@@ -234,8 +238,8 @@ export default function AbcXyzPage() {
         const coverage = r.days_with_sales / WINDOW_DAYS;
         const xyz: XyzKey = coverage > 0.6 ? "X" : coverage >= 0.2 ? "Y" : "Z";
         return {
-          id: r.product_ms_id,
-          name: r.product_name,
+          id: r.article,
+          name: r.article,
           category: r.category ?? "Без категории",
           revenue: r.revenue,
           quantity: r.quantity,
@@ -315,7 +319,7 @@ export default function AbcXyzPage() {
         <p className="text-sm text-muted max-w-2xl mt-1">
           АВС — доля в выручке: A — верхние 80&nbsp;%, B — 15&nbsp;%, C — 5&nbsp;%. XYZ — ровность
           спроса: доля дней с продажами. X — больше 60&nbsp;%, Y — от 20&nbsp;%, Z — реже. Расчёт за
-          последние {WINDOW_DAYS} дней.
+          последние {WINDOW_DAYS} дней, по артикулу (модели), а не по конкретному размеру/цвету.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -415,7 +419,7 @@ export default function AbcXyzPage() {
             ) : (
               <div className="overflow-x-auto">
                 <div className="min-w-[1100px] grid grid-cols-[1.4fr_1fr_0.4fr_0.4fr_0.9fr_0.6fr_0.5fr_0.7fr_1.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                  <div>Товар</div>
+                  <div>Артикул</div>
                   <div>Категория</div>
                   <div>ABC</div>
                   <div>XYZ</div>

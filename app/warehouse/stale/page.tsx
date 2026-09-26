@@ -30,7 +30,8 @@ type StaleRow = {
   id: string;
   name: string;
   stock: number;
-  money: number;
+  money: number; // at cost (себестоимость)
+  saleValue: number; // at retail (цена продажи)
   daysSinceLastSale: number | null; // null = no recorded sale at all in our synced history
 };
 
@@ -53,7 +54,14 @@ async function fetchAllRows<T>(
   return all;
 }
 
-type StaleRawRow = { product_ms_id: string; product_name: string; stock: number; money: number; days_since_last_sale: number | null };
+type StaleRawRow = {
+  product_ms_id: string;
+  product_name: string;
+  stock: number;
+  money: number;
+  sale_value: number;
+  days_since_last_sale: number | null;
+};
 
 function mapStaleRows(raw: StaleRawRow[]): StaleRow[] {
   return raw
@@ -62,6 +70,7 @@ function mapStaleRows(raw: StaleRawRow[]): StaleRow[] {
       name: r.product_name,
       stock: r.stock,
       money: r.money,
+      saleValue: r.sale_value,
       daysSinceLastSale: r.days_since_last_sale,
     }))
     .sort((a, b) => b.money - a.money);
@@ -80,8 +89,12 @@ function StaleTable({ rows, mobileLayout, emptyText }: { rows: StaleRow[]; mobil
               <span className="num">{r.stock.toLocaleString("ru-RU")}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted">Деньги</span>
+              <span className="text-muted">Деньги (себестоимость)</span>
               <span className="num">{money(r.money)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted">По цене продажи</span>
+              <span className="num">{money(r.saleValue)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted">Без продаж</span>
@@ -94,20 +107,22 @@ function StaleTable({ rows, mobileLayout, emptyText }: { rows: StaleRow[]; mobil
   }
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[680px] grid grid-cols-[1.6fr_0.6fr_0.9fr_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+      <div className="min-w-[800px] grid grid-cols-[1.6fr_0.6fr_0.9fr_0.9fr_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
         <div>Товар</div>
         <div>Остаток</div>
-        <div>Деньги</div>
+        <div>Деньги (себест.)</div>
+        <div>По цене продажи</div>
         <div>Без продаж</div>
       </div>
       {rows.map((r) => (
         <div
           key={r.id}
-          className="min-w-[680px] grid grid-cols-[1.6fr_0.6fr_0.9fr_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+          className="min-w-[800px] grid grid-cols-[1.6fr_0.6fr_0.9fr_0.9fr_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
         >
           <div className="font-semibold">{r.name}</div>
           <div className="num">{r.stock.toLocaleString("ru-RU")}</div>
           <div className="num">{money(r.money)}</div>
+          <div className="num text-muted">{money(r.saleValue)}</div>
           <div className="num text-muted">{r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`}</div>
         </div>
       ))}
@@ -182,7 +197,9 @@ export default function StaleInventoryPage() {
   }
 
   const totalMoney = rows.reduce((acc, r) => acc + r.money, 0);
+  const totalSaleValue = rows.reduce((acc, r) => acc + r.saleValue, 0);
   const totalFrozenMoney = frozenRows.reduce((acc, r) => acc + r.money, 0);
+  const totalFrozenSaleValue = frozenRows.reduce((acc, r) => acc + r.saleValue, 0);
 
   return (
     <>
@@ -207,14 +224,18 @@ export default function StaleInventoryPage() {
         <div className="text-sm text-muted">Загрузка…</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-2 gap-4 max-w-xl">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 max-w-2xl">
             <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">Зависло дольше {STALE_DAYS} дней</div>
               <div className="font-serif text-[26px] font-semibold num">{rows.length.toLocaleString("ru-RU")} моделей</div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <div className="text-xs text-muted">Денег в них</div>
+              <div className="text-xs text-muted">Денег в них (себестоимость)</div>
               <div className="font-serif text-[26px] font-semibold num">{money(totalMoney)}</div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xs text-muted">По цене продажи</div>
+              <div className="font-serif text-[26px] font-semibold num">{money(totalSaleValue)}</div>
             </div>
           </div>
 
@@ -229,14 +250,18 @@ export default function StaleInventoryPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-2 gap-4 max-w-xl">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 max-w-2xl">
             <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">Моделей в заморозке</div>
               <div className="font-serif text-[26px] font-semibold num">{frozenRows.length.toLocaleString("ru-RU")}</div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <div className="text-xs text-muted">Денег в них</div>
+              <div className="text-xs text-muted">Денег в них (себестоимость)</div>
               <div className="font-serif text-[26px] font-semibold num">{money(totalFrozenMoney)}</div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xs text-muted">По цене продажи</div>
+              <div className="font-serif text-[26px] font-semibold num">{money(totalFrozenSaleValue)}</div>
             </div>
           </div>
 

@@ -208,6 +208,7 @@ export type StockReportRow = {
   category: string | null;
   stock: number;
   buyPrice: number | null; // tenge — "price" field in the report is cost, not sale price
+  salePrice: number | null; // tenge — "salePrice" field, the retail price
   stockDays: number | null;
 };
 
@@ -225,6 +226,7 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
       name: string;
       stock?: number;
       price?: number; // kopecks, cost basis
+      salePrice?: number; // kopecks, retail price
       stockDays?: number;
       folder?: { name?: string };
     };
@@ -239,6 +241,7 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
         category: r.folder?.name ?? null,
         stock: r.stock ?? 0,
         buyPrice: r.price != null ? r.price / 100 : null,
+        salePrice: r.salePrice != null ? r.salePrice / 100 : null,
         stockDays: r.stockDays ?? null,
       });
     }
@@ -394,4 +397,47 @@ export async function fetchAllSupplies(): Promise<SupplyRow[]> {
     offset += limit;
   }
   return all;
+}
+
+// This account has no working "артикул" field — every colour/size gets its
+// own top-level product with an empty article field and a sequential,
+// unrelated code (confirmed live: 8 colour/size siblings of one style had 8
+// consecutive-but-unrelated `code` values, e.g. "04394".."04401"). The only
+// place the shared style number lives is the free-text name, e.g.
+// "Кардиган  B8271 Black exodor (3XL)" — so this peels trailing
+// colour/size/supplier-line qualifiers off the name, one token at a time,
+// split on whichever of "/", "," or a space sits closest to the end. It
+// only strips a token when it's a recognized word (never blindly cuts on
+// the separator alone), so an unrecognized qualifier — a typo, a colour not
+// in the list, a Cyrillic homoglyph — just leaves that one SKU ungrouped
+// instead of merging it into the wrong bucket or eating the article code.
+const ARTICLE_STRIP_WORDS = [
+  "dark", "light", "royal", "denim", "темно", "светло",
+  "blue", "black", "white", "red", "grey", "gray", "green", "brown", "coffee", "khaki", "beige",
+  "silver", "gold", "navy", "pink", "purple", "yellow", "orange", "maroon", "olive", "teal",
+  "calidad", "masculino", "bottino", "ексодор", "exodor", "codeno", "liwali", "cadeno", "daz", "polo", "sergio",
+  "калидад", "маскулино", "боттино", "индастри",
+  "синий", "чёрный", "черный", "черн", "белый", "красный", "серый", "зелёный", "зеленый", "коричневый",
+  "хаки", "бежевый", "розовый", "фиолетовый", "жёлтый", "желтый", "оранжевый", "бордовый", "голубой", "голуб", "коричн", "кофе",
+  "батал", "бебатл",
+  "темно-синий", "темно-серый", "темно-зелёный", "темно-зеленый", "темно-коричневый", "темно-бежевый", "темно-хаки",
+  "светло-серый", "светло-синий", "светло-зелёный", "светло-зеленый",
+  "gri", "yesil", "yeşil", "siyah", "beyaz", "mavi", "kirmizi", "kırmızı", "sari", "sarı", "kahve",
+  "lacivert", "bordo", "gümüş", "pembe", "mor", "turuncu", "haki",
+];
+const ARTICLE_STRIP_SET = new Set(ARTICLE_STRIP_WORDS.map((w) => w.toLowerCase()));
+
+export function deriveArticle(name: string): string {
+  let s = name.replace(/\s*\([^)]*\)/g, " ").trim();
+  for (;;) {
+    const m = s.match(/^(.*)[/,\s]([^/,\s]+)$/);
+    if (!m) break;
+    const [, rest, lastToken] = m;
+    if (!ARTICLE_STRIP_SET.has(lastToken.toLowerCase())) break;
+    const trimmedRest = rest.trim();
+    if (!trimmedRest) break; // never strip the whole name down to nothing
+    s = trimmedRest;
+  }
+  s = s.replace(/[/,\s]+$/, "").trim();
+  return s || name.trim();
 }
