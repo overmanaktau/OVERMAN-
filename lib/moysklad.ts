@@ -350,3 +350,48 @@ export async function fetchProfitByProductForDate(date: string, warehouseId?: st
   }
   return all;
 }
+
+// Приёмки (goods-received documents) — only ~400 of these ever, so unlike
+// everything else here this is a single full fetch, not a per-day sync.
+// Lets "Зависшие остатки" tell "just arrived, hasn't had a chance to sell
+// yet" apart from "been sitting dead for months" — a product restocked
+// recently shouldn't count as stale just because it hasn't sold yet.
+export type SupplyRow = {
+  productMsId: string;
+  warehouseId: string;
+  date: string; // YYYY-MM-DD
+};
+
+export async function fetchAllSupplies(): Promise<SupplyRow[]> {
+  const limit = 100;
+  let offset = 0;
+  const all: SupplyRow[] = [];
+  for (;;) {
+    const page = await moyskladFetch("/entity/supply", {
+      expand: "positions.assortment",
+      limit: String(limit),
+      offset: String(offset),
+    });
+    type Raw = {
+      moment?: string;
+      store?: { meta?: { href?: string } };
+      positions?: { rows?: { assortment?: { meta?: { href?: string } } }[] };
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      const storeHref = r.store?.meta?.href ?? "";
+      const warehouseId = storeHref.split("/").pop()?.split("?")[0] ?? "";
+      const date = (r.moment ?? "").slice(0, 10);
+      if (!warehouseId || !date) continue;
+      for (const p of r.positions?.rows ?? []) {
+        const href = p.assortment?.meta?.href ?? "";
+        const productId = href.split("/").pop()?.split("?")[0] ?? "";
+        if (!productId) continue;
+        all.push({ productMsId: productId, warehouseId, date });
+      }
+    }
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}

@@ -9,6 +9,7 @@ import {
   fetchAllProducts,
   fetchStockAll,
   fetchStockByStore,
+  fetchAllSupplies,
   fetchProfitByProductForDate,
 } from "@/lib/moysklad";
 
@@ -333,7 +334,31 @@ async function syncCatalogAndStock() {
     if (error) throw error;
   }
 
-  return { products: products.length, stockRows: stockRows.length };
+  // Only ~400 приёмки ever — cheap enough to refetch and rebuild in full
+  // every sync, same as the catalog/stock snapshot above.
+  const supplies = await fetchAllSupplies();
+  const bySupply = new Map<string, { productMsId: string; store: string; date: string }>();
+  for (const row of supplies) {
+    const store = WAREHOUSE_STORE[row.warehouseId];
+    if (!store || !seenIds.has(row.productMsId)) continue;
+    const key = `${row.productMsId}|${store}`;
+    const existing = bySupply.get(key);
+    if (!existing || row.date > existing.date) bySupply.set(key, { productMsId: row.productMsId, store, date: row.date });
+  }
+  const supplyRows = [...bySupply.values()].map(({ productMsId, store, date }) => ({
+    product_ms_id: productMsId,
+    store,
+    last_supply_date: date,
+    synced_at: now,
+  }));
+  for (const batch of chunk(supplyRows, 500)) {
+    const { error } = await supabaseAdmin
+      .from("moysklad_product_last_supply")
+      .upsert(batch, { onConflict: "product_ms_id,store" });
+    if (error) throw error;
+  }
+
+  return { products: products.length, stockRows: stockRows.length, supplyRows: supplyRows.length };
 }
 
 async function handle(request: Request) {
