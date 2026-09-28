@@ -235,6 +235,7 @@ export type StockReportRow = {
   buyPrice: number | null; // tenge — "price" field in the report is cost, not sale price
   salePrice: number | null; // tenge — "salePrice" field, the retail price
   stockDays: number | null;
+  imageUrl: string | null; // confirmed live: loads with no Authorization header — safe as a plain <img src>
 };
 
 export async function fetchStockAll(): Promise<StockReportRow[]> {
@@ -254,6 +255,7 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
       salePrice?: number; // kopecks, retail price
       stockDays?: number;
       folder?: { name?: string };
+      image?: { tiny?: { href?: string }; miniature?: { downloadHref?: string } };
     };
     const rows: Raw[] = page.rows ?? [];
     for (const r of rows) {
@@ -268,6 +270,7 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
         buyPrice: r.price != null ? r.price / 100 : null,
         salePrice: r.salePrice != null ? r.salePrice / 100 : null,
         stockDays: r.stockDays ?? null,
+        imageUrl: r.image?.miniature?.downloadHref ?? r.image?.tiny?.href ?? null,
       });
     }
     if (rows.length < limit) break;
@@ -436,25 +439,21 @@ export async function fetchAllSupplies(): Promise<SupplyRow[]> {
 // consecutive-but-unrelated `code` values, e.g. "04394".."04401"). The only
 // place the shared style number lives is the free-text name, e.g.
 // "Кардиган  B8271 Black exodor (3XL)" — so this peels trailing
-// colour/size/supplier-line qualifiers off the name, one token at a time,
-// split on whichever of "/", "," or a space sits closest to the end. It
-// only strips a token when it's a recognized word (never blindly cuts on
-// the separator alone), so an unrecognized qualifier — a typo, a colour not
-// in the list, a Cyrillic homoglyph — just leaves that one SKU ungrouped
-// instead of merging it into the wrong bucket or eating the article code.
+// size/supplier-line qualifiers off the name, one token at a time, split on
+// whichever of "/", "," or a space sits closest to the end. It only strips
+// a token when it's a recognized word (never blindly cuts on the separator
+// alone), so an unrecognized qualifier — a typo, a supplier tag not in the
+// list, a Cyrillic homoglyph — just leaves that one SKU ungrouped instead
+// of merging it into the wrong bucket or eating the article code.
+//
+// Colour words are deliberately NOT in this list: per the business, a
+// colour is a different model (a different "артикул"), only sizes of the
+// same colour share one — so colour stays in the derived string and two
+// SKUs that differ only by colour end up as two different articles.
 const ARTICLE_STRIP_WORDS = [
-  "dark", "light", "royal", "denim", "темно", "светло",
-  "blue", "black", "white", "red", "grey", "gray", "green", "brown", "coffee", "khaki", "beige",
-  "silver", "gold", "navy", "pink", "purple", "yellow", "orange", "maroon", "olive", "teal",
   "calidad", "masculino", "bottino", "ексодор", "exodor", "codeno", "liwali", "cadeno", "daz", "polo", "sergio",
   "калидад", "маскулино", "боттино", "индастри",
-  "синий", "чёрный", "черный", "черн", "белый", "красный", "серый", "зелёный", "зеленый", "коричневый",
-  "хаки", "бежевый", "розовый", "фиолетовый", "жёлтый", "желтый", "оранжевый", "бордовый", "голубой", "голуб", "коричн", "кофе",
   "батал", "бебатл",
-  "темно-синий", "темно-серый", "темно-зелёный", "темно-зеленый", "темно-коричневый", "темно-бежевый", "темно-хаки",
-  "светло-серый", "светло-синий", "светло-зелёный", "светло-зеленый",
-  "gri", "yesil", "yeşil", "siyah", "beyaz", "mavi", "kirmizi", "kırmızı", "sari", "sarı", "kahve",
-  "lacivert", "bordo", "gümüş", "pembe", "mor", "turuncu", "haki",
 ];
 const ARTICLE_STRIP_SET = new Set(ARTICLE_STRIP_WORDS.map((w) => w.toLowerCase()));
 

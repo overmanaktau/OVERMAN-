@@ -7,11 +7,8 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
-// No period selector here on purpose — АВС/XYZ is a rolling classification,
-// not a report for a chosen range. 90 days is long enough that "Дней"
-// (days-with-sales ratio, which XYZ is based on) is a meaningful signal
-// rather than noise from a short window.
-const WINDOW_DAYS = 90;
+const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
+const DEFAULT_PERIOD = 3; // "С начала месяца"
 
 const ABC_OPTIONS = [
   { value: "A", label: "A" },
@@ -49,6 +46,34 @@ function addDays(d: Date, n: number) {
   next.setDate(next.getDate() + n);
   return next;
 }
+function stripTime(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+type Range = { start: Date; end: Date };
+
+function getPeriodRange(index: number, today: Date): Range {
+  const d = stripTime(today);
+  const dow = d.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  const thisMonday = addDays(d, mondayOffset);
+  const thisSunday = addDays(thisMonday, 6);
+
+  if (index === 0) return { start: addDays(d, -1), end: addDays(d, -1) }; // Вчера
+  if (index === 1) return { start: addDays(thisMonday, -7), end: addDays(thisSunday, -7) };
+  if (index === 2) return { start: thisMonday, end: thisSunday };
+  if (index === 3) return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: d }; // С начала месяца
+  if (index === 4) {
+    return { start: new Date(d.getFullYear(), d.getMonth() - 1, 1), end: new Date(d.getFullYear(), d.getMonth(), 0) };
+  }
+  return { start: new Date(2000, 0, 1), end: d }; // Всё время
+}
+
+function parseYmd(s: string): Date {
+  const [y, m, day] = s.split("-").map(Number);
+  return new Date(y, m - 1, day);
+}
+
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
@@ -60,11 +85,12 @@ function friendlyError(e: unknown): string {
   return `Не удалось выполнить операцию: ${message}`;
 }
 
-// Grouped by "артикул" (model/style), not by individual МойСклад product —
-// this account has no working article field, so every colour and size is
-// its own product; classifying at that grain made XYZ meaningless (a single
-// size in one colour almost never sells daily). See deriveArticle in
-// lib/moysklad.ts for how the grouping key itself is derived.
+// Grouped by "артикул" — model+colour together, not by individual МойСклад
+// product — this account has no working article field, so every colour and
+// size is its own product; classifying at that grain made XYZ meaningless (a
+// single size in one colour almost never sells daily). Colour is kept as
+// part of the article (a different colour is a different model, per the
+// business); only size gets folded in. See deriveArticle in lib/moysklad.ts.
 type ProductRow = {
   id: string; // the derived article string, doubles as the row key
   name: string;
@@ -75,7 +101,44 @@ type ProductRow = {
   daysWithSales: number;
   abc: AbcKey;
   xyz: XyzKey;
+  imageUrl: string | null; // one photo per article — whichever size/colour SKU in the group happens to have one
 };
+
+function Thumb({ src, alt }: { src: string | null; alt: string }) {
+  if (!src) return <div className="w-9 h-9 rounded-md bg-paper border border-borderSoft flex-none" />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- external МойСклад CDN, not worth next/image's domain config for a thumbnail
+    <img src={src} alt={alt} className="w-9 h-9 rounded-md object-cover border border-borderSoft flex-none" />
+  );
+}
+
+// One row per underlying МойСклад product inside an article — since colour
+// is now baked into the article itself, all that's left to vary between
+// these is size (see deriveArticle in lib/moysklad.ts).
+type SkuRow = {
+  id: string;
+  name: string;
+  revenue: number;
+  quantity: number;
+  imageUrl: string | null;
+};
+
+function SizeBreakdown({ loading, rows }: { loading: boolean; rows: SkuRow[] | undefined }) {
+  if (loading) return <div className="text-[12.5px] text-muted py-2 pl-11">Загрузка размеров…</div>;
+  if (!rows || rows.length === 0) return <div className="text-[12.5px] text-mutedLight py-2 pl-11">Нет данных по размерам.</div>;
+  return (
+    <div className="flex flex-col gap-1.5 py-2 pl-11 pr-2">
+      {rows.map((s) => (
+        <div key={s.id} className="flex items-center gap-2.5 text-[12.5px]">
+          <Thumb src={s.imageUrl} alt={s.name} />
+          <div className="flex-1 min-w-0 truncate text-muted">{s.name}</div>
+          <div className="num flex-none">{s.quantity.toLocaleString("ru-RU")} шт</div>
+          <div className="num text-mutedLight flex-none w-24 text-right">{money(s.revenue)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // Paginates any Supabase query/rpc past PostgREST's default row cap — the
 // catalog is ~5-6k products, easily past 1000 rows once summed over 90 days.
@@ -194,12 +257,27 @@ export default function AbcXyzPage() {
   const { selected: selectedStores } = useStoreSelection();
   const canView = isAdmin || permissions["warehouse.stock"].canView;
 
+  const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
+  const [activeCustom, setActiveCustom] = useState<{ start: string; end: string } | null>(null);
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const customPickerRef = useRef<HTMLDivElement>(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<ProductRow[]>([]);
+  const [windowDays, setWindowDays] = useState(1);
   const [abcFilter, setAbcFilter] = useState<string[]>([]);
   const [xyzFilter, setXyzFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+
+  // The date range from the last successful load — reused when expanding a
+  // row's size breakdown so it always matches what's currently on screen.
+  const [range, setRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [skuCache, setSkuCache] = useState<Record<string, SkuRow[]>>({});
+  const [skuLoading, setSkuLoading] = useState<Set<string>>(new Set());
 
   const loadSeq = useRef(0);
 
@@ -208,9 +286,12 @@ export default function AbcXyzPage() {
     setLoading(true);
     setError(null);
     try {
-      const today = new Date();
-      const from = ymd(addDays(today, -(WINDOW_DAYS - 1)));
-      const to = ymd(today);
+      const range = activeCustom
+        ? { start: parseYmd(activeCustom.start), end: parseYmd(activeCustom.end) }
+        : getPeriodRange(periodIndex, new Date());
+      const from = ymd(range.start);
+      const to = ymd(range.end);
+      const days = Math.max(1, Math.round((range.end.getTime() - range.start.getTime()) / 86400000) + 1);
       type Raw = {
         article: string;
         category: string | null;
@@ -218,6 +299,7 @@ export default function AbcXyzPage() {
         quantity: number;
         cost: number;
         days_with_sales: number;
+        image_url: string | null;
       };
       const raw = await fetchAllRows<Raw>((from_, to_) =>
         supabase.rpc("product_sales_summary_by_article", { p_from: from, p_to: to, p_stores: selectedStores }).range(from_, to_)
@@ -235,7 +317,7 @@ export default function AbcXyzPage() {
         cumulative += r.revenue;
         const share = totalRevenue > 0 ? cumulative / totalRevenue : 1;
         const abc: AbcKey = share <= 0.8 ? "A" : share <= 0.95 ? "B" : "C";
-        const coverage = r.days_with_sales / WINDOW_DAYS;
+        const coverage = r.days_with_sales / days;
         const xyz: XyzKey = coverage > 0.6 ? "X" : coverage >= 0.2 ? "Y" : "Z";
         return {
           id: r.article,
@@ -247,11 +329,14 @@ export default function AbcXyzPage() {
           daysWithSales: r.days_with_sales,
           abc,
           xyz,
+          imageUrl: r.image_url,
         };
       });
 
       if (seq !== loadSeq.current) return;
       setRows(classified);
+      setWindowDays(days);
+      setRange({ from, to });
     } catch (e) {
       if (seq !== loadSeq.current) return;
       setError(friendlyError(e));
@@ -260,11 +345,79 @@ export default function AbcXyzPage() {
       if (seq === loadSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStores.join(",")]);
+  }, [periodIndex, activeCustom?.start, activeCustom?.end, selectedStores.join(",")]);
 
   useEffect(() => {
     load();
+    // A new period/store selection invalidates any cached size breakdowns —
+    // they were fetched for the old range and would show stale numbers.
+    setExpanded(new Set());
+    setSkuCache({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+
+  async function toggleExpand(articleId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(articleId)) next.delete(articleId);
+      else next.add(articleId);
+      return next;
+    });
+    if (skuCache[articleId] || !range.from) return;
+    setSkuLoading((prev) => new Set(prev).add(articleId));
+    try {
+      const skuRaw = await fetchAllRows<{
+        product_ms_id: string;
+        product_name: string;
+        revenue: number;
+        quantity: number;
+        image_url: string | null;
+      }>((from_, to_) =>
+        supabase
+          .rpc("product_sales_summary_by_sku", {
+            p_from: range.from,
+            p_to: range.to,
+            p_stores: selectedStores,
+            p_article: articleId,
+          })
+          .range(from_, to_)
+      );
+      skuRaw.sort((a, b) => b.quantity - a.quantity);
+      setSkuCache((prev) => ({
+        ...prev,
+        [articleId]: skuRaw.map((s) => ({
+          id: s.product_ms_id,
+          name: s.product_name,
+          revenue: s.revenue,
+          quantity: s.quantity,
+          imageUrl: s.image_url,
+        })),
+      }));
+    } catch {
+      setSkuCache((prev) => ({ ...prev, [articleId]: [] }));
+    } finally {
+      setSkuLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(articleId);
+        return next;
+      });
+    }
+  }
+
+  useEffect(() => {
+    if (!showCustomPicker) return;
+    function onClick(e: MouseEvent) {
+      if (customPickerRef.current && !customPickerRef.current.contains(e.target as Node)) setShowCustomPicker(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showCustomPicker]);
+
+  function applyCustomRange() {
+    if (!customStart || !customEnd || customStart > customEnd) return;
+    setActiveCustom({ start: customStart, end: customEnd });
+    setShowCustomPicker(false);
+  }
 
   if (!canView) {
     return (
@@ -318,8 +471,9 @@ export default function AbcXyzPage() {
         <h1 className="font-serif text-[28px] font-semibold m-0">АВС/XYZ анализ</h1>
         <p className="text-sm text-muted max-w-2xl mt-1">
           АВС — доля в выручке: A — верхние 80&nbsp;%, B — 15&nbsp;%, C — 5&nbsp;%. XYZ — ровность
-          спроса: доля дней с продажами. X — больше 60&nbsp;%, Y — от 20&nbsp;%, Z — реже. Расчёт за
-          последние {WINDOW_DAYS} дней, по артикулу (модели), а не по конкретному размеру/цвету.
+          спроса: доля дней с продажами за выбранный период. X — больше 60&nbsp;%, Y — от 20&nbsp;%,
+          Z — реже. По артикулу — это модель и цвет вместе (разный цвет = другая модель); нажмите на
+          строку, чтобы раскрыть размеры внутри неё.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -331,12 +485,95 @@ export default function AbcXyzPage() {
         )}
       </div>
 
+      <div className="flex items-center gap-1.5 flex-wrap bg-surface border border-border rounded-card p-1.5 w-fit relative">
+        {PERIODS.map((p, i) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => {
+              setPeriodIndex(i);
+              setActiveCustom(null);
+            }}
+            disabled={loading}
+            className={`font-sans text-[13px] rounded-md px-3.5 py-2 disabled:opacity-60 ${
+              i === periodIndex && !activeCustom ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+        <div className="w-px h-5 bg-border mx-0.5" />
+        <div ref={customPickerRef} className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              if (!showCustomPicker) {
+                setCustomStart(activeCustom?.start ?? ymd(addDays(new Date(), -6)));
+                setCustomEnd(activeCustom?.end ?? ymd(new Date()));
+              }
+              setShowCustomPicker((v) => !v);
+            }}
+            disabled={loading}
+            className={`text-[13px] rounded-md px-3.5 py-2 disabled:opacity-60 ${
+              activeCustom ? "bg-accent text-paper font-bold" : "text-muted font-medium"
+            }`}
+          >
+            {activeCustom ? `${activeCustom.start} — ${activeCustom.end}` : "Свой период"}
+          </button>
+          {showCustomPicker && (
+            <div className="absolute right-0 top-full mt-2 z-50 bg-surface border border-border rounded-lg shadow-lg p-3.5 flex flex-col gap-2.5 w-[230px]">
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                С
+                <input
+                  type="date"
+                  value={customStart}
+                  max={customEnd || undefined}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                По
+                <input
+                  type="date"
+                  value={customEnd}
+                  min={customStart || undefined}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="border border-border rounded-md px-2 py-1.5 text-[13px] bg-paper text-ink"
+                />
+              </label>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowCustomPicker(false)}
+                  className="text-[12.5px] font-semibold text-muted px-2.5 py-1.5 rounded-md hover:bg-paper"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={applyCustomRange}
+                  disabled={!customStart || !customEnd || customStart > customEnd}
+                  className="text-[12.5px] font-bold text-paper bg-accent rounded-md px-3 py-1.5 disabled:opacity-50"
+                >
+                  Применить
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {loading ? (
         <div className="text-sm text-muted">Загрузка…</div>
       ) : rows.length === 0 ? (
-        <div className="text-sm text-muted">Нет данных за последние {WINDOW_DAYS} дней.</div>
+        <div className="text-sm text-muted">Нет данных за выбранный период.</div>
       ) : (
         <>
+          <div className="text-xs text-mutedLight">
+            Дней в периоде: {windowDays} — от этого зависит, что считается «стабильным» спросом в XYZ.
+          </div>
+
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="overflow-x-auto">
               <div className="min-w-[560px] grid grid-cols-[80px_1fr_1fr_1fr] gap-2">
@@ -385,9 +622,18 @@ export default function AbcXyzPage() {
               <div className="flex flex-col gap-3">
                 {filtered.map((r) => {
                   const marginPct = r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0;
+                  const isOpen = expanded.has(r.id);
                   return (
                     <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
-                      <div className="font-semibold">{r.name}</div>
+                      <div
+                        className="flex items-center gap-2.5 cursor-pointer"
+                        onClick={() => toggleExpand(r.id)}
+                        title="Показать размеры"
+                      >
+                        <span className="text-mutedLight text-[10px] w-3 flex-none">{isOpen ? "▾" : "▸"}</span>
+                        <Thumb src={r.imageUrl} alt={r.name} />
+                        <div className="font-semibold">{r.name}</div>
+                      </div>
                       <div className="text-muted text-[12.5px]">{r.category}</div>
                       <div className="flex items-center justify-between">
                         <span className="text-muted">ABC / XYZ</span>
@@ -412,6 +658,11 @@ export default function AbcXyzPage() {
                         <span className="num">{marginPct.toFixed(0)}%</span>
                       </div>
                       <div className="text-mutedLight text-[12.5px] mt-1">{DECISIONS[`${r.abc}${r.xyz}`]}</div>
+                      {isOpen && (
+                        <div className="border-t border-borderSoft mt-1">
+                          <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -431,20 +682,29 @@ export default function AbcXyzPage() {
                 </div>
                 {filtered.map((r) => {
                   const marginPct = r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0;
+                  const isOpen = expanded.has(r.id);
                   return (
-                    <div
-                      key={r.id}
-                      className="min-w-[1100px] grid grid-cols-[1.4fr_1fr_0.4fr_0.4fr_0.9fr_0.6fr_0.5fr_0.7fr_1.8fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
-                    >
-                      <div className="font-semibold">{r.name}</div>
-                      <div className="text-muted">{r.category}</div>
-                      <div className="num font-bold">{r.abc}</div>
-                      <div className="num font-bold">{r.xyz}</div>
-                      <div className="num">{money(r.revenue)}</div>
-                      <div className="num">{r.quantity.toLocaleString("ru-RU")}</div>
-                      <div className="num">{r.daysWithSales}</div>
-                      <div className="num">{marginPct.toFixed(0)}%</div>
-                      <div className="text-muted text-[12.5px]">{DECISIONS[`${r.abc}${r.xyz}`]}</div>
+                    <div key={r.id} className="min-w-[1100px] border-b border-borderSoft">
+                      <div
+                        className="grid grid-cols-[1.4fr_1fr_0.4fr_0.4fr_0.9fr_0.6fr_0.5fr_0.7fr_1.8fr] gap-3 py-2.5 items-center text-[13px] cursor-pointer"
+                        onClick={() => toggleExpand(r.id)}
+                        title="Показать размеры"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="text-mutedLight text-[10px] w-3 flex-none">{isOpen ? "▾" : "▸"}</span>
+                          <Thumb src={r.imageUrl} alt={r.name} />
+                          <div className="font-semibold truncate">{r.name}</div>
+                        </div>
+                        <div className="text-muted">{r.category}</div>
+                        <div className="num font-bold">{r.abc}</div>
+                        <div className="num font-bold">{r.xyz}</div>
+                        <div className="num">{money(r.revenue)}</div>
+                        <div className="num">{r.quantity.toLocaleString("ru-RU")}</div>
+                        <div className="num">{r.daysWithSales}</div>
+                        <div className="num">{marginPct.toFixed(0)}%</div>
+                        <div className="text-muted text-[12.5px]">{DECISIONS[`${r.abc}${r.xyz}`]}</div>
+                      </div>
+                      {isOpen && <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} />}
                     </div>
                   );
                 })}

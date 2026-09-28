@@ -33,7 +33,16 @@ type StaleRow = {
   money: number; // at cost (себестоимость)
   saleValue: number; // at retail (цена продажи)
   daysSinceLastSale: number | null; // null = no recorded sale at all in our synced history
+  imageUrl: string | null; // ~14% coverage — most МойСклад products have no photo uploaded at all
 };
+
+function Thumb({ src, alt }: { src: string | null; alt: string }) {
+  if (!src) return <div className="w-9 h-9 rounded-md bg-paper border border-borderSoft flex-none" />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- external МойСклад CDN, not worth next/image's domain config for a thumbnail
+    <img src={src} alt={alt} className="w-9 h-9 rounded-md object-cover border border-borderSoft flex-none" />
+  );
+}
 
 const SORT_OPTIONS: { value: "money" | "saleValue" | "stock" | "days"; label: string }[] = [
   { value: "money", label: "по деньгам (себестоимость)" },
@@ -81,6 +90,7 @@ type StaleRawRow = {
   money: number;
   sale_value: number;
   days_since_last_sale: number | null;
+  image_url: string | null;
 };
 
 function mapStaleRows(raw: StaleRawRow[]): StaleRow[] {
@@ -91,6 +101,7 @@ function mapStaleRows(raw: StaleRawRow[]): StaleRow[] {
     money: r.money,
     saleValue: r.sale_value,
     daysSinceLastSale: r.days_since_last_sale,
+    imageUrl: r.image_url,
   }));
 }
 
@@ -101,7 +112,10 @@ function StaleTable({ rows, mobileLayout, emptyText }: { rows: StaleRow[]; mobil
       <div className="flex flex-col gap-3">
         {rows.map((r) => (
           <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
-            <div className="font-semibold">{r.name}</div>
+            <div className="flex items-center gap-2.5">
+              <Thumb src={r.imageUrl} alt={r.name} />
+              <div className="font-semibold">{r.name}</div>
+            </div>
             <div className="flex items-center justify-between">
               <span className="text-muted">Остаток</span>
               <span className="num">{r.stock.toLocaleString("ru-RU")}</span>
@@ -137,7 +151,10 @@ function StaleTable({ rows, mobileLayout, emptyText }: { rows: StaleRow[]; mobil
           key={r.id}
           className="min-w-[800px] grid grid-cols-[1.6fr_0.6fr_0.9fr_0.9fr_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
         >
-          <div className="font-semibold">{r.name}</div>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Thumb src={r.imageUrl} alt={r.name} />
+            <div className="font-semibold truncate">{r.name}</div>
+          </div>
           <div className="num">{r.stock.toLocaleString("ru-RU")}</div>
           <div className="num">{money(r.money)}</div>
           <div className="num text-muted">{money(r.saleValue)}</div>

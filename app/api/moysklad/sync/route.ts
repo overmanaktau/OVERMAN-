@@ -296,22 +296,33 @@ function chunk<T>(rows: T[], size: number): T[][] {
 async function syncCatalogAndStock() {
   const products = await fetchAllProducts();
   const now = new Date().toISOString();
+
+  // /report/stock/all gives one summed-across-everything number per product
+  // plus its name/price/category/photo; /report/stock/bystore gives the
+  // same product split by склад but without those — combine them, resolving
+  // each склад to a city/frozen bucket via WAREHOUSE_STORE (anything
+  // unmapped, e.g. "Кайнар", is dropped rather than guessed at). Fetched
+  // before the catalog upsert below so that upsert can carry each
+  // product's image_url along in the same pass.
+  const [stockAll, stockByStore] = await Promise.all([fetchStockAll(), fetchStockByStore()]);
+  const seenIds = new Set(products.map((p) => p.id));
+  const infoById = new Map(stockAll.map((s) => [s.productMsId, s]));
+
   for (const batch of chunk(products, 500)) {
     const { error } = await supabaseAdmin.from("moysklad_products").upsert(
-      batch.map((p) => ({ id: p.id, name: p.name, category: p.category, buy_price: p.buyPrice, archived: p.archived, synced_at: now })),
+      batch.map((p) => ({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        buy_price: p.buyPrice,
+        archived: p.archived,
+        image_url: infoById.get(p.id)?.imageUrl ?? null,
+        synced_at: now,
+      })),
       { onConflict: "id" }
     );
     if (error) throw error;
   }
-
-  // /report/stock/all gives one summed-across-everything number per product
-  // plus its name/price/category; /report/stock/bystore gives the same
-  // product split by склад but without name/price/category — combine them,
-  // resolving each склад to a city/frozen bucket via WAREHOUSE_STORE
-  // (anything unmapped, e.g. "Кайнар", is dropped rather than guessed at).
-  const [stockAll, stockByStore] = await Promise.all([fetchStockAll(), fetchStockByStore()]);
-  const seenIds = new Set(products.map((p) => p.id));
-  const infoById = new Map(stockAll.map((s) => [s.productMsId, s]));
 
   const byStock = new Map<string, { productMsId: string; store: string; stock: number }>();
   for (const row of stockByStore) {
