@@ -35,6 +35,26 @@ type StaleRow = {
   daysSinceLastSale: number | null; // null = no recorded sale at all in our synced history
 };
 
+const SORT_OPTIONS: { value: "money" | "saleValue" | "stock" | "days"; label: string }[] = [
+  { value: "money", label: "по деньгам (себестоимость)" },
+  { value: "saleValue", label: "по цене продажи" },
+  { value: "stock", label: "по остатку" },
+  { value: "days", label: "по дням без продаж" },
+];
+type SortField = (typeof SORT_OPTIONS)[number]["value"];
+
+// null (never sold at all) sorts as "more stale than any finite count" —
+// treating it as +Infinity puts it first when sorting "days" descending,
+// same place it'd land if we actually knew how long ago it last sold.
+function sortRows(rows: StaleRow[], field: SortField): StaleRow[] {
+  const sorted = [...rows];
+  sorted.sort((a, b) => {
+    if (field === "days") return (b.daysSinceLastSale ?? Infinity) - (a.daysSinceLastSale ?? Infinity);
+    return b[field] - a[field];
+  });
+  return sorted;
+}
+
 // Paginates past PostgREST's default row cap — this list alone can run into
 // the thousands (every slow-moving SKU across the whole catalog).
 async function fetchAllRows<T>(
@@ -64,16 +84,14 @@ type StaleRawRow = {
 };
 
 function mapStaleRows(raw: StaleRawRow[]): StaleRow[] {
-  return raw
-    .map((r) => ({
-      id: r.product_ms_id,
-      name: r.product_name,
-      stock: r.stock,
-      money: r.money,
-      saleValue: r.sale_value,
-      daysSinceLastSale: r.days_since_last_sale,
-    }))
-    .sort((a, b) => b.money - a.money);
+  return raw.map((r) => ({
+    id: r.product_ms_id,
+    name: r.product_name,
+    stock: r.stock,
+    money: r.money,
+    saleValue: r.sale_value,
+    daysSinceLastSale: r.days_since_last_sale,
+  }));
 }
 
 function StaleTable({ rows, mobileLayout, emptyText }: { rows: StaleRow[]; mobileLayout: boolean; emptyText: string }) {
@@ -143,6 +161,11 @@ export default function StaleInventoryPage() {
   // its own bucket the business tracks on purpose — always shown, never
   // folded into the city-filtered list above or affected by "Все города".
   const [frozenRows, setFrozenRows] = useState<StaleRow[]>([]);
+  const [sortField, setSortField] = useState<SortField>("money");
+  function cycleSortField() {
+    const idx = SORT_OPTIONS.findIndex((o) => o.value === sortField);
+    setSortField(SORT_OPTIONS[(idx + 1) % SORT_OPTIONS.length].value);
+  }
 
   const loadSeq = useRef(0);
 
@@ -239,8 +262,20 @@ export default function StaleInventoryPage() {
             </div>
           </div>
 
+          <button
+            type="button"
+            onClick={cycleSortField}
+            className="self-start text-[13px] font-semibold text-accent bg-surface border border-border rounded-md px-3.5 py-2 hover:bg-paper"
+          >
+            Сортировка: {SORT_OPTIONS.find((o) => o.value === sortField)?.label}
+          </button>
+
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <StaleTable rows={rows} mobileLayout={mobileLayout} emptyText="Нет зависших остатков — всё продаётся вовремя." />
+            <StaleTable
+              rows={sortRows(rows, sortField)}
+              mobileLayout={mobileLayout}
+              emptyText="Нет зависших остатков — всё продаётся вовремя."
+            />
           </div>
 
           <div className="flex flex-col gap-1 mt-2">
@@ -266,7 +301,7 @@ export default function StaleInventoryPage() {
           </div>
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <StaleTable rows={frozenRows} mobileLayout={mobileLayout} emptyText="В заморозке ничего нет." />
+            <StaleTable rows={sortRows(frozenRows, sortField)} mobileLayout={mobileLayout} emptyText="В заморозке ничего нет." />
           </div>
         </>
       )}
