@@ -5,6 +5,7 @@ import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
+import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 5; // "Всё время"
@@ -348,15 +349,16 @@ function MultiSelectFilter({
 }
 
 export default function AbcXyzPage() {
-  const { isAdmin, permissions, stores, accessibleStoreCodes } = useAuth();
+  const { isAdmin, permissions, accessibleStoreCodes } = useAuth();
   const { mobileLayout } = useSiteVersion();
   const canView = isAdmin || permissions["warehouse.stock"].canView;
 
   // Independent of the city picker in the sidebar — that one drives every
-  // other page; this page filters by склад on its own.
+  // other page; this page filters by real склад (not city) on its own.
+  const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes);
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
-  const effectiveStores = storeFilter.length > 0 ? storeFilter : accessibleStoreCodes;
-  const storeOptions = stores.filter((s) => accessibleStoreCodes.includes(s.code)).map((s) => ({ value: s.code, label: s.name }));
+  const effectiveStores = storeFilter.length > 0 ? storeFilter : accessibleWarehouseCodes;
+  const storeOptions = WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => ({ value: w.code, label: w.label }));
   function toggleStore(code: string) {
     setStoreFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
   }

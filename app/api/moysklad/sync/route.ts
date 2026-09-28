@@ -26,6 +26,11 @@ import {
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
 // doesn't carry the city in its name). "Онлайн продажи Overman" and
 // "Ак Кала" are inactive retailstore entries and get skipped.
+//
+// Stays at city granularity (unlike WAREHOUSE_STORE below) — this feeds
+// moysklad_registers/moysklad_sales_daily, which Продажи/Обзор filter by
+// the sidebar's city picker (values point_1/point_3). Changing this would
+// break that filter on those pages.
 const REGISTER_STORE: Record<string, string> = {
   "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Overman Актау
   "d3f209de-4da2-11f0-0a80-027a0003cde2": "point_1", // Saya Park
@@ -34,17 +39,21 @@ const REGISTER_STORE: Record<string, string> = {
 };
 
 // Warehouses (entity/store — where stock physically sits, distinct from the
-// retailstore/касса ids above) mapped to the same city codes. Confirmed with
-// the business owner: "Кайнар" is empty and not worth tracking, so it (and
-// anything else not listed here) is simply skipped by the sync. The two
-// "заморозка"/frozen warehouses hold written-off-for-now stock the business
-// tracks on purpose as its own bucket, held back until next season — never
-// folded into a city's live total.
+// retailstore/касса ids above) — unlike REGISTER_STORE, this maps to a code
+// per real warehouse (not collapsed to city), since Зависшие остатки/АВС-XYZ
+// filter by real склад directly. lib/warehouses.ts holds the matching
+// code→label→city map the frontend uses to build that filter and to
+// restrict it by a role's city access — keep the two in sync by hand.
+// Confirmed with the business owner: "Кайнар" is empty and not worth
+// tracking, so it (and anything else not listed here) is simply skipped by
+// the sync. The two "заморозка"/frozen warehouses hold written-off-for-now
+// stock the business tracks on purpose as its own bucket, held back until
+// next season — never folded into a city's live total.
 const WAREHOUSE_STORE: Record<string, string> = {
-  "109ed308-b012-11f0-0a80-110900247319": "point_1", // Overman
-  "fe3b03d3-4da1-11f0-0a80-18910004c37d": "point_1", // Saya Park
-  "bb935bd2-93e9-11f1-0a80-1f560022775d": "point_3", // Aktobe OVERMAN
-  "2ca9443b-a440-11f1-0a80-03ac00324d3c": "point_3", // Актобе скидка
+  "109ed308-b012-11f0-0a80-110900247319": "overman_aktau", // Overman
+  "fe3b03d3-4da1-11f0-0a80-18910004c37d": "saya_park", // Saya Park
+  "bb935bd2-93e9-11f1-0a80-1f560022775d": "overman_aktobe", // Aktobe OVERMAN
+  "2ca9443b-a440-11f1-0a80-03ac00324d3c": "aktobe_discount", // Актобе скидка
   "14352a86-5e96-11f1-0a80-1cbd00149396": "frozen", // заморозка 03.06.2026
   "554d7479-2728-11f0-0a80-15980025a3f6": "frozen", // Заморозка 24.02.2026
 };
