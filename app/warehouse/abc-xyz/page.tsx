@@ -398,7 +398,21 @@ export default function AbcXyzPage() {
         : getPeriodRange(periodIndex, new Date());
       const from = ymd(range.start);
       const to = ymd(range.end);
-      const days = Math.max(1, Math.round((range.end.getTime() - range.start.getTime()) / 86400000) + 1);
+      // "Всё время" spans from year 2000 so it never misses data, but that
+      // makes a terrible XYZ denominator — a product that sold on every
+      // single day we've actually synced would still show ~1% coverage
+      // (days_with_sales / ~9500), landing everything in Z. Clamp the
+      // denominator to when our own data actually starts.
+      const { data: earliestRow } = await supabase
+        .from("moysklad_product_sales_daily")
+        .select("sale_date")
+        .order("sale_date", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      const effectiveStart = earliestRow?.sale_date
+        ? new Date(Math.max(parseYmd(earliestRow.sale_date).getTime(), range.start.getTime()))
+        : range.start;
+      const days = Math.max(1, Math.round((range.end.getTime() - effectiveStart.getTime()) / 86400000) + 1);
       type Raw = {
         article: string;
         category: string | null;
