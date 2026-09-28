@@ -134,6 +134,18 @@ export default function SalesPage() {
   const [registerSales, setRegisterSales] = useState<RegisterSalesRow[]>([]);
   const [employeeSales, setEmployeeSales] = useState<EmployeeSalesRow[]>([]);
   const [showGross, setShowGross] = useState(false);
+  // Lets you tick a register out of "Продажи по кассам" to isolate what the
+  // rest do without it (or tick everything else off to isolate just one) —
+  // client-side only, affects nothing but this table's own totals.
+  const [hiddenRegisterIds, setHiddenRegisterIds] = useState<Set<string>>(new Set());
+  function toggleRegisterHidden(id: string) {
+    setHiddenRegisterIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   // selectedStores starts empty and updates a moment later once the store
   // list finishes loading, firing a second load() call right behind the
@@ -351,13 +363,18 @@ export default function SalesPage() {
     return showGross ? grossOf(r) : { revenue: r.revenue, receipts: r.receipts, items: r.items };
   }
 
-  const totalRevenue = registerSales.reduce((acc, r) => acc + displayed(r).revenue, 0);
-  const totalReceipts = registerSales.reduce((acc, r) => acc + displayed(r).receipts, 0);
-  const totalItems = registerSales.reduce((acc, r) => acc + displayed(r).items, 0);
+  // Every register total below is computed from this, not registerSales
+  // directly — a ticked-off register still renders (so it can be ticked
+  // back on) but drops out of every subtotal and the grand total.
+  const activeRegisterSales = registerSales.filter((r) => !hiddenRegisterIds.has(r.registerId));
+
+  const totalRevenue = activeRegisterSales.reduce((acc, r) => acc + displayed(r).revenue, 0);
+  const totalReceipts = activeRegisterSales.reduce((acc, r) => acc + displayed(r).receipts, 0);
+  const totalItems = activeRegisterSales.reduce((acc, r) => acc + displayed(r).items, 0);
   const totalReturned = {
-    returnedAmount: registerSales.reduce((acc, r) => acc + r.returnedAmount, 0),
-    returnedReceipts: registerSales.reduce((acc, r) => acc + r.returnedReceipts, 0),
-    returnedItems: registerSales.reduce((acc, r) => acc + r.returnedItems, 0),
+    returnedAmount: activeRegisterSales.reduce((acc, r) => acc + r.returnedAmount, 0),
+    returnedReceipts: activeRegisterSales.reduce((acc, r) => acc + r.returnedReceipts, 0),
+    returnedItems: activeRegisterSales.reduce((acc, r) => acc + r.returnedItems, 0),
   };
 
   // "0" when nothing was returned; otherwise a compact "sum · N чек · N тов."
@@ -390,7 +407,7 @@ export default function SalesPage() {
       </>
     );
   }
-  const totalCost = sumCost(registerSales);
+  const totalCost = sumCost(activeRegisterSales);
 
   function storeLabel(code: string | null) {
     if (!code) return "—";
@@ -544,15 +561,26 @@ export default function SalesPage() {
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-        <div className="text-[15px] font-bold">
-          Продажи по кассам{" "}
-          <button
-            type="button"
-            onClick={() => setShowGross((v) => !v)}
-            className="text-muted font-normal text-[12.5px] hover:underline"
-          >
-            ({showGross ? "без учёта возврата" : "с учётом возврата"})
-          </button>
+        <div className="text-[15px] font-bold flex items-center gap-2 flex-wrap">
+          <span>
+            Продажи по кассам{" "}
+            <button
+              type="button"
+              onClick={() => setShowGross((v) => !v)}
+              className="text-muted font-normal text-[12.5px] hover:underline"
+            >
+              ({showGross ? "без учёта возврата" : "с учётом возврата"})
+            </button>
+          </span>
+          {hiddenRegisterIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setHiddenRegisterIds(new Set())}
+              className="text-[12px] font-normal text-mutedLight hover:underline"
+            >
+              скрыто касс: {hiddenRegisterIds.size} · показать все
+            </button>
+          )}
         </div>
         {loading ? (
           <div className="text-sm text-muted py-4">Загрузка…</div>
@@ -561,26 +589,38 @@ export default function SalesPage() {
         ) : mobileLayout ? (
           <div className="flex flex-col gap-3">
             {visibleGroups.map((group) => {
-              const groupRevenue = group.rows.reduce((acc, r) => acc + displayed(r).revenue, 0);
-              const groupReceipts = group.rows.reduce((acc, r) => acc + displayed(r).receipts, 0);
-              const groupItems = group.rows.reduce((acc, r) => acc + displayed(r).items, 0);
+              const activeRows = group.rows.filter((r) => !hiddenRegisterIds.has(r.registerId));
+              const groupRevenue = activeRows.reduce((acc, r) => acc + displayed(r).revenue, 0);
+              const groupReceipts = activeRows.reduce((acc, r) => acc + displayed(r).receipts, 0);
+              const groupItems = activeRows.reduce((acc, r) => acc + displayed(r).items, 0);
               const groupReturned = {
-                returnedAmount: group.rows.reduce((acc, r) => acc + r.returnedAmount, 0),
-                returnedReceipts: group.rows.reduce((acc, r) => acc + r.returnedReceipts, 0),
-                returnedItems: group.rows.reduce((acc, r) => acc + r.returnedItems, 0),
+                returnedAmount: activeRows.reduce((acc, r) => acc + r.returnedAmount, 0),
+                returnedReceipts: activeRows.reduce((acc, r) => acc + r.returnedReceipts, 0),
+                returnedItems: activeRows.reduce((acc, r) => acc + r.returnedItems, 0),
               };
-              const groupCost = sumCost(group.rows);
+              const groupCost = sumCost(activeRows);
               return (
                 <div key={group.store ?? "none"} className="flex flex-col gap-2">
                   {group.rows.map((r) => {
                     const d = displayed(r);
                     const avgCheck = d.receipts > 0 ? d.revenue / d.receipts : 0;
                     const checkDepth = d.receipts > 0 ? d.items / d.receipts : 0;
+                    const hidden = hiddenRegisterIds.has(r.registerId);
                     return (
-                      <div key={r.registerId} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
-                        <div className="font-semibold">
+                      <div
+                        key={r.registerId}
+                        className={`flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px] ${hidden ? "opacity-40" : ""}`}
+                      >
+                        <label className="font-semibold flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!hidden}
+                            onChange={() => toggleRegisterHidden(r.registerId)}
+                            className="accent-accent"
+                            title="Учитывать в итогах"
+                          />
                           {r.name} <span className="text-muted font-normal">· {storeLabel(r.store)}</span>
-                        </div>
+                        </label>
                         <SalesField
                           label="Выручка"
                           value={money(d.revenue)}
@@ -603,7 +643,7 @@ export default function SalesPage() {
                       </div>
                     );
                   })}
-                  {group.rows.length > 1 && (
+                  {activeRows.length > 1 && (
                     <div className="flex flex-col gap-1 rounded-lg border border-[#E4DFC8] bg-weekendTint p-3 text-[13px] font-bold">
                       <div>Итого по {group.label}</div>
                       <SalesField
@@ -667,27 +707,38 @@ export default function SalesPage() {
               <div>Возврат</div>
             </div>
             {visibleGroups.map((group) => {
-              const groupRevenue = group.rows.reduce((acc, r) => acc + displayed(r).revenue, 0);
-              const groupReceipts = group.rows.reduce((acc, r) => acc + displayed(r).receipts, 0);
-              const groupItems = group.rows.reduce((acc, r) => acc + displayed(r).items, 0);
+              const activeRows = group.rows.filter((r) => !hiddenRegisterIds.has(r.registerId));
+              const groupRevenue = activeRows.reduce((acc, r) => acc + displayed(r).revenue, 0);
+              const groupReceipts = activeRows.reduce((acc, r) => acc + displayed(r).receipts, 0);
+              const groupItems = activeRows.reduce((acc, r) => acc + displayed(r).items, 0);
               const groupReturned = {
-                returnedAmount: group.rows.reduce((acc, r) => acc + r.returnedAmount, 0),
-                returnedReceipts: group.rows.reduce((acc, r) => acc + r.returnedReceipts, 0),
-                returnedItems: group.rows.reduce((acc, r) => acc + r.returnedItems, 0),
+                returnedAmount: activeRows.reduce((acc, r) => acc + r.returnedAmount, 0),
+                returnedReceipts: activeRows.reduce((acc, r) => acc + r.returnedReceipts, 0),
+                returnedItems: activeRows.reduce((acc, r) => acc + r.returnedItems, 0),
               };
-              const groupCost = sumCost(group.rows);
+              const groupCost = sumCost(activeRows);
               return (
                 <div key={group.store ?? "none"}>
                   {group.rows.map((r) => {
                     const d = displayed(r);
                     const avgCheck = d.receipts > 0 ? d.revenue / d.receipts : 0;
                     const checkDepth = d.receipts > 0 ? d.items / d.receipts : 0;
+                    const hidden = hiddenRegisterIds.has(r.registerId);
                     return (
                       <div
                         key={r.registerId}
-                        className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                        className={`min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px] ${hidden ? "opacity-40" : ""}`}
                       >
-                        <div className="font-semibold">{r.name}</div>
+                        <label className="font-semibold flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!hidden}
+                            onChange={() => toggleRegisterHidden(r.registerId)}
+                            className="accent-accent"
+                            title="Учитывать в итогах"
+                          />
+                          {r.name}
+                        </label>
                         <div className="text-muted">{storeLabel(r.store)}</div>
                         <div className="num">
                           {money(d.revenue)}
@@ -714,7 +765,7 @@ export default function SalesPage() {
                       </div>
                     );
                   })}
-                  {group.rows.length > 1 && (
+                  {activeRows.length > 1 && (
                     <div className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 py-2 border-b border-borderSoft items-center text-[12.5px] font-bold bg-weekendTint">
                       <div className="col-span-2">Итого по {group.label}</div>
                       <div className="num">
