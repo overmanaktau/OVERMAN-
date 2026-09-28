@@ -13,7 +13,12 @@ import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 // the recent sales pace and can stay low even for something that hasn't
 // actually sold in months. Threshold matches the page's own title; not
 // user-adjustable.
-const STALE_DAYS = 60;
+//
+// 45 means 45 is already stale (44 isn't) — but stale_inventory's SQL uses
+// a strict "> p_stale_days", so the RPC gets STALE_DAYS - 1 everywhere it's
+// called, while the UI still shows this constant itself.
+const STALE_DAYS = 45;
+const STALE_DAYS_QUERY = STALE_DAYS - 1;
 
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
@@ -511,12 +516,15 @@ export default function StaleInventoryPage() {
     try {
       const [raw, rawFrozen] = await Promise.all([
         fetchAllRows<StaleRawRow>((from, to) =>
-          supabase.rpc("stale_inventory", { p_stale_days: STALE_DAYS, p_stores: effectiveStores }).order("article", { ascending: true }).range(from, to)
+          supabase
+            .rpc("stale_inventory", { p_stale_days: STALE_DAYS_QUERY, p_stores: effectiveStores })
+            .order("article", { ascending: true })
+            .range(from, to)
         ),
-        // -1 rather than STALE_DAYS: "заморозка" isn't about staleness, it's
-        // stock the business deliberately set aside — show all of it, not
-        // just what's also been sitting 60+ days. (current_date - last_sale)
-        // is never negative, so "> -1" always passes.
+        // -1 rather than STALE_DAYS_QUERY: "заморозка" isn't about staleness,
+        // it's stock the business deliberately set aside — show all of it,
+        // not just what's also been sitting {STALE_DAYS}+ days.
+        // (current_date - last_sale) is never negative, so "> -1" always passes.
         fetchAllRows<StaleRawRow>((from, to) =>
           supabase.rpc("stale_inventory", { p_stale_days: -1, p_stores: ["frozen"] }).order("article", { ascending: true }).range(from, to)
         ),
@@ -611,7 +619,7 @@ export default function StaleInventoryPage() {
               rows={sortRows(rows, sortField)}
               mobileLayout={mobileLayout}
               emptyText="Нет зависших остатков — всё продаётся вовремя."
-              staleDays={STALE_DAYS}
+              staleDays={STALE_DAYS_QUERY}
               stores={effectiveStores}
               openLightbox={setLightbox}
             />
