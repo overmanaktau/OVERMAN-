@@ -25,7 +25,13 @@ import {
 // Confirmed with the business owner: these are the only live registers
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
 // doesn't carry the city in its name). "Онлайн продажи Overman" and
-// "Ак Кала" are inactive retailstore entries and get skipped.
+// "Ак Кала" are inactive retailstore entries and get skipped. Saya Park
+// stopped being used as of 2026-09-21 (business decision) — dropped from
+// this map so it's skipped the same way, and its sales from that date
+// onward were deleted from moysklad_sales_daily/_employee_sales_daily/
+// _product_sales_daily (one-off cleanup, not a migration — see chat).
+// Its stock warehouse (WAREHOUSE_STORE below) is untouched: goods may still
+// physically sit there even though the register itself isn't ringing sales.
 //
 // Stays at city granularity (unlike WAREHOUSE_STORE below) — this feeds
 // moysklad_registers/moysklad_sales_daily, which Продажи/Обзор filter by
@@ -33,7 +39,6 @@ import {
 // break that filter on those pages.
 const REGISTER_STORE: Record<string, string> = {
   "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Overman Актау
-  "d3f209de-4da2-11f0-0a80-027a0003cde2": "point_1", // Saya Park
   "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Overman Актобе
   "111827a0-a440-11f1-0a80-0dcb003111ce": "point_3", // Актобе скидка
 };
