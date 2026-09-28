@@ -236,6 +236,7 @@ export type StockReportRow = {
   salePrice: number | null; // tenge — "salePrice" field, the retail price
   stockDays: number | null;
   imageUrl: string | null; // confirmed live: loads with no Authorization header — safe as a plain <img src>
+  imageFullHref: string | null; // original-resolution download link — confirmed live: needs our Bearer token (401 without it), so the app fetches it through app/api/moysklad/image rather than using it directly as <img src>
 };
 
 export async function fetchStockAll(): Promise<StockReportRow[]> {
@@ -255,7 +256,7 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
       salePrice?: number; // kopecks, retail price
       stockDays?: number;
       folder?: { name?: string };
-      image?: { tiny?: { href?: string }; miniature?: { downloadHref?: string } };
+      image?: { meta?: { href?: string }; tiny?: { href?: string }; miniature?: { downloadHref?: string } };
     };
     const rows: Raw[] = page.rows ?? [];
     for (const r of rows) {
@@ -271,6 +272,7 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
         salePrice: r.salePrice != null ? r.salePrice / 100 : null,
         stockDays: r.stockDays ?? null,
         imageUrl: r.image?.miniature?.downloadHref ?? r.image?.tiny?.href ?? null,
+        imageFullHref: r.image?.meta?.href ?? null,
       });
     }
     if (rows.length < limit) break;

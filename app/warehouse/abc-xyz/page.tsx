@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
-import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
-const DEFAULT_PERIOD = 3; // "С начала месяца"
+const DEFAULT_PERIOD = 5; // "Всё время"
 
 const ABC_OPTIONS = [
   { value: "A", label: "A" },
@@ -102,13 +101,101 @@ type ProductRow = {
   abc: AbcKey;
   xyz: XyzKey;
   imageUrl: string | null; // one photo per article — whichever size/colour SKU in the group happens to have one
+  imageFullHref: string | null;
 };
 
-function Thumb({ src, alt }: { src: string | null; alt: string }) {
+type LightboxState = { fullHref: string | null; fallbackSrc: string | null; alt: string };
+
+function Thumb({
+  src,
+  fullHref,
+  alt,
+  onOpen,
+}: {
+  src: string | null;
+  fullHref: string | null;
+  alt: string;
+  onOpen: (state: LightboxState) => void;
+}) {
   if (!src) return <div className="w-9 h-9 rounded-md bg-paper border border-borderSoft flex-none" />;
   return (
     // eslint-disable-next-line @next/next/no-img-element -- external МойСклад CDN, not worth next/image's domain config for a thumbnail
-    <img src={src} alt={alt} className="w-9 h-9 rounded-md object-cover border border-borderSoft flex-none" />
+    <img
+      src={src}
+      alt={alt}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen({ fullHref, fallbackSrc: src, alt });
+      }}
+      className="w-9 h-9 rounded-md object-cover border border-borderSoft flex-none cursor-zoom-in"
+    />
+  );
+}
+
+// Fetches the full-resolution photo through our own proxy (the original
+// needs our API token — see app/api/moysklad/image) and falls back to
+// whatever thumbnail was already on screen if that fails or there's no
+// full-res version at all.
+function Lightbox({ state, onClose }: { state: LightboxState | null; onClose: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setBlobUrl(null);
+    if (!state?.fullHref) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    (async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const res = await fetch(`/api/moysklad/image?href=${encodeURIComponent(state.fullHref!)}`, {
+          headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+        });
+        if (!res.ok) throw new Error("failed");
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) setBlobUrl(objectUrl);
+      } catch {
+        // silently keep the fallback thumbnail already on screen
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [state?.fullHref]);
+
+  useEffect(() => {
+    if (!state) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [state, onClose]);
+
+  if (!state) return null;
+  const src = blobUrl ?? state.fallbackSrc;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6" onClick={onClose}>
+      {loading && !blobUrl && <div className="text-white text-sm">Загрузка фото…</div>}
+      {src && (
+        // eslint-disable-next-line @next/next/no-img-element -- blob: / external URL, not a static asset
+        <img src={src} alt={state.alt} onClick={(e) => e.stopPropagation()} className="max-w-full max-h-full rounded-lg object-contain" />
+      )}
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 text-white text-2xl leading-none w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10"
+      >
+        ✕
+      </button>
+    </div>
   );
 }
 
@@ -121,17 +208,26 @@ type SkuRow = {
   revenue: number;
   quantity: number;
   imageUrl: string | null;
+  imageFullHref: string | null;
 };
 
-function SizeBreakdown({ loading, rows }: { loading: boolean; rows: SkuRow[] | undefined }) {
+function SizeBreakdown({
+  loading,
+  rows,
+  openLightbox,
+}: {
+  loading: boolean;
+  rows: SkuRow[] | undefined;
+  openLightbox: (state: LightboxState) => void;
+}) {
   if (loading) return <div className="text-[12.5px] text-muted py-2 pl-11">Загрузка размеров…</div>;
   if (!rows || rows.length === 0) return <div className="text-[12.5px] text-mutedLight py-2 pl-11">Нет данных по размерам.</div>;
   return (
     <div className="flex flex-col gap-1.5 py-2 pl-11 pr-2">
       {rows.map((s) => (
         <div key={s.id} className="flex items-center gap-2.5 text-[12.5px]">
-          <Thumb src={s.imageUrl} alt={s.name} />
-          <div className="flex-1 min-w-0 truncate text-muted">{s.name}</div>
+          <Thumb src={s.imageUrl} fullHref={s.imageFullHref} alt={s.name} onOpen={openLightbox} />
+          <div className="flex-1 min-w-0 break-words text-muted">{s.name}</div>
           <div className="num flex-none">{s.quantity.toLocaleString("ru-RU")} шт</div>
           <div className="num text-mutedLight flex-none w-24 text-right">{money(s.revenue)}</div>
         </div>
@@ -252,10 +348,18 @@ function MultiSelectFilter({
 }
 
 export default function AbcXyzPage() {
-  const { isAdmin, permissions } = useAuth();
+  const { isAdmin, permissions, stores, accessibleStoreCodes } = useAuth();
   const { mobileLayout } = useSiteVersion();
-  const { selected: selectedStores } = useStoreSelection();
   const canView = isAdmin || permissions["warehouse.stock"].canView;
+
+  // Independent of the city picker in the sidebar — that one drives every
+  // other page; this page filters by склад on its own.
+  const [storeFilter, setStoreFilter] = useState<string[]>([]);
+  const effectiveStores = storeFilter.length > 0 ? storeFilter : accessibleStoreCodes;
+  const storeOptions = stores.filter((s) => accessibleStoreCodes.includes(s.code)).map((s) => ({ value: s.code, label: s.name }));
+  function toggleStore(code: string) {
+    setStoreFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
+  }
 
   const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
   const [activeCustom, setActiveCustom] = useState<{ start: string; end: string } | null>(null);
@@ -278,6 +382,7 @@ export default function AbcXyzPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [skuCache, setSkuCache] = useState<Record<string, SkuRow[]>>({});
   const [skuLoading, setSkuLoading] = useState<Set<string>>(new Set());
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   const loadSeq = useRef(0);
 
@@ -300,9 +405,10 @@ export default function AbcXyzPage() {
         cost: number;
         days_with_sales: number;
         image_url: string | null;
+        image_full_href: string | null;
       };
       const raw = await fetchAllRows<Raw>((from_, to_) =>
-        supabase.rpc("product_sales_summary_by_article", { p_from: from, p_to: to, p_stores: selectedStores }).range(from_, to_)
+        supabase.rpc("product_sales_summary_by_article", { p_from: from, p_to: to, p_stores: effectiveStores }).range(from_, to_)
       );
 
       // Only articles with real net revenue in the window get classified —
@@ -330,6 +436,7 @@ export default function AbcXyzPage() {
           abc,
           xyz,
           imageUrl: r.image_url,
+          imageFullHref: r.image_full_href,
         };
       });
 
@@ -345,7 +452,7 @@ export default function AbcXyzPage() {
       if (seq === loadSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodIndex, activeCustom?.start, activeCustom?.end, selectedStores.join(",")]);
+  }, [periodIndex, activeCustom?.start, activeCustom?.end, effectiveStores.join(",")]);
 
   useEffect(() => {
     load();
@@ -372,12 +479,13 @@ export default function AbcXyzPage() {
         revenue: number;
         quantity: number;
         image_url: string | null;
+        image_full_href: string | null;
       }>((from_, to_) =>
         supabase
           .rpc("product_sales_summary_by_sku", {
             p_from: range.from,
             p_to: range.to,
-            p_stores: selectedStores,
+            p_stores: effectiveStores,
             p_article: articleId,
           })
           .range(from_, to_)
@@ -391,6 +499,7 @@ export default function AbcXyzPage() {
           revenue: s.revenue,
           quantity: s.quantity,
           imageUrl: s.image_url,
+          imageFullHref: s.image_full_href,
         })),
       }));
     } catch {
@@ -466,6 +575,7 @@ export default function AbcXyzPage() {
 
   return (
     <>
+      <Lightbox state={lightbox} onClose={() => setLightbox(null)} />
       <div className="flex flex-col gap-1">
         <div className="text-xs text-mutedLight">Склад</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">АВС/XYZ анализ</h1>
@@ -564,6 +674,10 @@ export default function AbcXyzPage() {
         </div>
       </div>
 
+      {storeOptions.length > 1 && (
+        <MultiSelectFilter label="Склад" options={storeOptions} selected={storeFilter} onToggle={toggleStore} onClear={() => setStoreFilter([])} />
+      )}
+
       {loading ? (
         <div className="text-sm text-muted">Загрузка…</div>
       ) : rows.length === 0 ? (
@@ -631,8 +745,8 @@ export default function AbcXyzPage() {
                         title="Показать размеры"
                       >
                         <span className="text-mutedLight text-[10px] w-3 flex-none">{isOpen ? "▾" : "▸"}</span>
-                        <Thumb src={r.imageUrl} alt={r.name} />
-                        <div className="font-semibold">{r.name}</div>
+                        <Thumb src={r.imageUrl} fullHref={r.imageFullHref} alt={r.name} onOpen={setLightbox} />
+                        <div className="font-semibold break-words">{r.name}</div>
                       </div>
                       <div className="text-muted text-[12.5px]">{r.category}</div>
                       <div className="flex items-center justify-between">
@@ -660,7 +774,7 @@ export default function AbcXyzPage() {
                       <div className="text-mutedLight text-[12.5px] mt-1">{DECISIONS[`${r.abc}${r.xyz}`]}</div>
                       {isOpen && (
                         <div className="border-t border-borderSoft mt-1">
-                          <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} />
+                          <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} openLightbox={setLightbox} />
                         </div>
                       )}
                     </div>
@@ -692,8 +806,8 @@ export default function AbcXyzPage() {
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           <span className="text-mutedLight text-[10px] w-3 flex-none">{isOpen ? "▾" : "▸"}</span>
-                          <Thumb src={r.imageUrl} alt={r.name} />
-                          <div className="font-semibold truncate">{r.name}</div>
+                          <Thumb src={r.imageUrl} fullHref={r.imageFullHref} alt={r.name} onOpen={setLightbox} />
+                          <div className="font-semibold break-words">{r.name}</div>
                         </div>
                         <div className="text-muted">{r.category}</div>
                         <div className="num font-bold">{r.abc}</div>
@@ -704,7 +818,7 @@ export default function AbcXyzPage() {
                         <div className="num">{marginPct.toFixed(0)}%</div>
                         <div className="text-muted text-[12.5px]">{DECISIONS[`${r.abc}${r.xyz}`]}</div>
                       </div>
-                      {isOpen && <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} />}
+                      {isOpen && <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} openLightbox={setLightbox} />}
                     </div>
                   );
                 })}
