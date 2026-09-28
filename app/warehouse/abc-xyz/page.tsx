@@ -677,7 +677,9 @@ export default function AbcXyzPage() {
       </div>
 
       {storeOptions.length > 1 && (
-        <MultiSelectFilter label="Склад" options={storeOptions} selected={storeFilter} onToggle={toggleStore} onClear={() => setStoreFilter([])} />
+        <div className="max-w-[240px]">
+          <MultiSelectFilter label="Склад" options={storeOptions} selected={storeFilter} onToggle={toggleStore} onClear={() => setStoreFilter([])} />
+        </div>
       )}
 
       {loading ? (
