@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { authFetch } from "@/lib/apiClient";
 import { supabase } from "@/lib/supabaseClient";
-import { SECTIONS, emptyPermissions, type Permissions } from "@/lib/permissions";
+import { SECTIONS, PERMISSION_GROUPS, emptyPermissions, type Permissions } from "@/lib/permissions";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
@@ -92,6 +92,10 @@ function resolveStoreLabel(emp: Employee, roles: RoleDef[], cities: CityWithStor
   return names.length ? names.join(", ") : "Нет городов";
 }
 
+// Collapsed by default per group, remembered only for this component
+// instance (each PermissionsGrid — one per role card / employee panel —
+// opens fresh). Groups mirror the sidebar's own nav structure so "where do
+// I find the checkbox for X" matches what the person already knows.
 function PermissionsGrid({
   value,
   onChange,
@@ -101,44 +105,76 @@ function PermissionsGrid({
   onChange: (next: Permissions) => void;
   disabled?: boolean;
 }) {
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  function toggleGroup(key: string) {
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
   return (
-    <div className="grid grid-cols-[1fr_80px_80px] gap-2 text-[12.5px]">
-      <div className="text-mutedLight uppercase text-[10.5px] tracking-wide">Раздел</div>
-      <div className="text-mutedLight uppercase text-[10.5px] tracking-wide text-center">Просмотр</div>
-      <div className="text-mutedLight uppercase text-[10.5px] tracking-wide text-center">Редактир.</div>
-      {SECTIONS.map((s) => (
-        <Fragment key={s.key}>
-          <div className="py-1.5 border-t border-borderSoft">{s.label}</div>
-          <div className="py-1.5 border-t border-borderSoft text-center">
-            <input
-              type="checkbox"
-              checked={value[s.key].canView}
-              disabled={disabled}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  [s.key]: {
-                    canView: e.target.checked,
-                    canEdit: e.target.checked ? value[s.key].canEdit : false,
-                  },
-                })
-              }
-              className="accent-accent disabled:opacity-40"
-            />
+    <div className="flex flex-col gap-1 text-[12.5px]">
+      {PERMISSION_GROUPS.map((group) => {
+        const sections = SECTIONS.filter((s) => s.group === group.key);
+        if (sections.length === 0) return null;
+        const open = openGroups[group.key] ?? false;
+        return (
+          <div key={group.key} className="border-b border-borderSoft last:border-b-0">
+            <button
+              type="button"
+              onClick={() => toggleGroup(group.key)}
+              className="w-full flex items-center justify-between gap-2 py-2"
+            >
+              <span className="font-semibold">{group.label}</span>
+              <span className="text-mutedLight text-[10px]">{open ? "▲" : "▼"}</span>
+            </button>
+            {open && (
+              <div className="grid grid-cols-[1fr_70px_70px] gap-2 pb-2.5">
+                <div />
+                <div className="text-mutedLight uppercase text-[10.5px] tracking-wide text-center">Просмотр</div>
+                <div className="text-mutedLight uppercase text-[10.5px] tracking-wide text-center">Редактир.</div>
+                {sections.map((s) => (
+                  <Fragment key={s.key}>
+                    <div className="py-1.5 border-t border-borderSoft">{s.label}</div>
+                    <div className="py-1.5 border-t border-borderSoft text-center">
+                      <input
+                        type="checkbox"
+                        checked={value[s.key].canView}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          onChange({
+                            ...value,
+                            [s.key]: {
+                              canView: e.target.checked,
+                              canEdit: e.target.checked ? value[s.key].canEdit : false,
+                            },
+                          })
+                        }
+                        className="accent-accent disabled:opacity-40"
+                      />
+                    </div>
+                    <div className="py-1.5 border-t border-borderSoft text-center">
+                      {s.hasEdit ? (
+                        <input
+                          type="checkbox"
+                          checked={value[s.key].canEdit}
+                          disabled={disabled || !value[s.key].canView}
+                          onChange={(e) =>
+                            onChange({ ...value, [s.key]: { ...value[s.key], canEdit: e.target.checked } })
+                          }
+                          className="accent-accent disabled:opacity-40"
+                        />
+                      ) : (
+                        <span className="text-mutedLight" title="В этом разделе нечего редактировать — только просмотр">
+                          —
+                        </span>
+                      )}
+                    </div>
+                  </Fragment>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="py-1.5 border-t border-borderSoft text-center">
-            <input
-              type="checkbox"
-              checked={value[s.key].canEdit}
-              disabled={disabled || !value[s.key].canView}
-              onChange={(e) =>
-                onChange({ ...value, [s.key]: { ...value[s.key], canEdit: e.target.checked } })
-              }
-              className="accent-accent disabled:opacity-40"
-            />
-          </div>
-        </Fragment>
-      ))}
+        );
+      })}
     </div>
   );
 }
