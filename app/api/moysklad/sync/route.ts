@@ -25,13 +25,18 @@ import {
 // Confirmed with the business owner: these are the only live registers
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
 // doesn't carry the city in its name). "Онлайн продажи Overman" and
-// "Ак Кала" are inactive retailstore entries and get skipped. Saya Park
-// stopped being used as of 2026-09-21 (business decision) — dropped from
-// this map so it's skipped the same way, and its sales from that date
-// onward were deleted from moysklad_sales_daily/_employee_sales_daily/
-// _product_sales_daily (one-off cleanup, not a migration — see chat).
-// Its stock warehouse (WAREHOUSE_STORE below) is untouched: goods may still
-// physically sit there even though the register itself isn't ringing sales.
+// "Ак Кала" are inactive retailstore entries and get skipped.
+//
+// Saya Park stopped being used as of SAYA_PARK_RETIRED_FROM (business
+// decision) — it stays IN this map (unlike a genuinely dead retailstore)
+// because dates before that cutoff are real, legitimate sales that must
+// still resync correctly (e.g. a historical backfill); the date-gated skip
+// below is what actually excludes it from that date onward. Its sales from
+// SAYA_PARK_RETIRED_FROM onward were deleted from moysklad_sales_daily/
+// _employee_sales_daily/_product_sales_daily as a one-off cleanup (not a
+// migration — see chat). Its stock warehouse (WAREHOUSE_STORE below) is
+// untouched regardless of date: goods may still physically sit there even
+// though the register itself isn't ringing sales.
 //
 // Stays at city granularity (unlike WAREHOUSE_STORE below) — this feeds
 // moysklad_registers/moysklad_sales_daily, which Продажи/Обзор filter by
@@ -39,9 +44,13 @@ import {
 // break that filter on those pages.
 const REGISTER_STORE: Record<string, string> = {
   "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Overman Актау
+  "d3f209de-4da2-11f0-0a80-027a0003cde2": "point_1", // Saya Park
   "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Overman Актобе
   "111827a0-a440-11f1-0a80-0dcb003111ce": "point_3", // Актобе скидка
 };
+const SAYA_PARK_REGISTER_ID = "d3f209de-4da2-11f0-0a80-027a0003cde2";
+const SAYA_PARK_WAREHOUSE_ID = "fe3b03d3-4da1-11f0-0a80-18910004c37d";
+const SAYA_PARK_RETIRED_FROM = "2026-09-21"; // string-comparable since dates here are always "YYYY-MM-DD"
 
 // Warehouses (entity/store — where stock physically sits, distinct from the
 // retailstore/касса ids above) — unlike REGISTER_STORE, this maps to a code
@@ -107,6 +116,7 @@ async function runSync(date: string) {
     const id = d.retailStore?.id;
     const name = d.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue; // not a live retail register
+    if (id === SAYA_PARK_REGISTER_ID && date >= SAYA_PARK_RETIRED_FROM) continue;
     const agg = byRegister.get(id) ?? { ...emptyAgg(), name };
     agg.revenue += (d.sum ?? 0) / 100;
     agg.receipts += 1;
@@ -142,6 +152,7 @@ async function runSync(date: string) {
     const id = r.retailStore?.id;
     const name = r.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue;
+    if (id === SAYA_PARK_REGISTER_ID && date >= SAYA_PARK_RETIRED_FROM) continue;
     const agg = byRegister.get(id) ?? { ...emptyAgg(), name };
     const rSum = (r.sum ?? 0) / 100;
     const rItems = (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
@@ -239,14 +250,15 @@ async function runSync(date: string) {
   // (confirmed live — 6 parallel calls tripped a 429 "too many concurrent
   // requests"), so this trades a bit of wall-clock time for not failing.
   //
-  // Saya Park's warehouse is skipped here (unlike in syncCatalogAndStock,
-  // where WAREHOUSE_STORE still tracks its current stock) — the register
-  // stopped operating 2026-09-21, so no new sales should ever originate
-  // from that warehouse going forward.
-  const RETIRED_SALES_WAREHOUSES = new Set(["fe3b03d3-4da1-11f0-0a80-18910004c37d"]); // Saya Park
+  // Saya Park's warehouse is skipped here from SAYA_PARK_RETIRED_FROM
+  // onward (unlike in syncCatalogAndStock, where WAREHOUSE_STORE still
+  // tracks its current stock unconditionally) — dates before that cutoff
+  // are real historical sales and must still resync correctly.
   type ProductAgg = { name: string; revenue: number; quantity: number; cost: number; returnedAmount: number; returnedQuantity: number };
   const byProduct = new Map<string, ProductAgg>(); // key: `${productMsId}|${store}`
-  const warehouseIds = Object.keys(WAREHOUSE_STORE).filter((id) => !RETIRED_SALES_WAREHOUSES.has(id));
+  const warehouseIds = Object.keys(WAREHOUSE_STORE).filter(
+    (id) => !(id === SAYA_PARK_WAREHOUSE_ID && date >= SAYA_PARK_RETIRED_FROM)
+  );
   const perWarehouse: Awaited<ReturnType<typeof fetchProfitByProductForDate>>[] = [];
   for (const whId of warehouseIds) {
     perWarehouse.push(await fetchProfitByProductForDate(date, whId));
