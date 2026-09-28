@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
+
+// Without this, Vercel caps the function at its platform default (well
+// under a minute) — this route now does a full catalog/stock/supply resync
+// plus one profit-report call per склад, every single invocation, which
+// can run past that on its own. 300s is the max Vercel honors outside
+// Enterprise; it silently clamps down further on lower plans, so this is a
+// ceiling request, not a guarantee.
+export const maxDuration = 300;
 import {
   fetchRetailDemandsForDate,
   fetchRetailSalesReturnsForDate,

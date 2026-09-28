@@ -27,6 +27,10 @@ async function moyskladFetch(path: string, searchParams?: Record<string, string>
 }
 
 async function fetchAllPages<T>(path: string, filter: string): Promise<T[]> {
+  // МойСклад silently stops honoring "expand" once limit > 100 — confirmed
+  // live: at limit=1000 every expanded reference here (retailStore, owner,
+  // positions.assortment) degrades to a bare {meta} stub, which is why this
+  // stays at 100 while the non-expand report endpoints below use 1000.
   const limit = 100;
   let offset = 0;
   const all: T[] = [];
@@ -154,18 +158,36 @@ export type ProductCatalogRow = {
   archived: boolean;
 };
 
+// Only ~40 folders total — one cheap page, used to resolve each product's
+// category without needing expand=productFolder (which forced limit=100 on
+// the ~5,800-row product fetch below; productFolder is a bare {meta} ref
+// even without expand, so this trades one small extra request for letting
+// that fetch run at the full page size instead).
+async function fetchProductFolderNames(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  let offset = 0;
+  for (;;) {
+    const page = await moyskladFetch("/entity/productfolder", { limit: "1000", offset: String(offset) });
+    type Raw = { id: string; name: string };
+    const rows: Raw[] = page.rows ?? [];
+    for (const f of rows) map.set(f.id, f.name);
+    if (rows.length < 1000) break;
+    offset += 1000;
+  }
+  return map;
+}
+
 // МойСклад's default /entity/product listing silently excludes archived
 // products (confirmed live: no filter and filter=archived=false return the
 // same count) — an archived item can still have real leftover stock sitting
 // on a shelf, which is exactly what "Зависшие остатки" needs to catch, so
 // this fetches both and merges them rather than trusting the default.
-async function fetchProductPage(archived: boolean): Promise<ProductCatalogRow[]> {
-  const limit = 100;
+async function fetchProductPage(archived: boolean, folderNames: Map<string, string>): Promise<ProductCatalogRow[]> {
+  const limit = 1000; // safe at max page size — no expand needed (see fetchProductFolderNames)
   let offset = 0;
   const all: ProductCatalogRow[] = [];
   for (;;) {
     const page = await moyskladFetch("/entity/product", {
-      expand: "productFolder",
       filter: `archived=${archived}`,
       limit: String(limit),
       offset: String(offset),
@@ -174,15 +196,17 @@ async function fetchProductPage(archived: boolean): Promise<ProductCatalogRow[]>
       id: string;
       name: string;
       archived?: boolean;
-      productFolder?: { name?: string };
+      productFolder?: { meta?: { href?: string } };
       buyPrice?: Money;
     };
     const rows: Raw[] = page.rows ?? [];
     for (const p of rows) {
+      const folderHref = p.productFolder?.meta?.href ?? "";
+      const folderId = folderHref.split("/").pop()?.split("?")[0] ?? "";
       all.push({
         id: p.id,
         name: p.name,
-        category: p.productFolder?.name ?? null,
+        category: folderId ? folderNames.get(folderId) ?? null : null,
         buyPrice: p.buyPrice?.value != null ? p.buyPrice.value / 100 : null,
         archived: p.archived ?? false,
       });
@@ -194,7 +218,8 @@ async function fetchProductPage(archived: boolean): Promise<ProductCatalogRow[]>
 }
 
 export async function fetchAllProducts(): Promise<ProductCatalogRow[]> {
-  const [active, archived] = await Promise.all([fetchProductPage(false), fetchProductPage(true)]);
+  const folderNames = await fetchProductFolderNames();
+  const [active, archived] = await Promise.all([fetchProductPage(false, folderNames), fetchProductPage(true, folderNames)]);
   return [...active, ...archived];
 }
 
@@ -213,7 +238,7 @@ export type StockReportRow = {
 };
 
 export async function fetchStockAll(): Promise<StockReportRow[]> {
-  const limit = 100;
+  const limit = 1000; // safe at max page size — this report doesn't use expand, unlike the entity endpoints above
   let offset = 0;
   const all: StockReportRow[] = [];
   for (;;) {
@@ -264,7 +289,7 @@ export type StoreStockRow = {
 };
 
 export async function fetchStockByStore(): Promise<StoreStockRow[]> {
-  const limit = 100;
+  const limit = 1000; // safe at max page size — no expand param here either
   let offset = 0;
   const all: StoreStockRow[] = [];
   for (;;) {
@@ -313,7 +338,7 @@ export type ProductDayAgg = {
 
 export async function fetchProfitByProductForDate(date: string, warehouseId?: string): Promise<ProductDayAgg[]> {
   const { from, to } = dayWindow(date);
-  const limit = 100;
+  const limit = 1000; // safe at max page size — no expand param here either
   let offset = 0;
   const all: ProductDayAgg[] = [];
   for (;;) {
@@ -366,12 +391,18 @@ export type SupplyRow = {
 };
 
 export async function fetchAllSupplies(): Promise<SupplyRow[]> {
+  // expand=positions (bare, no ".assortment") still embeds each position's
+  // assortment as a normal {meta} reference — plenty to read the product id
+  // from — while the deeper ".assortment" expansion confirmed ~2.6x slower
+  // live (27s/page vs 10s/page) for data this function never uses beyond
+  // that href. And expand silently stops working past limit=100 at all
+  // (confirmed live, same as fetchAllPages above), so this stays there.
   const limit = 100;
   let offset = 0;
   const all: SupplyRow[] = [];
   for (;;) {
     const page = await moyskladFetch("/entity/supply", {
-      expand: "positions.assortment",
+      expand: "positions",
       limit: String(limit),
       offset: String(offset),
     });
