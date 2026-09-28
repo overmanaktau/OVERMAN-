@@ -234,15 +234,19 @@ async function runSync(date: string) {
   }
 
   // One /report/profit/byproduct call per склад (МойСклад's store filter
-  // only ever accepts a single value — see fetchProfitByProductForDate),
-  // then summed into this day's city/frozen buckets — several склады can
-  // resolve to the same bucket (e.g. Overman + Saya Park → point_1).
+  // only ever accepts a single value — see fetchProfitByProductForDate).
   // Sequential, not Promise.all: МойСклад rate-limits concurrent requests
   // (confirmed live — 6 parallel calls tripped a 429 "too many concurrent
   // requests"), so this trades a bit of wall-clock time for not failing.
+  //
+  // Saya Park's warehouse is skipped here (unlike in syncCatalogAndStock,
+  // where WAREHOUSE_STORE still tracks its current stock) — the register
+  // stopped operating 2026-09-21, so no new sales should ever originate
+  // from that warehouse going forward.
+  const RETIRED_SALES_WAREHOUSES = new Set(["fe3b03d3-4da1-11f0-0a80-18910004c37d"]); // Saya Park
   type ProductAgg = { name: string; revenue: number; quantity: number; cost: number; returnedAmount: number; returnedQuantity: number };
   const byProduct = new Map<string, ProductAgg>(); // key: `${productMsId}|${store}`
-  const warehouseIds = Object.keys(WAREHOUSE_STORE);
+  const warehouseIds = Object.keys(WAREHOUSE_STORE).filter((id) => !RETIRED_SALES_WAREHOUSES.has(id));
   const perWarehouse: Awaited<ReturnType<typeof fetchProfitByProductForDate>>[] = [];
   for (const whId of warehouseIds) {
     perWarehouse.push(await fetchProfitByProductForDate(date, whId));
