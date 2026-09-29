@@ -6,6 +6,7 @@ import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
+import { downloadExcel } from "@/lib/exportExcel";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 3; // "С начала месяца"
@@ -172,6 +173,7 @@ export default function StatisticsPage() {
   const [range, setRange] = useState<Range | null>(null);
   const [salesTotals, setSalesTotals] = useState({ revenue: 0, receipts: 0 });
   const [prevSalesTotals, setPrevSalesTotals] = useState({ revenue: 0, receipts: 0 });
+  const [salesByDate, setSalesByDate] = useState<Map<string, { revenue: number; receipts: number }>>(new Map());
 
   const canView = isAdmin || permissions["marketing.statistics"].canView;
 
@@ -183,6 +185,7 @@ export default function StatisticsPage() {
       setPrevExpensesTotal(0);
       setSalesTotals({ revenue: 0, receipts: 0 });
       setPrevSalesTotals({ revenue: 0, receipts: 0 });
+      setSalesByDate(new Map());
       setRange(activeCustom ? getCustomRange(activeCustom.start, activeCustom.end) : getPeriodRange(periodIndex, new Date()));
       setLoading(false);
       return;
@@ -210,7 +213,7 @@ export default function StatisticsPage() {
         return registerIds.length > 0 && from <= cappedTo
           ? supabase
               .from("moysklad_sales_daily")
-              .select("revenue, receipts_count")
+              .select("sale_date, revenue, receipts_count")
               .in("register_id", registerIds)
               .gte("sale_date", from)
               .lte("sale_date", cappedTo)
@@ -222,6 +225,18 @@ export default function StatisticsPage() {
           (acc, row) => ({ revenue: acc.revenue + row.revenue, receipts: acc.receipts + row.receipts_count }),
           { revenue: 0, receipts: 0 }
         );
+      }
+
+      // Same rows sumSales totals, but kept per-day (dates can repeat across
+      // registers, hence the accumulate-into-Map instead of a plain group-by)
+      // for the per-day Excel export below.
+      function groupSalesByDate(rows: { sale_date: string; revenue: number; receipts_count: number }[]) {
+        const map = new Map<string, { revenue: number; receipts: number }>();
+        for (const row of rows) {
+          const prev = map.get(row.sale_date) ?? { revenue: 0, receipts: 0 };
+          map.set(row.sale_date, { revenue: prev.revenue + row.revenue, receipts: prev.receipts + row.receipts_count });
+        }
+        return map;
       }
 
       const queries = [
@@ -259,6 +274,7 @@ export default function StatisticsPage() {
         setCurrent(entriesRes.data ?? []);
         setExpensesTotal((expensesRes.data ?? []).reduce((acc, e) => acc + (e.amount ?? 0), 0));
         setSalesTotals(sumSales(salesRes.data ?? []));
+        setSalesByDate(groupSalesByDate(salesRes.data ?? []));
         setPrevious(prevEntriesRes.data ?? []);
         setPrevExpensesTotal((prevExpensesRes.data ?? []).reduce((acc, e) => acc + (e.amount ?? 0), 0));
         setPrevSalesTotals(sumSales(prevSalesRes.data ?? []));
@@ -270,6 +286,7 @@ export default function StatisticsPage() {
         setCurrent(entriesRes.data ?? []);
         setExpensesTotal((expensesRes.data ?? []).reduce((acc, e) => acc + (e.amount ?? 0), 0));
         setSalesTotals(sumSales(salesRes.data ?? []));
+        setSalesByDate(groupSalesByDate(salesRes.data ?? []));
         setPrevious([]);
         setPrevExpensesTotal(0);
         setPrevSalesTotals({ revenue: 0, receipts: 0 });
@@ -427,12 +444,71 @@ export default function StatisticsPage() {
   }
   const maxChartValue = Math.max(1, ...chartDays.flatMap((d) => [d.plan, d.fact]));
 
+  function handleDownload() {
+    if (!range) return;
+    const byDate = new Map(current.map((r) => [r.entry_date, r]));
+    const headers = [
+      "Дата",
+      "Трафик план",
+      "Трафик факт",
+      "Количество чеков",
+      "Конверсия, %",
+      "Средний чек",
+      ...CHANNEL_DEFS.map((c) => c.label),
+      "Итого по каналам",
+    ];
+    const rows: (string | number)[][] = [];
+    for (let cursor = new Date(range.start); cursor <= range.end; cursor = addDays(cursor, 1)) {
+      const key = ymd(cursor);
+      const traffic = byDate.get(key);
+      const sales = salesByDate.get(key);
+      const fact = traffic?.traffic_fact ?? 0;
+      const receipts = sales?.receipts ?? 0;
+      const dayChannelTotal = CHANNEL_DEFS.reduce((sum, c) => sum + (traffic?.[c.key] ?? 0), 0);
+      rows.push([
+        key,
+        traffic?.traffic_plan ?? 0,
+        fact,
+        sales ? receipts : "",
+        sales && fact > 0 ? Number(((receipts / fact) * 100).toFixed(1)) : "",
+        sales && receipts > 0 ? Math.round(sales.revenue / receipts) : "",
+        ...CHANNEL_DEFS.map((c) => Math.round(traffic?.[c.key] ?? 0)),
+        Math.round(dayChannelTotal),
+      ]);
+    }
+    rows.push([
+      "Итого",
+      totals.plan,
+      totals.fact,
+      salesTotals.receipts,
+      conversionPct !== null ? Number(conversionPct.toFixed(1)) : "",
+      avgCheck !== null ? Math.round(avgCheck) : "",
+      ...CHANNEL_DEFS.map((c) => Math.round(totals[c.key])),
+      Math.round(channelTotal),
+    ]);
+    downloadExcel(`statistika_${ymd(range.start)}_${ymd(range.end)}.csv`, headers, rows);
+  }
+
   return (
     <>
       <div className="flex flex-col gap-1">
         <div className="text-xs text-mutedLight">Маркетинг</div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 justify-between">
           <h1 className="font-serif text-[28px] font-semibold m-0">Статистика</h1>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={loading || !range || current.length === 0}
+            className="flex items-center gap-1.5 text-[13px] font-semibold text-muted border border-border rounded-md px-3 py-2 hover:bg-paper disabled:opacity-50"
+            title="Скачать в Excel"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M12 15V3" />
+            </svg>
+            Скачать
+          </button>
         </div>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
