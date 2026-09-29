@@ -177,7 +177,9 @@ export default function ObzorPage() {
   // selector above (МойСклад's own "days current stock has been sitting"
   // metric doesn't have a meaningful date range), so it loads independently
   // of load()/range and only reacts to the store filter.
-  const [turnoverDays, setTurnoverDays] = useState<number | null>(null);
+  const [turnoverByCategory, setTurnoverByCategory] = useState<
+    { category: string; turnoverDays: number | null; stockValue: number; stockUnits: number }[]
+  >([]);
   const [turnoverLoading, setTurnoverLoading] = useState(true);
 
   useEffect(() => {
@@ -187,18 +189,29 @@ export default function ObzorPage() {
       const warehouseCodes = warehousesForCities(selectedStores);
       if (warehouseCodes.length === 0) {
         if (!cancelled) {
-          setTurnoverDays(null);
+          setTurnoverByCategory([]);
           setTurnoverLoading(false);
         }
         return;
       }
-      // Aggregated server-side (see stock_turnover_days in
-      // supabase/sql/050_stock_turnover.sql) — moysklad_product_stock has
-      // thousands of rows, well past PostgREST's default 1000-row page cap,
-      // so summing client-side would silently average only a fraction of it.
-      const { data, error: err } = await supabase.rpc("stock_turnover_days", { p_stores: warehouseCodes });
+      // Aggregated server-side (see stock_turnover_by_category in
+      // supabase/sql/051_stock_turnover_by_category.sql) — moysklad_product_stock
+      // has thousands of rows, well past PostgREST's default 1000-row page
+      // cap, so summing client-side would silently average only a fraction
+      // of it. Broken down by category (верх/низ/etc turn over at very
+      // different rates) rather than one blended figure.
+      const { data, error: err } = await supabase.rpc("stock_turnover_by_category", { p_stores: warehouseCodes });
       if (cancelled) return;
-      setTurnoverDays(err ? null : data);
+      setTurnoverByCategory(
+        err
+          ? []
+          : (data ?? []).map((r: { category: string; turnover_days: number | null; stock_value: number; stock_units: number }) => ({
+              category: r.category,
+              turnoverDays: r.turnover_days,
+              stockValue: r.stock_value,
+              stockUnits: r.stock_units,
+            }))
+      );
       setTurnoverLoading(false);
     })();
     return () => {
@@ -206,6 +219,12 @@ export default function ObzorPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStores.join(",")]);
+
+  const turnoverStockValueTotal = turnoverByCategory.reduce((acc, r) => acc + r.stockValue, 0);
+  const turnoverDays =
+    turnoverStockValueTotal > 0
+      ? turnoverByCategory.reduce((acc, r) => acc + (r.turnoverDays ?? 0) * r.stockValue, 0) / turnoverStockValueTotal
+      : null;
 
   // selectedStores starts empty and updates a moment later once the store
   // list finishes loading, firing a second load() call right behind the
@@ -461,6 +480,46 @@ export default function ObzorPage() {
               <div className="text-xs text-muted">Прогноз месяца</div>
               <div className="font-serif text-[26px] font-semibold num">{money(forecast)}</div>
             </div>
+          </div>
+
+          <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
+            <div className="flex items-center justify-between">
+              <div className="text-[15px] font-bold">Оборачиваемость по категориям</div>
+              <div className="text-xs text-mutedLight">по текущим остаткам, взвешено по себестоимости</div>
+            </div>
+            {turnoverLoading ? (
+              <div className="text-sm text-muted py-2">Загрузка…</div>
+            ) : turnoverByCategory.length === 0 ? (
+              <div className="text-sm text-muted py-2">Нет данных по остаткам за выбранные точки.</div>
+            ) : (
+              <div className="flex flex-col">
+                <div className="grid grid-cols-[1fr_110px_110px_110px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
+                  <div>Категория</div>
+                  <div className="text-right">Оборачив.</div>
+                  <div className="text-right">Остаток, шт</div>
+                  <div className="text-right">Остаток, ₸</div>
+                </div>
+                {turnoverByCategory.map((r) => (
+                  <div
+                    key={r.category}
+                    className="grid grid-cols-[1fr_110px_110px_110px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
+                  >
+                    <div className="font-semibold truncate">{r.category}</div>
+                    <div className="text-right num">{r.turnoverDays !== null ? `${Math.round(r.turnoverDays)} дн.` : "—"}</div>
+                    <div className="text-right num text-muted">{Math.round(r.stockUnits).toLocaleString("ru-RU")}</div>
+                    <div className="text-right num text-muted">{money(r.stockValue)}</div>
+                  </div>
+                ))}
+                <div className="grid grid-cols-[1fr_110px_110px_110px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
+                  <div>Итого</div>
+                  <div className="text-right num">{turnoverDays !== null ? `${Math.round(turnoverDays)} дн.` : "—"}</div>
+                  <div className="text-right num">
+                    {Math.round(turnoverByCategory.reduce((acc, r) => acc + r.stockUnits, 0)).toLocaleString("ru-RU")}
+                  </div>
+                  <div className="text-right num">{money(turnoverStockValueTotal)}</div>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
