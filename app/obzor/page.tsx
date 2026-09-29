@@ -5,6 +5,7 @@ import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
+import { warehousesForCities } from "@/lib/warehouses";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 3; // "С начала месяца"
@@ -171,6 +172,40 @@ export default function ObzorPage() {
   const [error, setError] = useState<string | null>(null);
   const [dayRows, setDayRows] = useState<{ date: string; revenue: number; receipts: number; items: number; cost: number | null }[]>([]);
   const [range, setRange] = useState<Range>(() => getPeriodRange(DEFAULT_PERIOD, new Date()));
+
+  // Оборачиваемость — a live stock snapshot, not scoped to the period
+  // selector above (МойСклад's own "days current stock has been sitting"
+  // metric doesn't have a meaningful date range), so it loads independently
+  // of load()/range and only reacts to the store filter.
+  const [turnoverDays, setTurnoverDays] = useState<number | null>(null);
+  const [turnoverLoading, setTurnoverLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setTurnoverLoading(true);
+      const warehouseCodes = warehousesForCities(selectedStores);
+      if (warehouseCodes.length === 0) {
+        if (!cancelled) {
+          setTurnoverDays(null);
+          setTurnoverLoading(false);
+        }
+        return;
+      }
+      // Aggregated server-side (see stock_turnover_days in
+      // supabase/sql/050_stock_turnover.sql) — moysklad_product_stock has
+      // thousands of rows, well past PostgREST's default 1000-row page cap,
+      // so summing client-side would silently average only a fraction of it.
+      const { data, error: err } = await supabase.rpc("stock_turnover_days", { p_stores: warehouseCodes });
+      if (cancelled) return;
+      setTurnoverDays(err ? null : data);
+      setTurnoverLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStores.join(",")]);
 
   // selectedStores starts empty and updates a moment later once the store
   // list finishes loading, firing a second load() call right behind the
@@ -387,7 +422,7 @@ export default function ObzorPage() {
         <div className="text-sm text-muted">Загрузка…</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
             <Kpi label="Выручка" value={money(totalRevenue)} />
             <Kpi label="Чеков" value={totalReceipts.toLocaleString("ru-RU")} />
             <Kpi label="Средний чек" value={money(avgCheck)} />
@@ -402,6 +437,11 @@ export default function ObzorPage() {
                   </span>
                 )
               }
+            />
+            <Kpi
+              label="Оборачиваемость склада"
+              value={turnoverLoading ? "…" : turnoverDays !== null ? `${Math.round(turnoverDays)} дн.` : "—"}
+              suffix={<span className="text-[11px] text-mutedLight">по текущим остаткам</span>}
             />
           </div>
 
