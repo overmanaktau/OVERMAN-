@@ -8,6 +8,7 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import { useSiteVersion } from "@/components/SiteVersion";
 import AccountMenu from "@/components/AccountMenu";
+import NotificationsBell from "@/components/NotificationsBell";
 import { supabase } from "@/lib/supabaseClient";
 import type { SectionKey } from "@/lib/permissions";
 
@@ -216,6 +217,7 @@ export default function Sidebar() {
           `fixed` descendant, which would otherwise pin this to the drawer's
           own box instead of the viewport's top-right corner. */}
       <div className="fixed top-4 right-4 z-[100] flex items-center gap-2">
+        <NotificationsBell />
         <AccountMenu />
       </div>
 

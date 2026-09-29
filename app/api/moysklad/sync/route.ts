@@ -446,6 +446,12 @@ async function handle(request: Request) {
       .from("moysklad_sync_state")
       .update({ last_synced_at: new Date().toISOString(), last_status: "error", last_error: message })
       .eq("id", true);
+    // Surfaces in the notification bell — moysklad_sync_state alone was
+    // easy to miss, which is exactly how the nightly sync silently failed
+    // once before nobody thought to check it.
+    await supabaseAdmin
+      .from("notifications")
+      .insert({ type: "sync_error", message: `Синхронизация МойСклад не удалась (${date}): ${message}` });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

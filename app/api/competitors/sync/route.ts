@@ -87,6 +87,7 @@ async function handle(request: Request) {
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    await supabaseAdmin.from("notifications").insert({ type: "sync_error", message: `Синхронизация конкурентов не удалась: ${message}` });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
