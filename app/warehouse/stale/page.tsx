@@ -506,6 +506,11 @@ export default function StaleInventoryPage() {
     setSortField(SORT_OPTIONS[(idx + 1) % SORT_OPTIONS.length].value);
   }
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
+  const [search, setSearch] = useState("");
+  function bySearch(list: StaleRow[]) {
+    const q = search.trim().toLowerCase();
+    return q ? list.filter((r) => r.name.toLowerCase().includes(q)) : list;
+  }
 
   const loadSeq = useRef(0);
 
@@ -581,11 +586,23 @@ export default function StaleInventoryPage() {
         )}
       </div>
 
-      {storeOptions.length > 1 && (
-        <div className="max-w-[240px]">
-          <MultiSelectFilter label="Склад" options={storeOptions} selected={storeFilter} onToggle={toggleStore} onClear={() => setStoreFilter([])} />
-        </div>
-      )}
+      <div className="flex items-end gap-4 flex-wrap">
+        {storeOptions.length > 1 && (
+          <div className="max-w-[240px]">
+            <MultiSelectFilter label="Склад" options={storeOptions} selected={storeFilter} onToggle={toggleStore} onClear={() => setStoreFilter([])} />
+          </div>
+        )}
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-semibold text-muted">Поиск</span>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Название товара…"
+            className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px] w-[220px]"
+          />
+        </label>
+      </div>
 
       {loading ? (
         <div className="text-sm text-muted">Загрузка…</div>
@@ -616,9 +633,9 @@ export default function StaleInventoryPage() {
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <StaleTable
-              rows={sortRows(rows, sortField)}
+              rows={sortRows(bySearch(rows), sortField)}
               mobileLayout={mobileLayout}
-              emptyText="Нет зависших остатков — всё продаётся вовремя."
+              emptyText={search ? "Ничего не найдено." : "Нет зависших остатков — всё продаётся вовремя."}
               staleDays={STALE_DAYS_QUERY}
               stores={effectiveStores}
               openLightbox={setLightbox}
@@ -647,9 +664,9 @@ export default function StaleInventoryPage() {
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <StaleTable
-              rows={sortRows(frozenRows, sortField)}
+              rows={sortRows(bySearch(frozenRows), sortField)}
               mobileLayout={mobileLayout}
-              emptyText="В заморозке ничего нет."
+              emptyText={search ? "Ничего не найдено." : "В заморозке ничего нет."}
               staleDays={-1}
               stores={["frozen"]}
               openLightbox={setLightbox}

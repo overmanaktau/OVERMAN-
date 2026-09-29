@@ -377,6 +377,7 @@ export default function AbcXyzPage() {
   const [abcFilter, setAbcFilter] = useState<string[]>([]);
   const [xyzFilter, setXyzFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
 
   // The date range from the last successful load — reused when expanding a
   // row's size breakdown so it always matches what's currently on screen.
@@ -570,7 +571,8 @@ export default function AbcXyzPage() {
     (r) =>
       (abcFilter.length === 0 || abcFilter.includes(r.abc)) &&
       (xyzFilter.length === 0 || xyzFilter.includes(r.xyz)) &&
-      (categoryFilter.length === 0 || categoryFilter.includes(r.category))
+      (categoryFilter.length === 0 || categoryFilter.includes(r.category)) &&
+      (!search.trim() || r.name.toLowerCase().includes(search.trim().toLowerCase()))
   );
   const totalFilteredRevenue = filtered.reduce((acc, r) => acc + r.revenue, 0);
 
@@ -741,6 +743,16 @@ export default function AbcXyzPage() {
               onToggle={toggleCategory}
               onClear={() => setCategoryFilter([])}
             />
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold text-muted">Поиск</span>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Название товара…"
+                className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px] w-[220px]"
+              />
+            </label>
           </div>
 
           <div className="text-sm text-muted">
