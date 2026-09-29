@@ -16,6 +16,13 @@ export type PermissionGroupKey = (typeof PERMISSION_GROUPS)[number]["key"];
 // delete action anywhere), confirmed by grepping every page gated by that
 // section for a `.canEdit` (or equivalent) usage. Keep this in sync if a
 // page later grows an edit action.
+//
+// viewless: true is the mirror case — there's nothing to "view" here, only
+// an action to allow or not (app/api/profile/route.ts checks can_edit only,
+// never can_view). The grid shows a single checkbox for these and keeps
+// canView/canEdit equal under the hood, so the stored data never drifts
+// into the confusing "view unchecked, edit checked" state the UI used to
+// allow.
 export const SECTIONS = [
   { key: "warehouse.stock", label: "Склад (АВС/XYZ, Зависшие остатки)", group: "warehouse", hasEdit: false },
 
@@ -31,7 +38,7 @@ export const SECTIONS = [
 
   { key: "requests", label: "Запросы", group: "general", hasEdit: true },
   { key: "accounts", label: "Аккаунты", group: "general", hasEdit: true },
-  { key: "profile.rename", label: "Смена имени сотрудника", group: "general", hasEdit: true },
+  { key: "profile.rename", label: "Смена имени сотрудника", group: "general", hasEdit: true, viewless: true },
 ] as const;
 
 export type SectionKey = (typeof SECTIONS)[number]["key"];

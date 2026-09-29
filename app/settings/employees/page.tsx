@@ -135,24 +135,40 @@ function PermissionsGrid({
                   <Fragment key={s.key}>
                     <div className="py-1.5 border-t border-borderSoft">{s.label}</div>
                     <div className="py-1.5 border-t border-borderSoft text-center">
-                      <input
-                        type="checkbox"
-                        checked={value[s.key].canView}
-                        disabled={disabled}
-                        onChange={(e) =>
-                          onChange({
-                            ...value,
-                            [s.key]: {
-                              canView: e.target.checked,
-                              canEdit: e.target.checked ? value[s.key].canEdit : false,
-                            },
-                          })
-                        }
-                        className="accent-accent disabled:opacity-40"
-                      />
+                      {"viewless" in s && s.viewless ? (
+                        <span className="text-mutedLight" title="Здесь нет отдельного просмотра — только само действие">
+                          —
+                        </span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={value[s.key].canView}
+                          disabled={disabled}
+                          onChange={(e) =>
+                            onChange({
+                              ...value,
+                              [s.key]: {
+                                canView: e.target.checked,
+                                canEdit: e.target.checked ? value[s.key].canEdit : false,
+                              },
+                            })
+                          }
+                          className="accent-accent disabled:opacity-40"
+                        />
+                      )}
                     </div>
                     <div className="py-1.5 border-t border-borderSoft text-center">
-                      {s.hasEdit ? (
+                      {"viewless" in s && s.viewless ? (
+                        <input
+                          type="checkbox"
+                          checked={value[s.key].canEdit}
+                          disabled={disabled}
+                          onChange={(e) =>
+                            onChange({ ...value, [s.key]: { canView: e.target.checked, canEdit: e.target.checked } })
+                          }
+                          className="accent-accent disabled:opacity-40"
+                        />
+                      ) : s.hasEdit ? (
                         <input
                           type="checkbox"
                           checked={value[s.key].canEdit}
