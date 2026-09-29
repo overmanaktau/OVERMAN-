@@ -20,6 +20,9 @@ type DayRow = {
   instagramPublic: number | "";
   flyer: number | "";
   twoGis: number | "";
+  locked: boolean;
+  requestPending: boolean;
+  unlockExpiresAt: string | null;
 };
 
 type ExpenseRow = {
@@ -196,6 +199,9 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
       instagramPublic: "",
       flyer: "",
       twoGis: "",
+      locked: false,
+      requestPending: false,
+      unlockExpiresAt: null,
     });
   }
   return rows;
@@ -203,6 +209,18 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
 
 function minutesLeft(iso: string, nowMs: number) {
   return Math.max(0, Math.ceil((new Date(iso).getTime() - nowMs) / 60000));
+}
+
+// Free zone: yesterday, today, or any future date — matches the
+// traffic_entries RLS policy in supabase/sql/048_traffic_entries_date_gate.sql.
+// Anything older needs an approved request (whole row, all 7 fields at once).
+function freeEntryCutoff(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return ymd(d.getFullYear(), d.getMonth(), d.getDate());
+}
+function isFreeEntryDate(entryDate: string, cutoff: string): boolean {
+  return entryDate >= cutoff;
 }
 
 export default function DataEntryPage() {
@@ -264,6 +282,16 @@ export default function DataEntryPage() {
     return exp.locked || rowIsExpired(exp.unlockExpiresAt);
   }
 
+  // Unlike expenses (locked once saved, any date), a day row is only ever
+  // gated by date: free-zone dates are never locked, and an old date is
+  // locked unless there's an active (non-expired) approved window —
+  // row.locked itself doesn't matter here, only the window does.
+  const freeCutoff = freeEntryCutoff();
+  function dayRowEffectivelyLocked(row: DayRow) {
+    if (isFreeEntryDate(row.entryDate, freeCutoff)) return false;
+    return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
+  }
+
   const load = useCallback(async () => {
     if (!store) return;
     setLoading(true);
@@ -293,22 +321,36 @@ export default function DataEntryPage() {
 
       const expenseIds = (expensesRes.data ?? []).map((e) => e.id);
 
-      const expReqRes = expenseIds.length
-        ? await supabase
-            .from("edit_requests")
-            .select("row_id")
-            .eq("table_name", "extra_expenses")
-            .eq("status", "pending")
-            .in("row_id", expenseIds)
-        : { data: [] as { row_id: number }[], error: null };
+      const [expReqRes, dayReqRes] = await Promise.all([
+        expenseIds.length
+          ? supabase
+              .from("edit_requests")
+              .select("row_id")
+              .eq("table_name", "extra_expenses")
+              .eq("status", "pending")
+              .in("row_id", expenseIds)
+          : Promise.resolve({ data: [] as { row_id: number }[], error: null }),
+        // Keyed by entry_date (not row_id) — a first-time entry on an old
+        // date has no row yet when the request is made, only entry_date+store.
+        supabase
+          .from("edit_requests")
+          .select("entry_date")
+          .eq("table_name", "traffic_entries")
+          .eq("status", "pending")
+          .eq("store", store)
+          .gte("entry_date", firstStr)
+          .lte("entry_date", lastStr),
+      ]);
       if (expReqRes.error) throw expReqRes.error;
+      if (dayReqRes.error) throw dayReqRes.error;
 
       const pendingExpenseIds = new Set((expReqRes.data ?? []).map((r) => r.row_id));
+      const pendingDayDates = new Set((dayReqRes.data ?? []).map((r) => r.entry_date));
 
       const byDate = new Map((entriesRes.data ?? []).map((e) => [e.entry_date, e]));
       const merged = buildMonthRows(year, monthIndex).map((row) => {
         const db = byDate.get(row.entryDate);
-        if (!db) return row;
+        if (!db) return { ...row, requestPending: pendingDayDates.has(row.entryDate) };
         return {
           ...row,
           id: db.id,
@@ -319,6 +361,9 @@ export default function DataEntryPage() {
           instagramPublic: db.instagram_public ?? "",
           flyer: db.flyer ?? "",
           twoGis: db.two_gis ?? "",
+          locked: db.locked ?? false,
+          requestPending: pendingDayDates.has(row.entryDate),
+          unlockExpiresAt: db.unlock_expires_at ?? null,
         };
       });
 
@@ -354,17 +399,15 @@ export default function DataEntryPage() {
   }, [load]);
 
   const dirtyDayCount = useMemo(() => {
-    // "план" can always change, so no row is ever fully excluded here — the
-    // disabled inputs already stop illegal edits to the other six fields,
-    // and the DB enforces it too, so a plain diff check is enough.
     let count = 0;
     for (const row of rows) {
+      if (dayRowEffectivelyLocked(row)) continue;
       const original = originalRows.find((o) => o.entryDate === row.entryDate);
       if (original && numericSnapshot(row) !== numericSnapshot(original)) count++;
     }
     return count;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, originalRows]);
+  }, [rows, originalRows, nowTick]);
 
   const dirtyExpenseCount = useMemo(() => {
     let count = 0;
@@ -404,7 +447,7 @@ export default function DataEntryPage() {
   }
 
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], rawValue: string) {
-    if (!canEditSection || !rows[index]) return;
+    if (!canEditSection || !rows[index] || dayRowEffectivelyLocked(rows[index])) return;
     if (DECIMAL_FIELDS.has(field)) {
       const text = sanitizeAmountText(rawValue); // digits + one "," decimal marker, even from paste
       setEditingText(text);
@@ -468,6 +511,35 @@ export default function DataEntryPage() {
     }
   }
 
+  // Unlike requestExpenseUnlock, row.id may not exist yet — a first-time
+  // entry on an old date has nothing in the DB to reference, so the
+  // approve route (already built for this) keys off entry_date instead.
+  async function requestDayRowUnlock(row: DayRow) {
+    if (savingDays) return;
+    setError(null);
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const uid = userData.user?.id;
+      if (!uid) throw new Error("Нет активной сессии.");
+
+      const context = `Точка «${storeName}», трафик и каналы за ${row.date}.${year}. Заявитель: ${requesterLabel}`;
+      const { error } = await supabase.from("edit_requests").insert({
+        table_name: "traffic_entries",
+        row_id: row.id ?? null,
+        entry_date: row.entryDate,
+        store,
+        context,
+        requested_by: uid,
+      });
+      if (error) throw error;
+
+      setRows((prev) => prev.map((r) => (r.entryDate === row.entryDate ? { ...r, requestPending: true } : r)));
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+  }
+
   const totals = useMemo(() => {
     const sum = (field: (typeof NUMERIC_FIELDS)[number]) =>
       rows.reduce((acc, r) => acc + (typeof r[field] === "number" ? (r[field] as number) : 0), 0);
@@ -493,16 +565,27 @@ export default function DataEntryPage() {
     const failed: string[] = [];
     try {
       for (const row of rows) {
+        if (dayRowEffectivelyLocked(row)) continue;
         const original = originalRows.find((o) => o.entryDate === row.entryDate);
         if (!original || numericSnapshot(row) === numericSnapshot(original)) continue;
 
         const payload: Record<string, unknown> = { store, entry_date: row.entryDate };
         for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
+        // Old-date rows only got this far because an approval opened a
+        // 30-minute window — re-lock immediately on save, same as expenses,
+        // so the next edit needs a fresh request.
+        if (!isFreeEntryDate(row.entryDate, freeCutoff)) {
+          payload.locked = true;
+          payload.unlock_expires_at = null;
+        }
 
         try {
           if (row.id) {
-            const { error } = await supabase.from("traffic_entries").update(payload).eq("id", row.id);
+            const { data: updated, error } = await supabase.from("traffic_entries").update(payload).eq("id", row.id).select("id");
             if (error) throw error;
+            if (!updated || updated.length === 0) {
+              throw new Error("время на изменение истекло — запросите доступ снова");
+            }
 
             const changeDescription = diffDayRow(original, row);
             if (changeDescription) {
@@ -628,9 +711,10 @@ export default function DataEntryPage() {
         <div className="text-xs text-mutedLight">Маркетинг</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Трафик и каналы можно свободно вносить и менять — любая дата, без запроса. Таблица
-          трафика и дополнительные расходы сохраняются отдельно — своей кнопкой «Сохранить» под
-          каждой таблицей.
+          Трафик и каналы: вчера, сегодня и любая будущая дата — свободно, без запроса. Дата
+          старше вчерашней — нужен одобренный запрос на всю строку сразу. Таблица трафика и
+          дополнительные расходы сохраняются отдельно — своей кнопкой «Сохранить» под каждой
+          таблицей.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -706,6 +790,9 @@ export default function DataEntryPage() {
               <div className="flex flex-col gap-2.5">
                 {visibleRows.map((row) => {
                   const i = rows.indexOf(row);
+                  const effectiveLocked = dayRowEffectivelyLocked(row);
+                  const rowEditableInputs = canEditSection && !effectiveLocked;
+                  const showCountdown = !effectiveLocked && row.unlockExpiresAt;
                   return (
                     <div
                       key={row.entryDate}
@@ -713,8 +800,28 @@ export default function DataEntryPage() {
                         row.weekend ? "bg-weekendTint" : ""
                       }`}
                     >
-                      <div className="text-[13px] font-semibold">
-                        {row.date} · {row.weekday}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[13px] font-semibold">
+                          {row.date} · {row.weekday}
+                        </div>
+                        {effectiveLocked &&
+                          (row.requestPending ? (
+                            <span className="text-[11px] text-mutedLight italic">Ожидает</span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={!canEditSection}
+                              onClick={() => requestDayRowUnlock(row)}
+                              className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
+                            >
+                              Запрос
+                            </button>
+                          ))}
+                        {showCountdown && (
+                          <span className="text-[9.5px] text-mutedLight italic">
+                            ещё {minutesLeft(row.unlockExpiresAt as string, nowTick)}м
+                          </span>
+                        )}
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         {NUMERIC_FIELDS.map((field) => {
@@ -727,7 +834,7 @@ export default function DataEntryPage() {
                               <input
                                 type="text"
                                 inputMode={isDecimal ? "decimal" : "numeric"}
-                                disabled={!canEditSection}
+                                disabled={!rowEditableInputs}
                                 value={isEditing ? editingText : formatGrouped(row[field], isDecimal ? 2 : 0)}
                                 onFocus={() => {
                                   setEditingField(cellKey);
@@ -755,7 +862,7 @@ export default function DataEntryPage() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+                <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px_100px] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
                   <div>Дата</div>
                   <div>День</div>
                   <div>Трафик план</div>
@@ -765,14 +872,18 @@ export default function DataEntryPage() {
                   <div>Insta паблик</div>
                   <div>Флаер</div>
                   <div>2ГИС</div>
+                  <div>Строка</div>
                 </div>
 
                 {visibleRows.map((row) => {
                   const i = rows.indexOf(row);
+                  const effectiveLocked = dayRowEffectivelyLocked(row);
+                  const rowEditableInputs = canEditSection && !effectiveLocked;
+                  const showCountdown = !effectiveLocked && row.unlockExpiresAt;
                   return (
                     <div
                       key={row.entryDate}
-                      className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center py-1 border-b border-borderSoft ${
+                      className={`grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px_100px] gap-2 items-center py-1 border-b border-borderSoft ${
                         row.weekend ? "bg-weekendTint" : ""
                       }`}
                     >
@@ -787,7 +898,7 @@ export default function DataEntryPage() {
                             key={field}
                             type="text"
                             inputMode={isDecimal ? "decimal" : "numeric"}
-                            disabled={!canEditSection}
+                            disabled={!rowEditableInputs}
                             value={
                               isEditing
                                 ? editingText
@@ -811,11 +922,31 @@ export default function DataEntryPage() {
                           />
                         );
                       })}
+                      <div className="flex flex-col items-end gap-0.5">
+                        {effectiveLocked &&
+                          (row.requestPending ? (
+                            <span className="text-[11px] text-mutedLight italic">Ожидает</span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={!canEditSection}
+                              onClick={() => requestDayRowUnlock(row)}
+                              className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
+                            >
+                              Запрос
+                            </button>
+                          ))}
+                        {showCountdown && (
+                          <span className="text-[9.5px] text-mutedLight italic">
+                            ещё {minutesLeft(row.unlockExpiresAt as string, nowTick)}м
+                          </span>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
 
-                <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
+                <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px_100px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
                   <div className="col-span-2">Итого</div>
                   <div className="num">{totals.trafficPlan.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
                   <div className="num">{totals.trafficFact.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
@@ -826,6 +957,7 @@ export default function DataEntryPage() {
                   </div>
                   <div className="num">{totals.flyer.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
                   <div className="num">{totals.twoGis.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div />
                 </div>
               </>
             )}
