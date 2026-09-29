@@ -1,25 +1,27 @@
-// Excel (RU locale, which is what this business runs on) expects ";" as the
-// list separator for a double-clicked CSV — a comma-separated file opens
-// with everything crammed into a single column instead of proper cells.
-// The UTF-8 BOM is what makes Excel read Cyrillic correctly instead of
-// mangling it.
+import * as XLSX from "xlsx";
+
+// A real .xlsx (not a CSV renamed to look like one) so Excel gets typed
+// cells — no more guessing a decimal number for a day.month date — and an
+// actual column-width column so a date like "01.09.2026" doesn't get
+// clipped to "####" on first open.
+//
+// Only ever used to WRITE workbooks built from our own trusted data here —
+// never to parse an uploaded/external file — which is the only path the
+// known SheetJS advisories (prototype pollution, ReDoS) apply to.
 export function downloadExcel(filename: string, headers: string[], rows: (string | number)[][]) {
-  const escape = (v: string | number) => {
-    // RU Excel expects "," as the decimal separator. A JS number with a "."
-    // (e.g. 17.4) is ambiguous with a day.month date, and Excel's RU locale
-    // silently reinterprets it as one (17.4 becomes "17 апреля") instead of
-    // showing the actual number — swapping the separator avoids that entirely.
-    const s = typeof v === "number" ? String(v).replace(".", ",") : v;
-    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const csv = [headers, ...rows].map((r) => r.map(escape).join(";")).join("\r\n");
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const data: (string | number)[][] = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(data);
+
+  ws["!cols"] = headers.map((header, col) => {
+    let max = String(header).length;
+    for (const row of rows) {
+      const len = String(row[col] ?? "").length;
+      if (len > max) max = len;
+    }
+    return { wch: Math.min(Math.max(max + 2, 8), 40) };
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Данные");
+  XLSX.writeFile(wb, filename.replace(/\.csv$/i, "") + ".xlsx");
 }
