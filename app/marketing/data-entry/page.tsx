@@ -211,16 +211,19 @@ function minutesLeft(iso: string, nowMs: number) {
   return Math.max(0, Math.ceil((new Date(iso).getTime() - nowMs) / 60000));
 }
 
-// Free zone: yesterday, today, or any future date — matches the
-// traffic_entries RLS policy in supabase/sql/048_traffic_entries_date_gate.sql.
-// Anything older needs an approved request (whole row, all 7 fields at once).
-function freeEntryCutoff(): string {
+// Two different free zones, matching supabase/sql/048_traffic_entries_date_gate.sql
+// (insert policy) and 049_traffic_entries_update_today_only_free.sql (update
+// policy): a FIRST-TIME entry is free for yesterday, today, or any future
+// date; CHANGING an already-saved row is free only today or later — fixing
+// an already-saved yesterday (or older) entry needs an approved request too.
+function todayYmd(): string {
+  const d = new Date();
+  return ymd(d.getFullYear(), d.getMonth(), d.getDate());
+}
+function firstEntryFreeCutoff(): string {
   const d = new Date();
   d.setDate(d.getDate() - 1);
   return ymd(d.getFullYear(), d.getMonth(), d.getDate());
-}
-function isFreeEntryDate(entryDate: string, cutoff: string): boolean {
-  return entryDate >= cutoff;
 }
 
 export default function DataEntryPage() {
@@ -282,13 +285,16 @@ export default function DataEntryPage() {
     return exp.locked || rowIsExpired(exp.unlockExpiresAt);
   }
 
-  // Unlike expenses (locked once saved, any date), a day row is only ever
-  // gated by date: free-zone dates are never locked, and an old date is
-  // locked unless there's an active (non-expired) approved window —
-  // row.locked itself doesn't matter here, only the window does.
-  const freeCutoff = freeEntryCutoff();
+  // A day row not yet saved (no id) is only gated by the first-entry rule
+  // (yesterday+); once it exists, changing it is only free today/future —
+  // fixing an already-saved yesterday needs a request, same as older dates.
+  // Either way, once locked, only an active (non-expired) approved window
+  // opens it back up — row.locked itself doesn't matter, only the window.
+  const todayStr = todayYmd();
+  const firstEntryCutoff = firstEntryFreeCutoff();
   function dayRowEffectivelyLocked(row: DayRow) {
-    if (isFreeEntryDate(row.entryDate, freeCutoff)) return false;
+    const freelyEditable = row.id ? row.entryDate >= todayStr : row.entryDate >= firstEntryCutoff;
+    if (freelyEditable) return false;
     return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
 
@@ -571,10 +577,10 @@ export default function DataEntryPage() {
 
         const payload: Record<string, unknown> = { store, entry_date: row.entryDate };
         for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
-        // Old-date rows only got this far because an approval opened a
-        // 30-minute window — re-lock immediately on save, same as expenses,
-        // so the next edit needs a fresh request.
-        if (!isFreeEntryDate(row.entryDate, freeCutoff)) {
+        // Anything before today re-locks immediately on save (even a
+        // just-approved yesterday first entry) — changing it again needs a
+        // fresh request, same as expenses lock right after their own save.
+        if (row.entryDate < todayStr) {
           payload.locked = true;
           payload.unlock_expires_at = null;
         }
