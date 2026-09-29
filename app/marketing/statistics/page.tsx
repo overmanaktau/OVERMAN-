@@ -466,7 +466,10 @@ export default function StatisticsPage() {
       const receipts = sales?.receipts ?? 0;
       const dayChannelTotal = CHANNEL_DEFS.reduce((sum, c) => sum + (traffic?.[c.key] ?? 0), 0);
       rows.push([
-        key,
+        // dd.mm.yyyy, not the raw ISO key — Excel's RU locale auto-detects
+        // "2026-09-01" as a date too, but then renders it too wide for the
+        // default column width ("####"); this format fits it cleanly.
+        `${pad2(cursor.getDate())}.${pad2(cursor.getMonth() + 1)}.${cursor.getFullYear()}`,
         traffic?.traffic_plan ?? 0,
         fact,
         sales ? receipts : "",

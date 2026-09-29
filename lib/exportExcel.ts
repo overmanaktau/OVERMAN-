@@ -5,7 +5,11 @@
 // mangling it.
 export function downloadExcel(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: string | number) => {
-    const s = String(v);
+    // RU Excel expects "," as the decimal separator. A JS number with a "."
+    // (e.g. 17.4) is ambiguous with a day.month date, and Excel's RU locale
+    // silently reinterprets it as one (17.4 becomes "17 апреля") instead of
+    // showing the actual number — swapping the separator avoids that entirely.
+    const s = typeof v === "number" ? String(v).replace(".", ",") : v;
     return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const csv = [headers, ...rows].map((r) => r.map(escape).join(";")).join("\r\n");
