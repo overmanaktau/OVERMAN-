@@ -88,15 +88,22 @@ export default function HistoryPage() {
     [nameById]
   );
 
-  // Every current employee shows up here, even with zero history yet, plus
-  // anyone who only appears in the history because they've since been deleted.
-  const employees = useMemo(
-    () =>
-      Array.from(new Set([...roster.map((e) => e.name), ...rows.map(resolveName)])).sort((a, b) =>
-        a.localeCompare(b, "ru")
-      ),
-    [rows, roster, resolveName]
+  // Split into two groups for the filter dropdown: every current employee
+  // (even with zero history yet), and separately anyone who only appears in
+  // the history because they've since been deleted — kept apart so a
+  // growing pile of ex-employees doesn't clutter the list of people who
+  // actually work here now.
+  const currentNames = useMemo(
+    () => Array.from(new Set(roster.map((e) => e.name))).sort((a, b) => a.localeCompare(b, "ru")),
+    [roster]
   );
+  const deletedNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const r of rows) {
+      if (!r.changed_by || !nameById.has(r.changed_by)) names.add(r.changed_by_name);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [rows, nameById]);
 
   const visibleRows = useMemo(() => {
     return rows.filter((r) => {
@@ -144,11 +151,20 @@ export default function HistoryPage() {
           className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2.5"
         >
           <option value="all">Все сотрудники</option>
-          {employees.map((name) => (
+          {currentNames.map((name) => (
             <option key={name} value={name}>
               {name}
             </option>
           ))}
+          {deletedNames.length > 0 && (
+            <optgroup label="Удалённые сотрудники">
+              {deletedNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </div>
 
