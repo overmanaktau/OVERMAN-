@@ -381,7 +381,14 @@ export default function ObzorPage() {
 
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-  const daysElapsed = today.getDate();
+  // Not today.getDate() — МойСклад syncs overnight for the PREVIOUS day, so
+  // today's row never exists yet while today is still ongoing (see
+  // yesterdayInAlmaty in the sync route). Averaging over today.getDate()
+  // would divide by a day that has zero revenue in the data, understating
+  // the daily run-rate — on the month's last day this made forecast exactly
+  // equal actual (daysElapsed === daysInMonth), erasing the extrapolation
+  // entirely. Using only the days actually present in mtdRevenue fixes it.
+  const daysElapsed = Math.max(0, today.getDate() - 1);
   const mtdRevenue = dayRows.filter((r) => r.date >= ymd(monthStart)).reduce((acc, r) => acc + r.revenue, 0);
   const forecast = daysElapsed > 0 ? (mtdRevenue / daysElapsed) * daysInMonth : 0;
 
