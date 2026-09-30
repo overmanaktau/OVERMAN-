@@ -45,7 +45,7 @@ export default function HistoryPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState<string>("all");
-  const [rosterNames, setRosterNames] = useState<string[]>([]);
+  const [roster, setRoster] = useState<{ id: string; name: string }[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,25 +70,37 @@ export default function HistoryPage() {
 
   useEffect(() => {
     authFetch("/api/history-employees")
-      .then((data) => setRosterNames((data.names ?? []) as string[]))
+      .then((data) => setRoster((data.roster ?? []) as { id: string; name: string }[]))
       .catch(() => {
         // non-fatal — the filter just falls back to names already present in the loaded history
       });
   }, []);
 
+  // changed_by_name is a text snapshot taken when the row was written — if
+  // someone's full_name is edited later (or was entered inconsistently, e.g.
+  // "Кайнар" vs "Рахашев Кайнар"), old rows stay stuck under the stale name
+  // forever, fragmenting one person into several filter entries. Resolving
+  // by changed_by (a stable user id) against the CURRENT roster fixes that;
+  // the stored name is only a fallback for someone no longer employed.
+  const nameById = useMemo(() => new Map(roster.map((e) => [e.id, e.name])), [roster]);
+  const resolveName = useCallback(
+    (r: EditHistoryRow) => (r.changed_by && nameById.get(r.changed_by)) || r.changed_by_name,
+    [nameById]
+  );
+
   // Every current employee shows up here, even with zero history yet, plus
   // anyone who only appears in the history because they've since been deleted.
   const employees = useMemo(
     () =>
-      Array.from(new Set([...rosterNames, ...rows.map((r) => r.changed_by_name)])).sort((a, b) =>
+      Array.from(new Set([...roster.map((e) => e.name), ...rows.map(resolveName)])).sort((a, b) =>
         a.localeCompare(b, "ru")
       ),
-    [rows, rosterNames]
+    [rows, roster, resolveName]
   );
 
   const visibleRows = useMemo(() => {
     return rows.filter((r) => {
-      if (employeeFilter !== "all" && r.changed_by_name !== employeeFilter) return false;
+      if (employeeFilter !== "all" && resolveName(r) !== employeeFilter) return false;
       if (periodMode === "custom") {
         const d = r.created_at.slice(0, 10);
         if (dateFrom && d < dateFrom) return false;
@@ -96,7 +108,7 @@ export default function HistoryPage() {
       }
       return true;
     });
-  }, [rows, employeeFilter, periodMode, dateFrom, dateTo]);
+  }, [rows, employeeFilter, periodMode, dateFrom, dateTo, resolveName]);
 
   return (
     <>
@@ -152,7 +164,7 @@ export default function HistoryPage() {
             {visibleRows.map((r) => (
               <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold">{r.changed_by_name}</span>
+                  <span className="font-semibold">{resolveName(r)}</span>
                   <span className="text-mutedLight text-[11px]">{formatDateTime(r.created_at)}</span>
                 </div>
                 <div className="text-mutedLight text-[11px] uppercase tracking-wide">{TABLE_LABEL[r.table_name]}</div>
@@ -174,7 +186,7 @@ export default function HistoryPage() {
                 className="min-w-[640px] grid grid-cols-[130px_150px_150px_1fr] gap-3 py-2.5 border-b border-borderSoft items-start text-[13px]"
               >
                 <div className="text-muted">{formatDateTime(r.created_at)}</div>
-                <div className="font-semibold">{r.changed_by_name}</div>
+                <div className="font-semibold">{resolveName(r)}</div>
                 <div className="text-muted">{TABLE_LABEL[r.table_name]}</div>
                 <div className="text-muted">{r.summary}</div>
               </div>
