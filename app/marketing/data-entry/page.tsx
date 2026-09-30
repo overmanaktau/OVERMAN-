@@ -23,6 +23,13 @@ type DayRow = {
   locked: boolean;
   requestPending: boolean;
   unlockExpiresAt: string | null;
+  // Whether факт трафика (traffic_fact) was ever saved for this date —
+  // план often gets entered weeks ahead for the whole month, which alone
+  // must NOT count as "already entered" for the free-first-entry window
+  // below (see dayRowEffectivelyLocked). Channel columns default to 0 (not
+  // null), so they can't distinguish "untouched" from "entered as zero" —
+  // only traffic_fact, genuinely nullable, is used for this check.
+  factEverEntered: boolean;
 };
 
 type ExpenseRow = {
@@ -202,6 +209,7 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
       locked: false,
       requestPending: false,
       unlockExpiresAt: null,
+      factEverEntered: false,
     });
   }
   return rows;
@@ -285,15 +293,18 @@ export default function DataEntryPage() {
     return exp.locked || rowIsExpired(exp.unlockExpiresAt);
   }
 
-  // A day row not yet saved (no id) is only gated by the first-entry rule
-  // (yesterday+); once it exists, changing it is only free today/future —
-  // fixing an already-saved yesterday needs a request, same as older dates.
-  // Either way, once locked, only an active (non-expired) approved window
-  // opens it back up — row.locked itself doesn't matter, only the window.
+  // A day row with no факт/канал data saved yet is only gated by the
+  // first-entry rule (yesterday+) — план alone doesn't count, since it's
+  // routinely entered weeks ahead for the whole month and shouldn't lock out
+  // the actual day-of entry. Once факт/каналы data exists, changing it is
+  // only free today/future — fixing an already-saved yesterday needs a
+  // request, same as older dates. Either way, once locked, only an active
+  // (non-expired) approved window opens it back up — row.locked itself
+  // doesn't matter, only the window.
   const todayStr = todayYmd();
   const firstEntryCutoff = firstEntryFreeCutoff();
   function dayRowEffectivelyLocked(row: DayRow) {
-    const freelyEditable = row.id ? row.entryDate >= todayStr : row.entryDate >= firstEntryCutoff;
+    const freelyEditable = row.factEverEntered ? row.entryDate >= todayStr : row.entryDate >= firstEntryCutoff;
     if (freelyEditable) return false;
     return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
@@ -370,6 +381,10 @@ export default function DataEntryPage() {
           locked: db.locked ?? false,
           requestPending: pendingDayDates.has(row.entryDate),
           unlockExpiresAt: db.unlock_expires_at ?? null,
+          // Only traffic_fact is genuinely nullable — the channel columns
+          // default to 0 (not null) in the DB, so they can't distinguish
+          // "never touched" from "entered as zero" and aren't used here.
+          factEverEntered: db.traffic_fact !== null,
         };
       });
 
