@@ -20,6 +20,11 @@ const XYZ_OPTIONS = [
   { value: "Y", label: "Y" },
   { value: "Z", label: "Z" },
 ];
+const XYZ_LABELS: { key: XyzKey; label: string }[] = [
+  { key: "X", label: "X — стабильно" },
+  { key: "Y", label: "Y — неровно" },
+  { key: "Z", label: "Z — редко" },
+];
 type AbcKey = "A" | "B" | "C";
 type XyzKey = "X" | "Y" | "Z";
 
@@ -709,7 +714,29 @@ export default function AbcXyzPage() {
           </div>
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <div className="overflow-x-auto">
+            {/* Mobile: one card per ABC row, X/Y/Z stacked as labeled lines —
+                no horizontal scroll anywhere, the side-by-side grid below
+                just doesn't fit a phone width. */}
+            <div className="flex flex-col gap-3 sm:hidden">
+              {ABC_OPTIONS.map((abcOpt) => (
+                <div key={abcOpt.value} className="rounded-lg border border-borderSoft p-3 flex flex-col gap-2">
+                  <div className="font-serif text-[18px] font-semibold">{abcOpt.value}</div>
+                  {XYZ_LABELS.map(({ key, label }) => {
+                    const cell = matrix[abcOpt.value as AbcKey][key];
+                    return (
+                      <div key={key} className="flex items-center justify-between text-[13px]">
+                        <span className="text-muted">{label}</span>
+                        <span className="text-right">
+                          <span className="num">{cell.count} поз</span> · <span className="num text-muted">{money(cell.revenue)}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden sm:block overflow-x-auto">
               <div className="min-w-[560px] grid grid-cols-[80px_1fr_1fr_1fr] gap-2">
                 <div />
                 <div className="text-[13px] font-semibold text-muted">X — стабильно</div>

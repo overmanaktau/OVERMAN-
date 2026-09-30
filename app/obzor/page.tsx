@@ -544,10 +544,47 @@ export default function ObzorPage() {
             ) : turnoverByBucket.length === 0 ? (
               <div className="text-sm text-muted py-2">Нет данных по остаткам за выбранные точки.</div>
             ) : (
-              // Scrolls within the card on narrow screens instead of the
-              // fixed-width money columns blowing out the whole page's width.
-              <div className="overflow-x-auto -mx-6 px-6">
-                <div className="flex flex-col min-w-[480px]">
+              <>
+                {/* Mobile: stacked cards, no horizontal scroll anywhere — the
+                    4-column grid below just doesn't fit a phone width. */}
+                <div className="flex flex-col gap-2 sm:hidden">
+                  {turnoverByBucket.map((r) => {
+                    const pct = r.stockValue > 0 ? (r.cogs / r.stockValue) * 100 : null;
+                    return (
+                      <div key={r.label} className="rounded-lg border border-borderSoft p-3 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="font-semibold text-[13px]">{r.label}</div>
+                          <div className="font-bold num text-[13px]">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
+                        </div>
+                        <div className="flex items-center justify-between text-[12px] text-muted">
+                          <span>Продано</span>
+                          <span className="num">{money(r.cogs)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[12px] text-muted">
+                          <span>Остаток</span>
+                          <span className="num">{money(r.stockValue)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="rounded-lg border border-border p-3 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-[13px] font-bold">
+                      <span>Итого</span>
+                      <span className="num">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span>Продано</span>
+                      <span className="num">{money(turnoverCogsTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span>Остаток</span>
+                      <span className="num">{money(turnoverStockValueTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Desktop/tablet: table — plenty of width, no scroll needed. */}
+                <div className="hidden sm:flex sm:flex-col">
                   <div className="grid grid-cols-[1fr_90px_110px_110px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
                     <div>Категория</div>
                     <div className="text-right">Оборачив.</div>
@@ -575,7 +612,7 @@ export default function ObzorPage() {
                     <div className="text-right num">{money(turnoverStockValueTotal)}</div>
                   </div>
                 </div>
-              </div>
+              </>
             )}
           </div>
         </>
