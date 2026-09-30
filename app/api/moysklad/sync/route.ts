@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
+import { getErrorMessage } from "@/lib/errors";
 
 // Without this, Vercel caps the function at its platform default (well
 // under a minute) — this route now does a full catalog/stock/supply resync
@@ -441,7 +442,11 @@ async function handle(request: Request) {
       .eq("id", true);
     return NextResponse.json({ ok: true, ...result, catalog });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    // Supabase/PostgREST errors are plain {message, code, ...} objects, not
+    // Error instances — `e instanceof Error ? e.message : String(e)` missed
+    // those and silently recorded "[object Object]", which is exactly what
+    // hid the real cause of the nightly sync failure on 2026-09-29.
+    const message = getErrorMessage(e);
     await supabaseAdmin
       .from("moysklad_sync_state")
       .update({ last_synced_at: new Date().toISOString(), last_status: "error", last_error: message })

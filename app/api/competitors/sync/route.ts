@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { fetchInstagramPosts } from "@/lib/apify";
+import { getErrorMessage } from "@/lib/errors";
 
 // Cost is per post scraped (~$0.0023 each on the Starter plan) — roughly
 // $0.0023 * results_per_competitor * competitor count * 30 days/month.
@@ -86,7 +87,7 @@ async function handle(request: Request) {
     const result = await runSync();
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = getErrorMessage(e);
     await supabaseAdmin.from("notifications").insert({ type: "sync_error", message: `Синхронизация конкурентов не удалась: ${message}` });
     return NextResponse.json({ error: message }, { status: 500 });
   }
