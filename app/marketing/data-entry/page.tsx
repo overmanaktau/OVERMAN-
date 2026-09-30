@@ -30,6 +30,11 @@ type DayRow = {
   // null), so they can't distinguish "untouched" from "entered as zero" —
   // only traffic_fact, genuinely nullable, is used for this check.
   factEverEntered: boolean;
+  // Whether trafficPlan was ever saved — план has its own, date-independent
+  // lock (see planFieldLocked): free to set once, but changing an
+  // already-set план always needs an approved request, unlike факт/каналы
+  // which stay free for today/future even after first entry.
+  planEverEntered: boolean;
 };
 
 type ExpenseRow = {
@@ -210,6 +215,7 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
       requestPending: false,
       unlockExpiresAt: null,
       factEverEntered: false,
+      planEverEntered: false,
     });
   }
   return rows;
@@ -293,19 +299,29 @@ export default function DataEntryPage() {
     return exp.locked || rowIsExpired(exp.unlockExpiresAt);
   }
 
-  // A day row with no факт/канал data saved yet is only gated by the
-  // first-entry rule (yesterday+) — план alone doesn't count, since it's
-  // routinely entered weeks ahead for the whole month and shouldn't lock out
-  // the actual day-of entry. Once факт/каналы data exists, changing it is
-  // only free today/future — fixing an already-saved yesterday needs a
-  // request, same as older dates. Either way, once locked, only an active
-  // (non-expired) approved window opens it back up — row.locked itself
-  // doesn't matter, only the window.
+  // Governs факт трафика + каналы specifically (план has its own rule
+  // below). A day row with no факт/канал data saved yet is only gated by
+  // the first-entry rule (yesterday+) — план alone doesn't count, since
+  // it's routinely entered weeks ahead for the whole month and shouldn't
+  // lock out the actual day-of entry. Once факт/каналы data exists,
+  // changing it is only free today/future — fixing an already-saved
+  // yesterday needs a request, same as older dates. Either way, once
+  // locked, only an active (non-expired) approved window opens it back up —
+  // row.locked itself doesn't matter, only the window.
   const todayStr = todayYmd();
   const firstEntryCutoff = firstEntryFreeCutoff();
   function dayRowEffectivelyLocked(row: DayRow) {
     const freelyEditable = row.factEverEntered ? row.entryDate >= todayStr : row.entryDate >= firstEntryCutoff;
     if (freelyEditable) return false;
+    return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
+  }
+
+  // План: free to set for the first time (any date — no date gate at all,
+  // planning ahead is normal), but once it has a value, changing it always
+  // needs an approved request, regardless of date — unlike факт/каналы,
+  // план doesn't get a free today/future window back after first entry.
+  function planFieldLocked(row: DayRow) {
+    if (!row.planEverEntered) return false;
     return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
 
@@ -385,6 +401,7 @@ export default function DataEntryPage() {
           // default to 0 (not null) in the DB, so they can't distinguish
           // "never touched" from "entered as zero" and aren't used here.
           factEverEntered: db.traffic_fact !== null,
+          planEverEntered: db.traffic_plan !== null,
         };
       });
 
@@ -422,7 +439,9 @@ export default function DataEntryPage() {
   const dirtyDayCount = useMemo(() => {
     let count = 0;
     for (const row of rows) {
-      if (dayRowEffectivelyLocked(row)) continue;
+      // Skip only if BOTH план and факт/каналы are locked — a row with just
+      // one side locked can still have a legitimate edit on the other.
+      if (planFieldLocked(row) && dayRowEffectivelyLocked(row)) continue;
       const original = originalRows.find((o) => o.entryDate === row.entryDate);
       if (original && numericSnapshot(row) !== numericSnapshot(original)) count++;
     }
@@ -468,7 +487,9 @@ export default function DataEntryPage() {
   }
 
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], rawValue: string) {
-    if (!canEditSection || !rows[index] || dayRowEffectivelyLocked(rows[index])) return;
+    if (!canEditSection || !rows[index]) return;
+    const fieldLocked = field === "trafficPlan" ? planFieldLocked(rows[index]) : dayRowEffectivelyLocked(rows[index]);
+    if (fieldLocked) return;
     if (DECIMAL_FIELDS.has(field)) {
       const text = sanitizeAmountText(rawValue); // digits + one "," decimal marker, even from paste
       setEditingText(text);
@@ -586,7 +607,9 @@ export default function DataEntryPage() {
     const failed: string[] = [];
     try {
       for (const row of rows) {
-        if (dayRowEffectivelyLocked(row)) continue;
+        // Skip only if BOTH план and факт/каналы are locked — one side
+        // being locked doesn't stop a legitimate edit on the other.
+        if (planFieldLocked(row) && dayRowEffectivelyLocked(row)) continue;
         const original = originalRows.find((o) => o.entryDate === row.entryDate);
         if (!original || numericSnapshot(row) === numericSnapshot(original)) continue;
 
@@ -595,7 +618,11 @@ export default function DataEntryPage() {
         // Anything before today re-locks immediately on save (even a
         // just-approved yesterday first entry) — changing it again needs a
         // fresh request, same as expenses lock right after their own save.
-        if (row.entryDate < todayStr) {
+        // A план that was already set and just got changed re-locks too,
+        // regardless of date — план only ever gets one free edit per
+        // approval, same spirit as факт's old-date re-lock.
+        const planWasChanged = original.planEverEntered && row.trafficPlan !== original.trafficPlan;
+        if (row.entryDate < todayStr || planWasChanged) {
           payload.locked = true;
           payload.unlock_expires_at = null;
         }
@@ -732,10 +759,11 @@ export default function DataEntryPage() {
         <div className="text-xs text-mutedLight">Маркетинг</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Трафик и каналы: вчера, сегодня и любая будущая дата — свободно, без запроса. Дата
-          старше вчерашней — нужен одобренный запрос на всю строку сразу. Таблица трафика и
-          дополнительные расходы сохраняются отдельно — своей кнопкой «Сохранить» под каждой
-          таблицей.
+          Трафик факт и каналы: вчера, сегодня и любая будущая дата — свободно, без запроса.
+          Дата старше вчерашней — нужен одобренный запрос на всю строку сразу. Трафик план: можно
+          внести один раз свободно, а изменить уже внесённый план — только по одобренному запросу,
+          независимо от даты. Таблица трафика и дополнительные расходы сохраняются отдельно —
+          своей кнопкой «Сохранить» под каждой таблицей.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -811,9 +839,10 @@ export default function DataEntryPage() {
               <div className="flex flex-col gap-2.5">
                 {visibleRows.map((row) => {
                   const i = rows.indexOf(row);
-                  const effectiveLocked = dayRowEffectivelyLocked(row);
-                  const rowEditableInputs = canEditSection && !effectiveLocked;
-                  const showCountdown = !effectiveLocked && row.unlockExpiresAt;
+                  const planLocked = planFieldLocked(row);
+                  const factLocked = dayRowEffectivelyLocked(row);
+                  const rowNeedsRequest = planLocked || factLocked;
+                  const showCountdown = !rowNeedsRequest && row.unlockExpiresAt;
                   return (
                     <div
                       key={row.entryDate}
@@ -825,7 +854,7 @@ export default function DataEntryPage() {
                         <div className="text-[13px] font-semibold">
                           {row.date} · {row.weekday}
                         </div>
-                        {effectiveLocked &&
+                        {rowNeedsRequest &&
                           (row.requestPending ? (
                             <span className="text-[11px] text-mutedLight italic">Ожидает</span>
                           ) : (
@@ -849,13 +878,14 @@ export default function DataEntryPage() {
                           const cellKey = `day-${i}-${field}`;
                           const isEditing = editingField === cellKey;
                           const isDecimal = DECIMAL_FIELDS.has(field);
+                          const fieldEditable = canEditSection && !(field === "trafficPlan" ? planLocked : factLocked);
                           return (
                             <label key={field} className="flex flex-col gap-0.5 min-w-0">
                               <span className="text-[10.5px] text-mutedLight truncate">{FIELD_LABEL[field]}</span>
                               <input
                                 type="text"
                                 inputMode={isDecimal ? "decimal" : "numeric"}
-                                disabled={!rowEditableInputs}
+                                disabled={!fieldEditable}
                                 value={isEditing ? editingText : formatGrouped(row[field], isDecimal ? 2 : 0)}
                                 onFocus={() => {
                                   setEditingField(cellKey);
@@ -898,9 +928,10 @@ export default function DataEntryPage() {
 
                 {visibleRows.map((row) => {
                   const i = rows.indexOf(row);
-                  const effectiveLocked = dayRowEffectivelyLocked(row);
-                  const rowEditableInputs = canEditSection && !effectiveLocked;
-                  const showCountdown = !effectiveLocked && row.unlockExpiresAt;
+                  const planLocked = planFieldLocked(row);
+                  const factLocked = dayRowEffectivelyLocked(row);
+                  const rowNeedsRequest = planLocked || factLocked;
+                  const showCountdown = !rowNeedsRequest && row.unlockExpiresAt;
                   return (
                     <div
                       key={row.entryDate}
@@ -914,12 +945,13 @@ export default function DataEntryPage() {
                         const cellKey = `day-${i}-${field}`;
                         const isEditing = editingField === cellKey;
                         const isDecimal = DECIMAL_FIELDS.has(field);
+                        const fieldEditable = canEditSection && !(field === "trafficPlan" ? planLocked : factLocked);
                         return (
                           <input
                             key={field}
                             type="text"
                             inputMode={isDecimal ? "decimal" : "numeric"}
-                            disabled={!rowEditableInputs}
+                            disabled={!fieldEditable}
                             value={
                               isEditing
                                 ? editingText
@@ -944,7 +976,7 @@ export default function DataEntryPage() {
                         );
                       })}
                       <div className="flex flex-col items-end gap-0.5">
-                        {effectiveLocked &&
+                        {rowNeedsRequest &&
                           (row.requestPending ? (
                             <span className="text-[11px] text-mutedLight italic">Ожидает</span>
                           ) : (
