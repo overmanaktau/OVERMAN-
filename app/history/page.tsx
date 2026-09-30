@@ -86,7 +86,7 @@ function EmployeeFilter({
         <span className="text-mutedLight text-[10px]">▾</span>
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-30 bg-surface border border-border rounded-lg shadow-lg p-1.5 w-[240px] max-h-[360px] overflow-y-auto flex flex-col gap-0.5">
+        <div className="absolute left-0 top-full mt-1.5 z-30 bg-surface border border-border rounded-lg shadow-lg p-1.5 w-[240px] max-w-[calc(100vw-2rem)] max-h-[360px] overflow-y-auto flex flex-col gap-0.5">
           <button type="button" onClick={() => pick("all")} className={itemClass(value === "all")}>
             Все сотрудники
           </button>
