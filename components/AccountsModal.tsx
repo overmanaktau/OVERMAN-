@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { useAuth } from "@/components/AuthGate";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import { recordLoginEvent } from "@/lib/loginEvents";
 import { getErrorMessage } from "@/lib/errors";
@@ -62,9 +61,7 @@ function friendlyError(e: unknown): string {
 }
 
 export default function AccountsModal({ onClose }: { onClose: () => void }) {
-  const { isAdmin, permissions } = useAuth();
   const { requestNavigation } = useUnsavedChanges();
-  const canEdit = isAdmin || permissions.accounts.canEdit;
 
   const [loading, setLoading] = useState(true);
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -255,9 +252,8 @@ export default function AccountsModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {canEdit && (
-          <div className="pt-3 border-t border-borderSoft">
-            {adding ? (
+        <div className="pt-3 border-t border-borderSoft">
+          {adding ? (
               <form onSubmit={handleAddSubmit} className="flex flex-col gap-2">
                 <input
                   type="email"
@@ -309,7 +305,6 @@ export default function AccountsModal({ onClose }: { onClose: () => void }) {
               </button>
             )}
           </div>
-        )}
       </div>
     </div>
   );

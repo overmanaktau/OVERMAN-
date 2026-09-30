@@ -51,14 +51,13 @@ function initials(name: string | null, email: string | null): string {
 
 export default function AccountMenu() {
   const router = useRouter();
-  const { email, fullName, isAdmin, permissions } = useAuth();
+  const { email, fullName } = useAuth();
   const { theme, setTheme } = useTheme();
   const { mobileLayout, setVersion } = useSiteVersion();
   const { requestNavigation } = useUnsavedChanges();
   const [open, setOpen] = useState(false);
   const [showAccounts, setShowAccounts] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const canSeeAccounts = isAdmin || permissions.accounts.canView || permissions.accounts.canEdit;
 
   useEffect(() => {
     if (!open) return;
@@ -147,21 +146,17 @@ export default function AccountMenu() {
               </button>
             </div>
           </div>
-          {canSeeAccounts && (
-            <>
-              <div className="h-px bg-border mx-1" />
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  setShowAccounts(true);
-                }}
-                className="text-[13px] text-left font-semibold text-ink px-2 py-2 rounded-md hover:bg-paper"
-              >
-                Аккаунты
-              </button>
-            </>
-          )}
+          <div className="h-px bg-border mx-1" />
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              setShowAccounts(true);
+            }}
+            className="text-[13px] text-left font-semibold text-ink px-2 py-2 rounded-md hover:bg-paper"
+          >
+            Аккаунты
+          </button>
           <div className="h-px bg-border mx-1" />
           <button
             type="button"
