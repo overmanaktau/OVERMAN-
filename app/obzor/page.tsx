@@ -535,7 +535,7 @@ export default function ObzorPage() {
           </div>
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
               <div className="text-[15px] font-bold">Оборачиваемость по категориям</div>
               <div className="text-xs text-mutedLight">себест. продаж за период / себест. текущего остатка</div>
             </div>
@@ -544,32 +544,36 @@ export default function ObzorPage() {
             ) : turnoverByBucket.length === 0 ? (
               <div className="text-sm text-muted py-2">Нет данных по остаткам за выбранные точки.</div>
             ) : (
-              <div className="flex flex-col">
-                <div className="grid grid-cols-[1fr_110px_130px_130px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
-                  <div>Категория</div>
-                  <div className="text-right">Оборачив.</div>
-                  <div className="text-right">Продано, ₸</div>
-                  <div className="text-right">Остаток, ₸</div>
-                </div>
-                {turnoverByBucket.map((r) => {
-                  const pct = r.stockValue > 0 ? (r.cogs / r.stockValue) * 100 : null;
-                  return (
-                    <div
-                      key={r.label}
-                      className="grid grid-cols-[1fr_110px_130px_130px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
-                    >
-                      <div className="font-semibold truncate">{r.label}</div>
-                      <div className="text-right num">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
-                      <div className="text-right num text-muted">{money(r.cogs)}</div>
-                      <div className="text-right num text-muted">{money(r.stockValue)}</div>
-                    </div>
-                  );
-                })}
-                <div className="grid grid-cols-[1fr_110px_130px_130px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
-                  <div>Итого</div>
-                  <div className="text-right num">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</div>
-                  <div className="text-right num">{money(turnoverCogsTotal)}</div>
-                  <div className="text-right num">{money(turnoverStockValueTotal)}</div>
+              // Scrolls within the card on narrow screens instead of the
+              // fixed-width money columns blowing out the whole page's width.
+              <div className="overflow-x-auto -mx-6 px-6">
+                <div className="flex flex-col min-w-[480px]">
+                  <div className="grid grid-cols-[1fr_90px_110px_110px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
+                    <div>Категория</div>
+                    <div className="text-right">Оборачив.</div>
+                    <div className="text-right">Продано, ₸</div>
+                    <div className="text-right">Остаток, ₸</div>
+                  </div>
+                  {turnoverByBucket.map((r) => {
+                    const pct = r.stockValue > 0 ? (r.cogs / r.stockValue) * 100 : null;
+                    return (
+                      <div
+                        key={r.label}
+                        className="grid grid-cols-[1fr_90px_110px_110px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
+                      >
+                        <div className="font-semibold truncate">{r.label}</div>
+                        <div className="text-right num">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
+                        <div className="text-right num text-muted">{money(r.cogs)}</div>
+                        <div className="text-right num text-muted">{money(r.stockValue)}</div>
+                      </div>
+                    );
+                  })}
+                  <div className="grid grid-cols-[1fr_90px_110px_110px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
+                    <div>Итого</div>
+                    <div className="text-right num">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</div>
+                    <div className="text-right num">{money(turnoverCogsTotal)}</div>
+                    <div className="text-right num">{money(turnoverStockValueTotal)}</div>
+                  </div>
                 </div>
               </div>
             )}
