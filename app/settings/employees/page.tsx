@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { authFetch } from "@/lib/apiClient";
 import { supabase } from "@/lib/supabaseClient";
-import { SECTIONS, PERMISSION_GROUPS, emptyPermissions, type Permissions } from "@/lib/permissions";
+import { SECTIONS, PERMISSION_GROUPS, emptyPermissions, fullPermissions, type Permissions } from "@/lib/permissions";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
@@ -248,6 +248,7 @@ function StoreAccessEditor({
 
 function EmployeeAccessPanel({
   role,
+  defaultFull,
   cities,
   canEdit,
   onSave,
@@ -257,6 +258,12 @@ function EmployeeAccessPanel({
   onUnregisterDirty,
 }: {
   role: RoleDef | null;
+  // Администратор has no role_id (it bypasses role_permissions entirely —
+  // AuthGate grants it full access unconditionally), so there's nothing to
+  // load here. Without this, the panel defaulted to emptyPermissions(),
+  // showing every checkbox off even though the admin's real access is
+  // everything — misleading, since it looked like they had no access at all.
+  defaultFull?: boolean;
   cities: CityWithStores[];
   canEdit: boolean;
   onSave: (permissions: Permissions, storeAccess: StoreAccessGrant[]) => Promise<void>;
@@ -266,10 +273,10 @@ function EmployeeAccessPanel({
   onUnregisterDirty: (key: string) => void;
 }) {
   const [permissions, setPermissions] = useState<Permissions>(
-    role ? toPermissions(role.role_permissions) : emptyPermissions()
+    role ? toPermissions(role.role_permissions) : defaultFull ? fullPermissions() : emptyPermissions()
   );
   const [storeAccess, setStoreAccess] = useState<StoreAccessGrant[]>(
-    role ? toGrants(role.role_store_access) : []
+    role ? toGrants(role.role_store_access) : defaultFull ? [{ scope: "all", cityId: null, storeId: null }] : []
   );
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
@@ -1069,6 +1076,7 @@ export default function EmployeesPage() {
                 {accessEditingId === emp.id && (
                   <EmployeeAccessPanel
                     role={emp.roleId ? roles.find((r) => r.id === emp.roleId) ?? null : null}
+                    defaultFull={emp.role === "admin"}
                     cities={cities}
                     canEdit={canEdit}
                     onSave={(perms, storeAccess) => handleSaveEmployeeAccess(emp, perms, storeAccess)}
