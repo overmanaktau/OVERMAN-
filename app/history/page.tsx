@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { authFetch } from "@/lib/apiClient";
 import PeriodFilterBar, { type PeriodMode } from "@/components/PeriodFilterBar";
@@ -33,6 +33,91 @@ function friendlyError(e: unknown): string {
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+// Custom dropdown instead of a plain <select> so "Удалённые сотрудники" can
+// be its own collapsed-by-default disclosure — a native <optgroup> label
+// isn't clickable and shows every deleted account the moment the list
+// opens, right alongside people who currently work here.
+function EmployeeFilter({
+  value,
+  onChange,
+  currentNames,
+  deletedNames,
+}: {
+  value: string;
+  onChange: (name: string) => void;
+  currentNames: string[];
+  deletedNames: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [deletedOpen, setDeletedOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setDeletedOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  function pick(name: string) {
+    onChange(name);
+    setOpen(false);
+    setDeletedOpen(false);
+  }
+
+  const itemClass = (active: boolean) =>
+    `w-full text-left text-[13px] px-3 py-1.5 rounded-md hover:bg-paper ${active ? "text-accent font-bold" : "text-ink"}`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2.5"
+      >
+        {value === "all" ? "Все сотрудники" : value}
+        <span className="text-mutedLight text-[10px]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 z-30 bg-surface border border-border rounded-lg shadow-lg p-1.5 w-[240px] max-h-[360px] overflow-y-auto flex flex-col gap-0.5">
+          <button type="button" onClick={() => pick("all")} className={itemClass(value === "all")}>
+            Все сотрудники
+          </button>
+          {currentNames.map((name) => (
+            <button key={name} type="button" onClick={() => pick(name)} className={itemClass(value === name)}>
+              {name}
+            </button>
+          ))}
+          {deletedNames.length > 0 && (
+            <>
+              <div className="h-px bg-border my-1" />
+              <button
+                type="button"
+                onClick={() => setDeletedOpen((v) => !v)}
+                className="w-full flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-mutedLight px-3 py-1.5 rounded-md hover:bg-paper"
+              >
+                Удалённые сотрудники
+                <span className="text-[9px]">{deletedOpen ? "▴" : "▾"}</span>
+              </button>
+              {deletedOpen &&
+                deletedNames.map((name) => (
+                  <button key={name} type="button" onClick={() => pick(name)} className={itemClass(value === name) + " pl-5"}>
+                    {name}
+                  </button>
+                ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function HistoryPage() {
@@ -145,27 +230,12 @@ export default function HistoryPage() {
           dateTo={dateTo}
           onDateToChange={setDateTo}
         />
-        <select
+        <EmployeeFilter
           value={employeeFilter}
-          onChange={(e) => setEmployeeFilter(e.target.value)}
-          className="text-[13px] font-semibold bg-surface border border-border rounded-lg px-3 py-2.5"
-        >
-          <option value="all">Все сотрудники</option>
-          {currentNames.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-          {deletedNames.length > 0 && (
-            <optgroup label="Удалённые сотрудники">
-              {deletedNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+          onChange={setEmployeeFilter}
+          currentNames={currentNames}
+          deletedNames={deletedNames}
+        />
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
