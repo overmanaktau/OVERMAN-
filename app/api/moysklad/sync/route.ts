@@ -26,32 +26,25 @@ import {
 // Confirmed with the business owner: these are the only live registers
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
 // doesn't carry the city in its name). "Онлайн продажи Overman" and
-// "Ак Кала" are inactive retailstore entries and get skipped.
-//
-// Saya Park stopped being used as of SAYA_PARK_RETIRED_FROM (business
-// decision) — it stays IN this map (unlike a genuinely dead retailstore)
-// because dates before that cutoff are real, legitimate sales that must
-// still resync correctly (e.g. a historical backfill); the date-gated skip
-// below is what actually excludes it from that date onward. Its sales from
-// SAYA_PARK_RETIRED_FROM onward were deleted from moysklad_sales_daily/
-// _employee_sales_daily/_product_sales_daily as a one-off cleanup (not a
-// migration — see chat). Its stock warehouse (WAREHOUSE_STORE below) is
-// untouched regardless of date: goods may still physically sit there even
-// though the register itself isn't ringing sales.
+// "Ак Кала" are inactive retailstore entries and get skipped — as of
+// 2026-10-01 so are "Актау (скидка)" (formerly "Saya Park" — the business
+// renamed and archived it, didn't delete it) and "Актобе (скидка)"
+// (id 111827a0…, formerly the second Актобе register): both are actually
+// archived/deactivated on the МойСклад side now, not just a date cutoff, so
+// they're simply left out of this map — no special-casing needed. Their
+// stock warehouses (WAREHOUSE_STORE below) stay regardless: goods may still
+// physically sit there even though the register itself isn't ringing sales.
+// Historical sales already synced from them stay in Supabase untouched —
+// "Всё время" still reflects that real, legitimate history.
 //
 // Stays at city granularity (unlike WAREHOUSE_STORE below) — this feeds
 // moysklad_registers/moysklad_sales_daily, which Продажи/Обзор filter by
 // the sidebar's city picker (values point_1/point_3). Changing this would
 // break that filter on those pages.
 const REGISTER_STORE: Record<string, string> = {
-  "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Overman Актау
-  "d3f209de-4da2-11f0-0a80-027a0003cde2": "point_1", // Saya Park
-  "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Overman Актобе
-  "111827a0-a440-11f1-0a80-0dcb003111ce": "point_3", // Актобе скидка
+  "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Актау
+  "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Актобе
 };
-const SAYA_PARK_REGISTER_ID = "d3f209de-4da2-11f0-0a80-027a0003cde2";
-const SAYA_PARK_WAREHOUSE_ID = "fe3b03d3-4da1-11f0-0a80-18910004c37d";
-const SAYA_PARK_RETIRED_FROM = "2026-09-21"; // string-comparable since dates here are always "YYYY-MM-DD"
 
 // Warehouses (entity/store — where stock physically sits, distinct from the
 // retailstore/касса ids above) — unlike REGISTER_STORE, this maps to a code
@@ -63,7 +56,9 @@ const SAYA_PARK_RETIRED_FROM = "2026-09-21"; // string-comparable since dates he
 // tracking, so it (and anything else not listed here) is simply skipped by
 // the sync. The two "заморозка"/frozen warehouses hold written-off-for-now
 // stock the business tracks on purpose as its own bucket, held back until
-// next season — never folded into a city's live total.
+// next season — never folded into a city's live total. Saya Park and
+// Актобе скидка stay here even though their registers are archived above —
+// this map is about physical stock location, not active points of sale.
 const WAREHOUSE_STORE: Record<string, string> = {
   "109ed308-b012-11f0-0a80-110900247319": "overman_aktau", // Overman
   "fe3b03d3-4da1-11f0-0a80-18910004c37d": "saya_park", // Saya Park
@@ -117,7 +112,6 @@ async function runSync(date: string) {
     const id = d.retailStore?.id;
     const name = d.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue; // not a live retail register
-    if (id === SAYA_PARK_REGISTER_ID && date >= SAYA_PARK_RETIRED_FROM) continue;
     const agg = byRegister.get(id) ?? { ...emptyAgg(), name };
     agg.revenue += (d.sum ?? 0) / 100;
     agg.receipts += 1;
@@ -153,7 +147,6 @@ async function runSync(date: string) {
     const id = r.retailStore?.id;
     const name = r.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue;
-    if (id === SAYA_PARK_REGISTER_ID && date >= SAYA_PARK_RETIRED_FROM) continue;
     const agg = byRegister.get(id) ?? { ...emptyAgg(), name };
     const rSum = (r.sum ?? 0) / 100;
     const rItems = (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
@@ -251,15 +244,14 @@ async function runSync(date: string) {
   // (confirmed live — 6 parallel calls tripped a 429 "too many concurrent
   // requests"), so this trades a bit of wall-clock time for not failing.
   //
-  // Saya Park's warehouse is skipped here from SAYA_PARK_RETIRED_FROM
-  // onward (unlike in syncCatalogAndStock, where WAREHOUSE_STORE still
-  // tracks its current stock unconditionally) — dates before that cutoff
-  // are real historical sales and must still resync correctly.
+  // Every warehouse in WAREHOUSE_STORE is queried unconditionally, even
+  // Saya Park and Актобе скидка whose registers are now archived (no new
+  // retaildemand can appear there, so this just returns empty for current
+  // dates) — simpler than a per-warehouse cutoff, and still correct for
+  // historical backfills of dates before they were archived.
   type ProductAgg = { name: string; revenue: number; quantity: number; cost: number; returnedAmount: number; returnedQuantity: number };
   const byProduct = new Map<string, ProductAgg>(); // key: `${productMsId}|${store}`
-  const warehouseIds = Object.keys(WAREHOUSE_STORE).filter(
-    (id) => !(id === SAYA_PARK_WAREHOUSE_ID && date >= SAYA_PARK_RETIRED_FROM)
-  );
+  const warehouseIds = Object.keys(WAREHOUSE_STORE);
   const perWarehouse: Awaited<ReturnType<typeof fetchProfitByProductForDate>>[] = [];
   for (const whId of warehouseIds) {
     perWarehouse.push(await fetchProfitByProductForDate(date, whId));
