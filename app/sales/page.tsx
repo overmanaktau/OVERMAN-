@@ -91,6 +91,17 @@ type EmployeeSalesRow = {
   returnedItems: number;
 };
 
+type EmployeeSortField = "revenue" | "receipts" | "items" | "avgCheck" | "conversion" | "depth";
+
+const EMPLOYEE_SORT_FIELDS: { key: EmployeeSortField; label: string }[] = [
+  { key: "revenue", label: "Выручка" },
+  { key: "receipts", label: "Чеков" },
+  { key: "items", label: "Кол-во товара" },
+  { key: "avgCheck", label: "Средний чек" },
+  { key: "conversion", label: "Конверсия" },
+  { key: "depth", label: "Глубина чека" },
+];
+
 // revenue/receipts/items on a row are already net of returns. "Gross" adds
 // the returned amounts back — "what it looked like before the return came
 // in" — purely for display; nothing that sums across rows elsewhere in the
@@ -151,6 +162,13 @@ export default function SalesPage() {
       return next;
     });
   }
+
+  // Сортировка "Продажи по сотрудникам" — по умолчанию выручка по убыванию
+  // (как и раньше), но пользователь сам выбирает критерий из меню.
+  const [employeeSortField, setEmployeeSortField] = useState<EmployeeSortField>("revenue");
+  const [employeeSortDir, setEmployeeSortDir] = useState<"desc" | "asc">("desc");
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
 
   // selectedStores starts empty and updates a moment later once the store
   // list finishes loading, firing a second load() call right behind the
@@ -363,6 +381,15 @@ export default function SalesPage() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [showCustomPicker]);
 
+  useEffect(() => {
+    if (!showSortMenu) return;
+    function onClick(e: MouseEvent) {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) setShowSortMenu(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showSortMenu]);
+
   function applyCustomRange() {
     if (!customStart || !customEnd || customStart > customEnd) return;
     setActiveCustom({ start: customStart, end: customEnd });
@@ -469,6 +496,36 @@ export default function SalesPage() {
     const group = employeeCityGroups.find((g) => g.store === r.store) ?? employeeCityGroups[employeeCityGroups.length - 1];
     group.rows.push(r);
   }
+
+  // Значение сотрудника по выбранному критерию сортировки — конверсия без
+  // данных по трафику за период уходит в конец списка (а не в начало,
+  // как было бы с 0), чтобы "нет данных" не выглядело как "хуже всех".
+  function employeeMetric(r: EmployeeSalesRow, field: EmployeeSortField): number {
+    const d = displayed(r);
+    switch (field) {
+      case "revenue":
+        return d.revenue;
+      case "receipts":
+        return d.receipts;
+      case "items":
+        return d.items;
+      case "avgCheck":
+        return d.receipts > 0 ? d.revenue / d.receipts : 0;
+      case "conversion": {
+        const traffic = trafficByStore.get(r.store ?? "") ?? 0;
+        return traffic > 0 ? d.receipts / traffic : -Infinity;
+      }
+      case "depth":
+        return d.receipts > 0 ? d.items / d.receipts : 0;
+    }
+  }
+  for (const group of employeeCityGroups) {
+    group.rows.sort((a, b) => {
+      const diff = employeeMetric(a, employeeSortField) - employeeMetric(b, employeeSortField);
+      return employeeSortDir === "asc" ? diff : -diff;
+    });
+  }
+
   const visibleEmployeeGroups = employeeCityGroups.filter((g) => g.rows.length > 0);
 
   const totalEmployeeRevenue = employeeSales.reduce((acc, r) => acc + displayed(r).revenue, 0);
@@ -871,7 +928,44 @@ export default function SalesPage() {
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-        <div className="text-[15px] font-bold">Продажи по сотрудникам</div>
+        <div className="text-[15px] font-bold flex items-center gap-2 flex-wrap">
+          <span>Продажи по сотрудникам</span>
+          <div ref={sortMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowSortMenu((v) => !v)}
+              className="text-muted font-normal text-[12.5px] hover:underline"
+            >
+              Сортировка: {EMPLOYEE_SORT_FIELDS.find((f) => f.key === employeeSortField)?.label}{" "}
+              {employeeSortDir === "desc" ? "↓" : "↑"}
+            </button>
+            {showSortMenu && (
+              <div className="absolute left-0 top-full mt-2 z-50 bg-surface border border-border rounded-lg shadow-lg py-1.5 w-[200px]">
+                {EMPLOYEE_SORT_FIELDS.map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => {
+                      if (employeeSortField === f.key) {
+                        setEmployeeSortDir((d) => (d === "desc" ? "asc" : "desc"));
+                      } else {
+                        setEmployeeSortField(f.key);
+                        setEmployeeSortDir("desc");
+                      }
+                      setShowSortMenu(false);
+                    }}
+                    className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-paper ${
+                      employeeSortField === f.key ? "font-bold text-ink" : "text-muted font-normal"
+                    }`}
+                  >
+                    {f.label}
+                    {employeeSortField === f.key ? ` ${employeeSortDir === "desc" ? "↓" : "↑"}` : ""}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
         {loading ? (
           <div className="text-sm text-muted py-4">Загрузка…</div>
         ) : employeeSales.length === 0 ? (
