@@ -479,7 +479,6 @@ export default function SalesPage() {
     returnedReceipts: employeeSales.reduce((acc, r) => acc + r.returnedReceipts, 0),
     returnedItems: employeeSales.reduce((acc, r) => acc + r.returnedItems, 0),
   };
-  const totalEmployeeCost = sumCost(employeeSales);
 
   function groupTotals(rows: EmployeeSalesRow[]) {
     const revenue = rows.reduce((acc, r) => acc + displayed(r).revenue, 0);
@@ -898,20 +897,22 @@ export default function SalesPage() {
                         extra={!showGross && r.returnedReceipts > 0 ? `(${r.returnedReceipts})` : null}
                       />
                       <SalesField
-                        label="Конверсия"
-                        value={conversionLabel(displayed(r).receipts, trafficByStore.get(r.store ?? "") ?? 0)}
+                        label="Кол-во товара"
+                        value={displayed(r).items.toLocaleString("ru-RU")}
+                        extra={!showGross && r.returnedItems > 0 ? `(${r.returnedItems})` : null}
                       />
                       <SalesField
                         label="Средний чек"
                         value={displayed(r).receipts > 0 ? money(displayed(r).revenue / displayed(r).receipts) : "—"}
                       />
                       <SalesField
-                        label="Кол-во товара"
-                        value={displayed(r).items.toLocaleString("ru-RU")}
-                        extra={!showGross && r.returnedItems > 0 ? `(${r.returnedItems})` : null}
+                        label="Конверсия"
+                        value={conversionLabel(displayed(r).receipts, trafficByStore.get(r.store ?? "") ?? 0)}
                       />
-                      <SalesField label="Вал. прибыль" value={grossProfit(displayed(r).revenue, r.cost)} />
-                      <SalesField label="Возврат" value={returnSummary(r)} />
+                      <SalesField
+                        label="Глубина чека"
+                        value={displayed(r).receipts > 0 ? (displayed(r).items / displayed(r).receipts).toFixed(3) : "—"}
+                      />
                     </div>
                   ))}
                   {group.rows.length > 1 && (
@@ -928,17 +929,16 @@ export default function SalesPage() {
                         extra={!showGross && g.returned.returnedReceipts > 0 ? `(${g.returned.returnedReceipts})` : null}
                       />
                       <SalesField
-                        label="Конверсия"
-                        value={conversionLabel(g.receipts, trafficByStore.get(group.store ?? "") ?? 0)}
-                      />
-                      <SalesField label="Средний чек" value={g.receipts > 0 ? money(g.revenue / g.receipts) : "—"} />
-                      <SalesField
                         label="Кол-во товара"
                         value={g.items.toLocaleString("ru-RU")}
                         extra={!showGross && g.returned.returnedItems > 0 ? `(${g.returned.returnedItems})` : null}
                       />
-                      <SalesField label="Вал. прибыль" value={grossProfit(g.revenue, g.cost)} />
-                      <SalesField label="Возврат" value={returnSummary(g.returned)} />
+                      <SalesField label="Средний чек" value={g.receipts > 0 ? money(g.revenue / g.receipts) : "—"} />
+                      <SalesField
+                        label="Конверсия"
+                        value={conversionLabel(g.receipts, trafficByStore.get(group.store ?? "") ?? 0)}
+                      />
+                      <SalesField label="Глубина чека" value={g.receipts > 0 ? (g.items / g.receipts).toFixed(3) : "—"} />
                     </div>
                   )}
                 </div>
@@ -956,46 +956,48 @@ export default function SalesPage() {
                 value={String(totalEmployeeReceipts)}
                 extra={!showGross && totalEmployeeReturned.returnedReceipts > 0 ? `(${totalEmployeeReturned.returnedReceipts})` : null}
               />
-              <SalesField label="Конверсия" value={conversionLabel(totalEmployeeReceipts, totalTraffic)} />
-              <SalesField
-                label="Средний чек"
-                value={totalEmployeeReceipts > 0 ? money(totalEmployeeRevenue / totalEmployeeReceipts) : "—"}
-              />
               <SalesField
                 label="Кол-во товара"
                 value={totalEmployeeItems.toLocaleString("ru-RU")}
                 extra={!showGross && totalEmployeeReturned.returnedItems > 0 ? `(${totalEmployeeReturned.returnedItems})` : null}
               />
-              <SalesField label="Вал. прибыль" value={grossProfit(totalEmployeeRevenue, totalEmployeeCost)} />
-              <SalesField label="Возврат" value={returnSummary(totalEmployeeReturned)} />
+              <SalesField
+                label="Средний чек"
+                value={totalEmployeeReceipts > 0 ? money(totalEmployeeRevenue / totalEmployeeReceipts) : "—"}
+              />
+              <SalesField label="Конверсия" value={conversionLabel(totalEmployeeReceipts, totalTraffic)} />
+              <SalesField
+                label="Глубина чека"
+                value={totalEmployeeReceipts > 0 ? (totalEmployeeItems / totalEmployeeReceipts).toFixed(3) : "—"}
+              />
             </div>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <div className="min-w-[940px] grid grid-cols-[1.2fr_1fr_0.55fr_0.7fr_0.9fr_0.8fr_1.1fr_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
+            <div className="min-w-[880px] grid grid-cols-[1.2fr_1fr_0.55fr_0.8fr_0.9fr_0.7fr_0.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Сотрудник</div>
               <div>Выручка</div>
               <div>Чеков</div>
-              <div>Конверсия</div>
-              <div>Средний чек</div>
               <div>Кол-во товара</div>
-              <div>Вал. прибыль</div>
-              <div>Возврат</div>
+              <div>Средний чек</div>
+              <div>Конверсия</div>
+              <div>Глубина чека</div>
             </div>
             {visibleEmployeeGroups.map((group) => {
               const g = groupTotals(group.rows);
               return (
                 <div key={group.store ?? "none"}>
-                  <div className="min-w-[940px] pt-2.5 pb-1 text-[10.5px] uppercase tracking-wide text-mutedLight">
+                  <div className="min-w-[880px] pt-2.5 pb-1 text-[10.5px] uppercase tracking-wide text-mutedLight">
                     {group.label}
                   </div>
                   {group.rows.map((r) => {
                     const d = displayed(r);
                     const avgCheck = d.receipts > 0 ? d.revenue / d.receipts : 0;
+                    const checkDepth = d.receipts > 0 ? d.items / d.receipts : 0;
                     return (
                       <div
                         key={`${r.employeeId}|${r.store ?? ""}`}
-                        className="min-w-[940px] grid grid-cols-[1.2fr_1fr_0.55fr_0.7fr_0.9fr_0.8fr_1.1fr_1fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
+                        className="min-w-[880px] grid grid-cols-[1.2fr_1fr_0.55fr_0.8fr_0.9fr_0.7fr_0.8fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
                       >
                         <div className="font-semibold">{r.name}</div>
                         <div className="num">
@@ -1010,21 +1012,20 @@ export default function SalesPage() {
                             <span className="text-mutedLight"> ({r.returnedReceipts})</span>
                           )}
                         </div>
-                        <div className="num">{conversionLabel(d.receipts, trafficByStore.get(r.store ?? "") ?? 0)}</div>
-                        <div className="num">{money(avgCheck)}</div>
                         <div className="num">
                           {d.items.toLocaleString("ru-RU")}
                           {!showGross && r.returnedItems > 0 && (
                             <span className="text-mutedLight"> ({r.returnedItems})</span>
                           )}
                         </div>
-                        <div className="num">{grossProfit(d.revenue, r.cost)}</div>
-                        <div className="num text-muted">{returnSummary(r)}</div>
+                        <div className="num">{money(avgCheck)}</div>
+                        <div className="num">{conversionLabel(d.receipts, trafficByStore.get(r.store ?? "") ?? 0)}</div>
+                        <div className="num">{checkDepth.toFixed(3)}</div>
                       </div>
                     );
                   })}
                   {group.rows.length > 1 && (
-                    <div className="min-w-[940px] grid grid-cols-[1.2fr_1fr_0.55fr_0.7fr_0.9fr_0.8fr_1.1fr_1fr] gap-3 py-2 border-b border-borderSoft items-center text-[12.5px] font-bold bg-weekendTint">
+                    <div className="min-w-[880px] grid grid-cols-[1.2fr_1fr_0.55fr_0.8fr_0.9fr_0.7fr_0.8fr] gap-3 py-2 border-b border-borderSoft items-center text-[12.5px] font-bold bg-weekendTint">
                       <div>Итого по {group.label}</div>
                       <div className="num">
                         {money(g.revenue)}
@@ -1038,22 +1039,21 @@ export default function SalesPage() {
                           <span className="text-mutedLight font-normal"> ({g.returned.returnedReceipts})</span>
                         )}
                       </div>
-                      <div className="num">{conversionLabel(g.receipts, trafficByStore.get(group.store ?? "") ?? 0)}</div>
-                      <div className="num">{g.receipts > 0 ? money(g.revenue / g.receipts) : "—"}</div>
                       <div className="num">
                         {g.items.toLocaleString("ru-RU")}
                         {!showGross && g.returned.returnedItems > 0 && (
                           <span className="text-mutedLight font-normal"> ({g.returned.returnedItems})</span>
                         )}
                       </div>
-                      <div className="num">{grossProfit(g.revenue, g.cost)}</div>
-                      <div className="num text-muted font-normal">{returnSummary(g.returned)}</div>
+                      <div className="num">{g.receipts > 0 ? money(g.revenue / g.receipts) : "—"}</div>
+                      <div className="num">{conversionLabel(g.receipts, trafficByStore.get(group.store ?? "") ?? 0)}</div>
+                      <div className="num">{g.receipts > 0 ? (g.items / g.receipts).toFixed(3) : "—"}</div>
                     </div>
                   )}
                 </div>
               );
             })}
-            <div className="min-w-[940px] grid grid-cols-[1.2fr_1fr_0.55fr_0.7fr_0.9fr_0.8fr_1.1fr_1fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
+            <div className="min-w-[880px] grid grid-cols-[1.2fr_1fr_0.55fr_0.8fr_0.9fr_0.7fr_0.8fr] gap-3 pt-2.5 border-t-2 border-[#E4DFC8] text-[13px] font-bold">
               <div>Итого</div>
               <div className="num">
                 {money(totalEmployeeRevenue)}
@@ -1067,16 +1067,17 @@ export default function SalesPage() {
                   <span className="text-mutedLight font-normal"> ({totalEmployeeReturned.returnedReceipts})</span>
                 )}
               </div>
-              <div className="num">{conversionLabel(totalEmployeeReceipts, totalTraffic)}</div>
-              <div className="num">{totalEmployeeReceipts > 0 ? money(totalEmployeeRevenue / totalEmployeeReceipts) : "—"}</div>
               <div className="num">
                 {totalEmployeeItems.toLocaleString("ru-RU")}
                 {!showGross && totalEmployeeReturned.returnedItems > 0 && (
                   <span className="text-mutedLight font-normal"> ({totalEmployeeReturned.returnedItems})</span>
                 )}
               </div>
-              <div className="num">{grossProfit(totalEmployeeRevenue, totalEmployeeCost)}</div>
-              <div className="num text-muted font-normal">{returnSummary(totalEmployeeReturned)}</div>
+              <div className="num">{totalEmployeeReceipts > 0 ? money(totalEmployeeRevenue / totalEmployeeReceipts) : "—"}</div>
+              <div className="num">{conversionLabel(totalEmployeeReceipts, totalTraffic)}</div>
+              <div className="num">
+                {totalEmployeeReceipts > 0 ? (totalEmployeeItems / totalEmployeeReceipts).toFixed(3) : "—"}
+              </div>
             </div>
           </div>
         )}
