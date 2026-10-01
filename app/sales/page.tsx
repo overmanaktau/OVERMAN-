@@ -164,9 +164,9 @@ export default function SalesPage() {
   }
 
   // Сортировка "Продажи по сотрудникам" — по умолчанию выручка по убыванию
-  // (как и раньше), но пользователь сам выбирает критерий из меню.
+  // (как и раньше), но пользователь сам выбирает критерий из меню. Только
+  // по убыванию — возрастающий порядок не нужен.
   const [employeeSortField, setEmployeeSortField] = useState<EmployeeSortField>("revenue");
-  const [employeeSortDir, setEmployeeSortDir] = useState<"desc" | "asc">("desc");
   const [showSortMenu, setShowSortMenu] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
@@ -520,10 +520,7 @@ export default function SalesPage() {
     }
   }
   for (const group of employeeCityGroups) {
-    group.rows.sort((a, b) => {
-      const diff = employeeMetric(a, employeeSortField) - employeeMetric(b, employeeSortField);
-      return employeeSortDir === "asc" ? diff : -diff;
-    });
+    group.rows.sort((a, b) => employeeMetric(b, employeeSortField) - employeeMetric(a, employeeSortField));
   }
 
   const visibleEmployeeGroups = employeeCityGroups.filter((g) => g.rows.length > 0);
@@ -936,8 +933,7 @@ export default function SalesPage() {
               onClick={() => setShowSortMenu((v) => !v)}
               className="text-muted font-normal text-[12.5px] hover:underline"
             >
-              Сортировка: {EMPLOYEE_SORT_FIELDS.find((f) => f.key === employeeSortField)?.label}{" "}
-              {employeeSortDir === "desc" ? "↓" : "↑"}
+              Сортировка: {EMPLOYEE_SORT_FIELDS.find((f) => f.key === employeeSortField)?.label} ↓
             </button>
             {showSortMenu && (
               <div className="absolute left-0 top-full mt-2 z-50 bg-surface border border-border rounded-lg shadow-lg py-1.5 w-[200px]">
@@ -946,12 +942,7 @@ export default function SalesPage() {
                     key={f.key}
                     type="button"
                     onClick={() => {
-                      if (employeeSortField === f.key) {
-                        setEmployeeSortDir((d) => (d === "desc" ? "asc" : "desc"));
-                      } else {
-                        setEmployeeSortField(f.key);
-                        setEmployeeSortDir("desc");
-                      }
+                      setEmployeeSortField(f.key);
                       setShowSortMenu(false);
                     }}
                     className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-paper ${
@@ -959,7 +950,6 @@ export default function SalesPage() {
                     }`}
                   >
                     {f.label}
-                    {employeeSortField === f.key ? ` ${employeeSortDir === "desc" ? "↓" : "↑"}` : ""}
                   </button>
                 ))}
               </div>
