@@ -209,7 +209,9 @@ export default function ObzorPage() {
   // got sold through in the selected period. Scoped to the same period as
   // the rest of the page (unlike the old stockDays-based version), so it
   // loads alongside range/selectedStores rather than independently.
-  const [turnoverByBucket, setTurnoverByBucket] = useState<{ label: string; cogs: number; stockValue: number }[]>([]);
+  const [turnoverByBucket, setTurnoverByBucket] = useState<
+    { label: string; cogs: number; stockValue: number; revenue: number; stockSaleValue: number }[]
+  >([]);
   const [turnoverLoading, setTurnoverLoading] = useState(true);
 
   useEffect(() => {
@@ -244,19 +246,28 @@ export default function ObzorPage() {
         setTurnoverLoading(false);
         return;
       }
-      const byCategory = new Map<string, { cogs: number; stock_value: number }>(
-        (data as { category: string; cogs: number; stock_value: number }[]).map((row) => [row.category, row])
+      const byCategory = new Map<
+        string,
+        { cogs: number; stock_value: number; revenue: number; stock_sale_value: number }
+      >(
+        (
+          data as { category: string; cogs: number; stock_value: number; revenue: number; stock_sale_value: number }[]
+        ).map((row) => [row.category, row])
       );
       const buckets = CATEGORY_BUCKETS.map((b) => {
         let cogs = 0;
         let stockValue = 0;
+        let revenue = 0;
+        let stockSaleValue = 0;
         for (const cat of b.categories) {
           const row = byCategory.get(cat);
           if (!row) continue;
           cogs += row.cogs;
           stockValue += row.stock_value;
+          revenue += row.revenue;
+          stockSaleValue += row.stock_sale_value;
         }
-        return { label: b.label, cogs, stockValue };
+        return { label: b.label, cogs, stockValue, revenue, stockSaleValue };
       });
       setTurnoverByBucket(buckets);
       setTurnoverLoading(false);
@@ -270,6 +281,8 @@ export default function ObzorPage() {
   const turnoverStockValueTotal = turnoverByBucket.reduce((acc, r) => acc + r.stockValue, 0);
   const turnoverCogsTotal = turnoverByBucket.reduce((acc, r) => acc + r.cogs, 0);
   const turnoverPct = turnoverStockValueTotal > 0 ? (turnoverCogsTotal / turnoverStockValueTotal) * 100 : null;
+  const turnoverRevenueTotal = turnoverByBucket.reduce((acc, r) => acc + r.revenue, 0);
+  const turnoverStockSaleValueTotal = turnoverByBucket.reduce((acc, r) => acc + r.stockSaleValue, 0);
 
   // selectedStores starts empty and updates a moment later once the store
   // list finishes loading, firing a second load() call right behind the
@@ -557,12 +570,20 @@ export default function ObzorPage() {
                           <div className="font-bold num text-[13px]">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
-                          <span>Продано</span>
+                          <span>Продано (себест.)</span>
                           <span className="num">{money(r.cogs)}</span>
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
-                          <span>Остаток</span>
+                          <span>Остаток (себест.)</span>
                           <span className="num">{money(r.stockValue)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[12px] text-muted">
+                          <span>Продано (прод. цена)</span>
+                          <span className="num">{money(r.revenue)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[12px] text-muted">
+                          <span>Остаток (прод. цена)</span>
+                          <span className="num">{money(r.stockSaleValue)}</span>
                         </div>
                       </div>
                     );
@@ -573,43 +594,66 @@ export default function ObzorPage() {
                       <span className="num">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
-                      <span>Продано</span>
+                      <span>Продано (себест.)</span>
                       <span className="num">{money(turnoverCogsTotal)}</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
-                      <span>Остаток</span>
+                      <span>Остаток (себест.)</span>
                       <span className="num">{money(turnoverStockValueTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span>Продано (прод. цена)</span>
+                      <span className="num">{money(turnoverRevenueTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span>Остаток (прод. цена)</span>
+                      <span className="num">{money(turnoverStockSaleValueTotal)}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Desktop/tablet: table — plenty of width, no scroll needed. */}
+                {/* Desktop/tablet: table — plenty of width, no scroll needed. Each
+                    money cell shows себестоимость as the primary number and
+                    продажная цена as a smaller line right under it, so the
+                    extra figures sit "рядом" without widening the table. */}
                 <div className="hidden sm:flex sm:flex-col">
-                  <div className="grid grid-cols-[1fr_90px_110px_110px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
+                  <div className="grid grid-cols-[1fr_90px_130px_130px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
                     <div>Категория</div>
                     <div className="text-right">Оборачив.</div>
-                    <div className="text-right">Продано, ₸</div>
-                    <div className="text-right">Остаток, ₸</div>
+                    <div className="text-right">Продано, ₸ (себест. / прод.)</div>
+                    <div className="text-right">Остаток, ₸ (себест. / прод.)</div>
                   </div>
                   {turnoverByBucket.map((r) => {
                     const pct = r.stockValue > 0 ? (r.cogs / r.stockValue) * 100 : null;
                     return (
                       <div
                         key={r.label}
-                        className="grid grid-cols-[1fr_90px_110px_110px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
+                        className="grid grid-cols-[1fr_90px_130px_130px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
                       >
-                        <div className="font-semibold truncate">{r.label}</div>
-                        <div className="text-right num">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
-                        <div className="text-right num text-muted">{money(r.cogs)}</div>
-                        <div className="text-right num text-muted">{money(r.stockValue)}</div>
+                        <div className="font-semibold truncate self-center">{r.label}</div>
+                        <div className="text-right num self-center">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
+                        <div className="text-right">
+                          <div className="num text-muted">{money(r.cogs)}</div>
+                          <div className="num text-[11px] text-mutedLight">{money(r.revenue)}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="num text-muted">{money(r.stockValue)}</div>
+                          <div className="num text-[11px] text-mutedLight">{money(r.stockSaleValue)}</div>
+                        </div>
                       </div>
                     );
                   })}
-                  <div className="grid grid-cols-[1fr_90px_110px_110px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
-                    <div>Итого</div>
-                    <div className="text-right num">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</div>
-                    <div className="text-right num">{money(turnoverCogsTotal)}</div>
-                    <div className="text-right num">{money(turnoverStockValueTotal)}</div>
+                  <div className="grid grid-cols-[1fr_90px_130px_130px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
+                    <div className="self-center">Итого</div>
+                    <div className="text-right num self-center">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</div>
+                    <div className="text-right">
+                      <div className="num">{money(turnoverCogsTotal)}</div>
+                      <div className="num text-[11px] font-normal text-mutedLight">{money(turnoverRevenueTotal)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="num">{money(turnoverStockValueTotal)}</div>
+                      <div className="num text-[11px] font-normal text-mutedLight">{money(turnoverStockSaleValueTotal)}</div>
+                    </div>
                   </div>
                 </div>
               </>
