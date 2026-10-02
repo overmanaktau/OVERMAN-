@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { warehousesForCities } from "@/lib/warehouses";
 import { escapeHtml, packSections } from "@/lib/telegram";
+import { fetchRetailDemandSummariesForDate } from "@/lib/moysklad";
 
 // compact: укороченный формат — без маржи, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. Пока только у Актау;
@@ -163,6 +164,58 @@ function kassaBlock(rows: SalesRow[], compact: boolean): string {
   return pre(table(["Касса", "Выручка", "Шт", "Маржа"], list, [16, 7, 3, 5], 1));
 }
 
+function checksWord(n: number): string {
+  const mod100 = n % 100;
+  const mod10 = n % 10;
+  if (mod10 === 1 && mod100 !== 11) return "чек";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "чека";
+  return "чеков";
+}
+
+// Сотрудники по убыванию выручки за день. «Бигчек» — самый крупный одиночный
+// чек дня среди всех кассиров отчёта, если он от 100 000 ₸: метка ставится
+// ровно одному сотруднику (владельцу этого чека), не нескольким.
+const BIG_CHECK_FROM = 100_000;
+
+async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<string> {
+  const [empRes, regRes, demands] = await Promise.all([
+    supabaseAdmin
+      .from("moysklad_employee_sales_daily")
+      .select("employee_ms_id, employee_name, revenue, receipts_count")
+      .eq("sale_date", date)
+      .in("store", scope.cityCodes),
+    supabaseAdmin.from("moysklad_registers").select("id").in("store", scope.cityCodes),
+    fetchRetailDemandSummariesForDate(date),
+  ]);
+  if (empRes.error) throw empRes.error;
+  if (regRes.error) throw regRes.error;
+
+  const byEmployee = new Map<string, { name: string; revenue: number; receipts: number }>();
+  for (const r of (empRes.data ?? []) as { employee_ms_id: string; employee_name: string; revenue: number; receipts_count: number }[]) {
+    const agg = byEmployee.get(r.employee_ms_id) ?? { name: r.employee_name, revenue: 0, receipts: 0 };
+    agg.revenue += r.revenue;
+    agg.receipts += r.receipts_count;
+    byEmployee.set(r.employee_ms_id, agg);
+  }
+  if (byEmployee.size === 0) return `<i>за день продаж нет</i>`;
+
+  const registerIds = new Set((regRes.data ?? []).map((r) => r.id as string));
+  let biggest: { sum: number; ownerId: string } | null = null;
+  for (const d of demands) {
+    if (!registerIds.has(d.retailStoreId)) continue;
+    if (!biggest || d.sum > biggest.sum) biggest = { sum: d.sum, ownerId: d.ownerId };
+  }
+  const bigCheck = biggest && biggest.sum / 100 >= BIG_CHECK_FROM && byEmployee.has(biggest.ownerId) ? biggest : null;
+
+  const lines = [...byEmployee.entries()]
+    .sort((a, b) => b[1].revenue - a[1].revenue)
+    .map(([id, e], i) => {
+      const mark = bigCheck && bigCheck.ownerId === id ? ` (бигчек ${num(bigCheck.sum / 100)})` : "";
+      return `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)}`;
+    });
+  return pre(lines.join("\n"));
+}
+
 export async function buildSalesReport(scope: ReportScope, date: string): Promise<string[]> {
   const monthStart = `${date.slice(0, 8)}01`;
   const warehouses = warehousesForCities(scope.cityCodes);
@@ -240,10 +293,12 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const publicationsBlock = pubs.length === 0 ? `<i>за день публикаций не внесено</i>` : pre(pubLines.join("\n"));
 
   const compact = !!scope.compact;
+  const employeesBlock = compact ? await buildEmployeeBlock(scope, date) : null;
   const coreSections = [
     title,
     section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),
     section("ПО КАССАМ", kassaBlock(dayRows, compact)),
+    ...(employeesBlock ? [section("ПО СОТРУДНИКАМ", employeesBlock)] : []),
     section(compact ? "ПРОДАННЫЕ ТОВАРЫ" : "ТОП КАТЕГОРИЙ", categoryBlock),
     section("ПРОГНОЗ МЕСЯЦА", forecastBlock),
   ];

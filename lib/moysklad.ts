@@ -107,6 +107,39 @@ export async function fetchRetailDemandsForDate(date: string): Promise<RetailDem
   return fetchAllPages<RetailDemand>("/entity/retaildemand", filter);
 }
 
+// Light version of the above for reports that only need each check's total,
+// who rang it up and on which register (e.g. "самый крупный чек смены") — no
+// expand and no positions, so a whole day comes back in one 1000-row page
+// instead of the deep-expanded 100-per-page pull the nightly sync does. With
+// no expand, owner/retailStore are bare {meta} references; their ids sit at
+// the end of meta.href.
+export type RetailDemandSummary = { sum: number; ownerId: string; retailStoreId: string; moment: string };
+
+export async function fetchRetailDemandSummariesForDate(date: string): Promise<RetailDemandSummary[]> {
+  const { from, to } = dayWindow(date);
+  const filter = `moment>=${from};moment<${to}`;
+  const limit = 1000;
+  let offset = 0;
+  const all: RetailDemandSummary[] = [];
+  const idOf = (ref?: { meta?: { href?: string } } | null) => ref?.meta?.href?.split("/").pop()?.split("?")[0] ?? "";
+  for (;;) {
+    const page = await moyskladFetch("/entity/retaildemand", { filter, limit: String(limit), offset: String(offset) });
+    type Raw = {
+      moment: string;
+      sum?: number;
+      owner?: { meta?: { href?: string } } | null;
+      retailStore?: { meta?: { href?: string } } | null;
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      all.push({ sum: r.sum ?? 0, ownerId: idOf(r.owner), retailStoreId: idOf(r.retailStore), moment: r.moment });
+    }
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
 // A return (retailsalesreturn) always references the original sale via
 // "demand". It always adjusts revenue/items on the day the RETURN itself
 // happened (not the original sale's day) — a return processed today reduces
