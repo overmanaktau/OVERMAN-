@@ -157,34 +157,20 @@ function Kpi({ label, value, suffix }: { label: string; value: string; suffix?: 
 }
 
 // The ~28 raw МойСклад folders folded into the 5 buckets the business
-// actually thinks in terms of. Anything not listed (мусорные/промо folders
-// like "Без категории", "Бесплатный", "OVERMAN Баттал скидка" — negligible
-// value, doesn't cleanly fit any bucket) is left out of the breakdown rather
-// than guessed at.
-const CATEGORY_BUCKETS: { label: string; categories: string[] }[] = [
-  { label: "Верх", categories: ["Верхняя \\ Осень, Весна", "Верхняя \\ Зима", "Верхняя"] },
-  {
-    label: "Плечевой",
-    categories: [
-      "Плечевая",
-      "Кофта",
-      "Футболка",
-      "Кардиган",
-      "Рубашка Кэжуал",
-      "Рубашка Классика",
-      "Тенниска",
-      "Спортивка\\Толстовка",
-      "Пиджак",
-      "Водолазка",
-      "Кэжуал",
-      "Классика",
-      "Двойка",
-      "OVERMAN скидка плечевая",
-    ],
-  },
-  { label: "Брюки", categories: ["Брюки", "Джинсы", "Шорты", "Трико", "OVERMAN скидка брюки"] },
-  { label: "Обувь", categories: ["Обувь", "OVERMAN скидка обувь", "Тапочки"] },
-  { label: "Аксессуары", categories: ["Аксессуары"] },
+// actually thinks in terms of. stock_turnover_by_category already groups by
+// top_category (the root МойСклад folder each product sits under, resolved
+// from the real folder hierarchy at sync time — see
+// supabase/sql/054_top_category.sql) — so this is just the display label and
+// fixed order for the 5 real root folders. Anything else (a product with no
+// category, or sitting outside these 5 roots entirely, e.g. "Бесплатный")
+// comes back from the RPC as its own row but is simply never looked up here,
+// same as before.
+const TOP_CATEGORIES: { key: string; label: string }[] = [
+  { key: "Верхняя", label: "Верх" },
+  { key: "Плечевая", label: "Плечевой" },
+  { key: "Брюки", label: "Брюки" },
+  { key: "Обувь", label: "Обувь" },
+  { key: "Аксессуары", label: "Аксессуары" },
 ];
 
 export default function ObzorPage() {
@@ -230,11 +216,12 @@ export default function ObzorPage() {
         return;
       }
       // Aggregated server-side (see stock_turnover_by_category in
-      // supabase/sql/052_turnover_by_cogs.sql) — moysklad_product_stock and
+      // supabase/sql/054_top_category.sql) — moysklad_product_stock and
       // moysklad_product_sales_daily both run into the thousands of rows,
       // well past PostgREST's default 1000-row page cap, so summing
-      // client-side would silently total only a fraction of it. Returns per
-      // raw МойСклад category; folded into the 5 business buckets below.
+      // client-side would silently total only a fraction of it. The RPC
+      // already groups by top_category, so each of the 5 real root folders
+      // shows up as exactly one row — no further folding needed here.
       const { data, error: err } = await supabase.rpc("stock_turnover_by_category", {
         p_stores: warehouseCodes,
         p_from: ymd(r.start),
@@ -254,20 +241,15 @@ export default function ObzorPage() {
           data as { category: string; cogs: number; stock_value: number; revenue: number; stock_sale_value: number }[]
         ).map((row) => [row.category, row])
       );
-      const buckets = CATEGORY_BUCKETS.map((b) => {
-        let cogs = 0;
-        let stockValue = 0;
-        let revenue = 0;
-        let stockSaleValue = 0;
-        for (const cat of b.categories) {
-          const row = byCategory.get(cat);
-          if (!row) continue;
-          cogs += row.cogs;
-          stockValue += row.stock_value;
-          revenue += row.revenue;
-          stockSaleValue += row.stock_sale_value;
-        }
-        return { label: b.label, cogs, stockValue, revenue, stockSaleValue };
+      const buckets = TOP_CATEGORIES.map((b) => {
+        const row = byCategory.get(b.key);
+        return {
+          label: b.label,
+          cogs: row?.cogs ?? 0,
+          stockValue: row?.stock_value ?? 0,
+          revenue: row?.revenue ?? 0,
+          stockSaleValue: row?.stock_sale_value ?? 0,
+        };
       });
       setTurnoverByBucket(buckets);
       setTurnoverLoading(false);
