@@ -220,17 +220,24 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const monthStart = `${date.slice(0, 8)}01`;
   const warehouses = warehousesForCities(scope.cityCodes);
 
+  // Компактный отчёт (Актау) не показывает публикации, категории и топ товаров —
+  // эти запросы для него не делаем.
+  const skipped = { data: [] as never[], error: null };
   const [monthRows, trafficRes, pubRes, catRes, prodRes] = await Promise.all([
     loadSales(scope, monthStart, date),
     supabaseAdmin.from("traffic_entries").select("traffic_fact").eq("entry_date", date).in("store", scope.cityCodes),
-    supabaseAdmin
-      .from("publication_entries")
-      .select("entry_time, post_type, source, reach, views, likes, comments, shares, caption")
-      .eq("entry_date", date)
-      .in("store", scope.cityCodes)
-      .order("entry_time", { ascending: true }),
-    supabaseAdmin.rpc("report_top_categories", { p_stores: warehouses, p_date: date, p_limit: 5 }),
-    supabaseAdmin.rpc("report_top_products", { p_stores: warehouses, p_date: date, p_days: 14, p_limit: 10 }),
+    scope.compact
+      ? skipped
+      : supabaseAdmin
+          .from("publication_entries")
+          .select("entry_time, post_type, source, reach, views, likes, comments, shares, caption")
+          .eq("entry_date", date)
+          .in("store", scope.cityCodes)
+          .order("entry_time", { ascending: true }),
+    scope.compact ? skipped : supabaseAdmin.rpc("report_top_categories", { p_stores: warehouses, p_date: date, p_limit: 5 }),
+    scope.compact
+      ? skipped
+      : supabaseAdmin.rpc("report_top_products", { p_stores: warehouses, p_date: date, p_days: 14, p_limit: 10 }),
   ]);
   if (trafficRes.error) throw trafficRes.error;
   if (pubRes.error) throw pubRes.error;
@@ -246,23 +253,14 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const categoryBlock =
     categories.length === 0
       ? `<i>за день продаж нет</i>`
-      : scope.compact
-        ? pre(
-            table(
-              ["Категория", "Выручка", "Шт"],
-              categories.map((c) => [c.category, num(c.revenue), num(c.quantity)]),
-              [18, 9, 3],
-              1
-            )
+      : pre(
+          table(
+            ["Категория", "Выручка", "Шт", "Маржа"],
+            categories.map((c) => [c.category, num(c.revenue), num(c.quantity), pct(c.revenue, c.cost)]),
+            [16, 7, 3, 5],
+            1
           )
-        : pre(
-            table(
-              ["Категория", "Выручка", "Шт", "Маржа"],
-              categories.map((c) => [c.category, num(c.revenue), num(c.quantity), pct(c.revenue, c.cost)]),
-              [16, 7, 3, 5],
-              1
-            )
-          );
+        );
 
   const mtd = monthRows.reduce((a, r) => a + r.revenue, 0);
   const dayNumber = Number(date.slice(8, 10));
@@ -299,7 +297,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
     section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),
     section("ПО КАССАМ", kassaBlock(dayRows, compact)),
     ...(employeesBlock ? [section("ПО СОТРУДНИКАМ", employeesBlock)] : []),
-    section(compact ? "ПРОДАННЫЕ ТОВАРЫ" : "ТОП КАТЕГОРИЙ", categoryBlock),
+    ...(compact ? [] : [section("ТОП КАТЕГОРИЙ", categoryBlock)]),
     section("ПРОГНОЗ МЕСЯЦА", forecastBlock),
   ];
   if (compact) return packSections(coreSections);
