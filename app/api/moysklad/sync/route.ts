@@ -26,25 +26,34 @@ import {
 // Confirmed with the business owner: these are the only live registers
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
 // doesn't carry the city in its name). "Онлайн продажи Overman" and
-// "Ак Кала" are inactive retailstore entries and get skipped — as of
-// 2026-10-01 so are "Актау (скидка)" (formerly "Saya Park" — the business
-// renamed and archived it, didn't delete it) and "Актобе (скидка)"
-// (id 111827a0…, formerly the second Актобе register): both are actually
-// archived/deactivated on the МойСклад side now, not just a date cutoff, so
-// they're simply left out of this map — no special-casing needed. Their
-// stock warehouses (WAREHOUSE_STORE below) stay regardless: goods may still
-// physically sit there even though the register itself isn't ringing sales.
-// Historical sales already synced from them stay in Supabase untouched —
-// "Всё время" still reflects that real, legitimate history.
+// "Ак Кала" are inactive retailstore entries and get skipped.
+//
+// Everything is counted by fact: if a register rang sales on a day, that day
+// reports them — even if the register is archived in МойСклад today (it's
+// kept there instead of deleted, so history still resolves). That includes
+// "Актобе (скидка)" (id 111827a0…) on every date.
+//
+// The one exception is Saya Park (now "Актау (скидка)"): the business owner
+// says it does not count from SAYA_PARK_RETIRED_FROM (21 Sept, inclusive)
+// onward, and everything before that date is real sales that must resync
+// correctly (e.g. a historical backfill) — hence a date-gated skip below
+// instead of dropping it from the map. Its stock warehouse (WAREHOUSE_STORE
+// below) is untouched regardless of date: goods may still physically sit
+// there even though the register itself isn't ringing sales.
 //
 // Stays at city granularity (unlike WAREHOUSE_STORE below) — this feeds
 // moysklad_registers/moysklad_sales_daily, which Продажи/Обзор filter by
 // the sidebar's city picker (values point_1/point_3). Changing this would
 // break that filter on those pages.
 const REGISTER_STORE: Record<string, string> = {
-  "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Актау
-  "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Актобе
+  "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Overman Актау
+  "d3f209de-4da2-11f0-0a80-027a0003cde2": "point_1", // Saya Park
+  "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Overman Актобе
+  "111827a0-a440-11f1-0a80-0dcb003111ce": "point_3", // Актобе скидка
 };
+const SAYA_PARK_REGISTER_ID = "d3f209de-4da2-11f0-0a80-027a0003cde2";
+const SAYA_PARK_WAREHOUSE_ID = "fe3b03d3-4da1-11f0-0a80-18910004c37d";
+const SAYA_PARK_RETIRED_FROM = "2026-09-21"; // string-comparable since dates here are always "YYYY-MM-DD"
 
 // Warehouses (entity/store — where stock physically sits, distinct from the
 // retailstore/касса ids above) — unlike REGISTER_STORE, this maps to a code
@@ -112,6 +121,7 @@ async function runSync(date: string) {
     const id = d.retailStore?.id;
     const name = d.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue; // not a live retail register
+    if (id === SAYA_PARK_REGISTER_ID && date >= SAYA_PARK_RETIRED_FROM) continue;
     const agg = byRegister.get(id) ?? { ...emptyAgg(), name };
     agg.revenue += (d.sum ?? 0) / 100;
     agg.receipts += 1;
@@ -138,6 +148,8 @@ async function runSync(date: string) {
   // also voids the receipt itself (receipts_count -1) when the original
   // check was a single item, since there's no completed sale left; a return
   // from a multi-item check just shrinks that receipt, it doesn't void it.
+  // Counts are shown as they are, not clamped at zero: a return of a sale
+  // made on an earlier day leaves a negative number for the return day.
   // returnedAmount/returnedReceipts/returnedItems are kept alongside so the
   // UI can show both the final (already-netted) figure and, next to it, how
   // much of it was returns.
@@ -147,6 +159,7 @@ async function runSync(date: string) {
     const id = r.retailStore?.id;
     const name = r.retailStore?.name;
     if (!id || !name || !REGISTER_STORE[id]) continue;
+    if (id === SAYA_PARK_REGISTER_ID && date >= SAYA_PARK_RETIRED_FROM) continue;
     const agg = byRegister.get(id) ?? { ...emptyAgg(), name };
     const rSum = (r.sum ?? 0) / 100;
     const rItems = (r.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
@@ -162,7 +175,7 @@ async function runSync(date: string) {
     if (demandHref) {
       const originalItemCount = await fetchDemandItemCount(demandHref);
       if (originalItemCount === 1) {
-        agg.receipts = Math.max(0, agg.receipts - 1);
+        agg.receipts -= 1;
         agg.returnedReceipts += 1;
         voidedReceipts += 1;
         voidedThisReturn = true;
@@ -182,7 +195,7 @@ async function runSync(date: string) {
       eAgg.returnedAmount += rSum;
       eAgg.returnedItems += rItems;
       if (voidedThisReturn) {
-        eAgg.receipts = Math.max(0, eAgg.receipts - 1);
+        eAgg.receipts -= 1;
         eAgg.returnedReceipts += 1;
       }
       byEmployee.set(key, eAgg);
@@ -244,14 +257,15 @@ async function runSync(date: string) {
   // (confirmed live — 6 parallel calls tripped a 429 "too many concurrent
   // requests"), so this trades a bit of wall-clock time for not failing.
   //
-  // Every warehouse in WAREHOUSE_STORE is queried unconditionally, even
-  // Saya Park and Актобе скидка whose registers are now archived (no new
-  // retaildemand can appear there, so this just returns empty for current
-  // dates) — simpler than a per-warehouse cutoff, and still correct for
-  // historical backfills of dates before they were archived.
+  // Saya Park's warehouse is skipped here from SAYA_PARK_RETIRED_FROM
+  // onward (unlike in syncCatalogAndStock, where WAREHOUSE_STORE still
+  // tracks its current stock unconditionally) — dates before that cutoff
+  // are real historical sales and must still resync correctly.
   type ProductAgg = { name: string; revenue: number; quantity: number; cost: number; returnedAmount: number; returnedQuantity: number };
   const byProduct = new Map<string, ProductAgg>(); // key: `${productMsId}|${store}`
-  const warehouseIds = Object.keys(WAREHOUSE_STORE);
+  const warehouseIds = Object.keys(WAREHOUSE_STORE).filter(
+    (id) => !(id === SAYA_PARK_WAREHOUSE_ID && date >= SAYA_PARK_RETIRED_FROM)
+  );
   const perWarehouse: Awaited<ReturnType<typeof fetchProfitByProductForDate>>[] = [];
   for (const whId of warehouseIds) {
     perWarehouse.push(await fetchProfitByProductForDate(date, whId));

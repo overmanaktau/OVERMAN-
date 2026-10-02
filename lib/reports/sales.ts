@@ -169,9 +169,12 @@ function kassaBlock(rows: SalesRow[], compact: boolean): string {
   return pre(table(["Касса", "Выручка", "Шт", "Маржа"], list, [16, 7, 3, 5], 1));
 }
 
+// Склонение по модулю: у возвратов чеков может быть минус («−1 чек»), а в JS
+// -1 % 10 === -1, из-за чего без abs любой минус давал бы «чеков».
 function checksWord(n: number): string {
-  const mod100 = n % 100;
-  const mod10 = n % 10;
+  const abs = Math.abs(n);
+  const mod100 = abs % 100;
+  const mod10 = abs % 10;
   if (mod10 === 1 && mod100 !== 11) return "чек";
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "чека";
   return "чеков";
@@ -186,7 +189,7 @@ async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<str
   const [empRes, regRes, demands] = await Promise.all([
     supabaseAdmin
       .from("moysklad_employee_sales_daily")
-      .select("employee_ms_id, employee_name, revenue, receipts_count")
+      .select("employee_ms_id, employee_name, revenue, receipts_count, items_count")
       .eq("sale_date", date)
       .in("store", scope.cityCodes),
     supabaseAdmin.from("moysklad_registers").select("id").in("store", scope.cityCodes),
@@ -195,11 +198,18 @@ async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<str
   if (empRes.error) throw empRes.error;
   if (regRes.error) throw regRes.error;
 
-  const byEmployee = new Map<string, { name: string; revenue: number; receipts: number }>();
-  for (const r of (empRes.data ?? []) as { employee_ms_id: string; employee_name: string; revenue: number; receipts_count: number }[]) {
-    const agg = byEmployee.get(r.employee_ms_id) ?? { name: r.employee_name, revenue: 0, receipts: 0 };
+  const byEmployee = new Map<string, { name: string; revenue: number; receipts: number; items: number }>();
+  for (const r of (empRes.data ?? []) as {
+    employee_ms_id: string;
+    employee_name: string;
+    revenue: number;
+    receipts_count: number;
+    items_count: number;
+  }[]) {
+    const agg = byEmployee.get(r.employee_ms_id) ?? { name: r.employee_name, revenue: 0, receipts: 0, items: 0 };
     agg.revenue += r.revenue;
     agg.receipts += r.receipts_count;
+    agg.items += r.items_count;
     byEmployee.set(r.employee_ms_id, agg);
   }
   if (byEmployee.size === 0) return `<i>за день продаж нет</i>`;
@@ -216,7 +226,7 @@ async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<str
     .sort((a, b) => b[1].revenue - a[1].revenue)
     .map(([id, e], i) => {
       const mark = bigCheck && bigCheck.ownerId === id ? ` (бигчек ${num(bigCheck.sum / 100)})` : "";
-      return `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)}`;
+      return `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт`;
     });
   return pre(lines.join("\n"));
 }
