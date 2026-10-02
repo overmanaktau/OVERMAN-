@@ -140,6 +140,50 @@ export async function fetchRetailDemandSummariesForDate(date: string): Promise<R
   return all;
 }
 
+// Чеки дня с покупателем (agent) и сотрудником — для раздела LTV. agentCreated —
+// когда покупатель появился в базе (в том же формате «YYYY-MM-DD HH:mm:ss.SSS»,
+// что и moment, поэтому строки сравнимы). expand работает только при limit ≤ 100.
+export type LtvCheck = {
+  retailStoreId: string;
+  ownerName: string;
+  agentName: string;
+  agentCreated: string | null;
+};
+
+export async function fetchLtvChecksForDate(date: string): Promise<LtvCheck[]> {
+  const { from, to } = dayWindow(date);
+  const filter = `moment>=${from};moment<${to}`;
+  const limit = 100;
+  const idOf = (ref?: { meta?: { href?: string } } | null) => ref?.meta?.href?.split("/").pop()?.split("?")[0] ?? "";
+  const all: LtvCheck[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await moyskladFetch("/entity/retaildemand", {
+      filter,
+      limit: String(limit),
+      offset: String(offset),
+      expand: "agent,owner",
+    });
+    type Raw = {
+      retailStore?: { meta?: { href?: string } } | null;
+      owner?: { name?: string } | null;
+      agent?: { name?: string; created?: string } | null;
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      all.push({
+        retailStoreId: idOf(r.retailStore),
+        ownerName: r.owner?.name ?? "",
+        agentName: r.agent?.name ?? "",
+        agentCreated: r.agent?.created ?? null,
+      });
+    }
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
 // Способы оплаты по документам дня: чек (sale) или возврат (return), его сумма
 // и сколько из неё наличными (cashSum) — всё остальное (карта, QR) безнал.
 // Лёгкая выгрузка без expand и позиций, как у fetchRetailDemandSummariesForDate.

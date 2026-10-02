@@ -1,7 +1,11 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { warehousesForCities } from "@/lib/warehouses";
 import { escapeHtml, packSections } from "@/lib/telegram";
-import { fetchPaymentSummariesForRange, fetchRetailDemandSummariesForDate } from "@/lib/moysklad";
+import {
+  fetchLtvChecksForDate,
+  fetchPaymentSummariesForRange,
+  fetchRetailDemandSummariesForDate,
+} from "@/lib/moysklad";
 
 // compact: укороченный формат — без маржи, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. Пока только у Актау;
@@ -161,6 +165,50 @@ function trafficBlock(receipts: number, visitors: number, plan: number): string 
       line("Конверсия", visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "—"),
     ].join("\n")
   );
+}
+
+// Раздел «LTV» (Актау, после «ТРАФИК»): чеки дня по покупателям.
+//  · Свои — покупатель уже был в базе до этого дня (создан раньше начала дня);
+//  · Новые — все чеки, кроме своих;
+//  · Зарег — новые, кто зарегистрировался в этот день (не «Розничный покупатель»);
+//  · Не зарег — чеки на «Розничного покупателя».
+// Проценты: свои — от всех чеков, зарег и не зарег — от новых. Ниже — сколько
+// розничных чеков провёл каждый сотрудник (кто не проводил — того нет в списке).
+async function ltvBlock(dayRows: SalesRow[], date: string): Promise<string> {
+  const registerIds = new Set(dayRows.map((r) => r.register_id));
+  const checks = (await fetchLtvChecksForDate(date)).filter((c) => registerIds.has(c.retailStoreId));
+  if (checks.length === 0) return `<i>за день продаж нет</i>`;
+
+  const dayStart = `${date} 00:00:00`;
+  const isRetail = (c: { agentName: string }) => !c.agentName || c.agentName.trim().toLowerCase() === "розничный покупатель";
+  const retail = checks.filter(isRetail);
+  const own = checks.filter((c) => !isRetail(c) && c.agentCreated !== null && c.agentCreated < dayStart);
+  const total = checks.length;
+  const fresh = total - own.length;
+  const registered = fresh - retail.length;
+  const p = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toFixed(2)}%` : "—");
+
+  const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+  const lines = [
+    line("Чек", num(total)),
+    line("Свои", `${num(own.length)} (${p(own.length, total)})`),
+    line("Новые", num(fresh)),
+    line("Зарег", `${num(registered)} (${p(registered, fresh)})`),
+    line("Не зарег", `${num(retail.length)} (${p(retail.length, fresh)})`),
+  ];
+
+  const byEmployee = new Map<string, number>();
+  for (const c of retail) {
+    const name = c.ownerName || "—";
+    byEmployee.set(name, (byEmployee.get(name) ?? 0) + 1);
+  }
+  if (byEmployee.size > 0) {
+    lines.push("", "Розничный покупатель:");
+    for (const [name, count] of [...byEmployee.entries()].sort((a, b) => b[1] - a[1])) {
+      lines.push(`${fit(name, 15)}${num(count).padStart(17)}`);
+    }
+  }
+  return pre(lines.join("\n"));
 }
 
 // «По способу оплаты» (Актау вместо «По кассам»): наличные и безнал по данным
@@ -456,6 +504,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const employeesBlock = compact ? await buildEmployeeBlock(scope, date, date) : null;
   const returnsBlock = compact ? await buildReturnsBlock(scope, date, date, dayRows) : null;
   const paymentsBlock = compact ? await paymentBlock(dayRows, date, date) : null;
+  const ltvSection = compact ? await ltvBlock(dayRows, date) : null;
   const coreSections = [
     title,
     section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),
@@ -467,6 +516,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
     ...(compact
       ? [section("ТРАФИК", trafficBlock(dayRows.reduce((a, r) => a + r.receipts_count, 0), visitors, trafficPlan))]
       : []),
+    ...(ltvSection ? [section("LTV", ltvSection)] : []),
   ];
   if (compact) return packSections(coreSections);
 
