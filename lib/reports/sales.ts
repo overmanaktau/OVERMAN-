@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { warehousesForCities } from "@/lib/warehouses";
 import { escapeHtml, packSections } from "@/lib/telegram";
-import { fetchPaymentSummariesForDate, fetchRetailDemandSummariesForDate } from "@/lib/moysklad";
+import { fetchPaymentSummariesForRange, fetchRetailDemandSummariesForDate } from "@/lib/moysklad";
 
 // compact: укороченный формат — без маржи, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. Пока только у Актау;
@@ -167,9 +167,9 @@ function trafficBlock(receipts: number, visitors: number, plan: number): string 
 // МойСклад за те же кассы, что вошли в итоги дня. Возвраты вычитаются, как и из
 // выручки, так что нал + безнал = выручка дня. Безнал = всё, что не наличные
 // (карта, QR).
-async function paymentBlock(dayRows: SalesRow[], date: string): Promise<string> {
+async function paymentBlock(dayRows: SalesRow[], from: string, to: string): Promise<string> {
   const registerIds = new Set(dayRows.map((r) => r.register_id));
-  const payments = await fetchPaymentSummariesForDate(date);
+  const payments = await fetchPaymentSummariesForRange(from, to);
   let total = 0;
   let cash = 0;
   for (const p of payments) {
@@ -222,15 +222,18 @@ function checksWord(n: number): string {
 // ровно одному сотруднику (владельцу этого чека), не нескольким.
 const BIG_CHECK_FROM = 100_000;
 
-async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<string> {
+// Для недели и месяца (from < to) метка «бигчек» не ставится — отчёт за период
+// только суммирует сотрудников.
+async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, withBigCheck = true): Promise<string> {
   const [empRes, regRes, demands] = await Promise.all([
     supabaseAdmin
       .from("moysklad_employee_sales_daily")
       .select("employee_ms_id, employee_name, revenue, receipts_count, items_count")
-      .eq("sale_date", date)
+      .gte("sale_date", from)
+      .lte("sale_date", to)
       .in("store", scope.cityCodes),
     supabaseAdmin.from("moysklad_registers").select("id").in("store", scope.cityCodes),
-    fetchRetailDemandSummariesForDate(date),
+    withBigCheck ? fetchRetailDemandSummariesForDate(to) : Promise.resolve([]),
   ]);
   if (empRes.error) throw empRes.error;
   if (regRes.error) throw regRes.error;
@@ -249,7 +252,7 @@ async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<str
     agg.items += r.items_count;
     byEmployee.set(r.employee_ms_id, agg);
   }
-  if (byEmployee.size === 0) return `<i>за день продаж нет</i>`;
+  if (byEmployee.size === 0) return `<i>за ${from === to ? "день" : "период"} продаж нет</i>`;
 
   const registerIds = new Set((regRes.data ?? []).map((r) => r.id as string));
   let biggest: { sum: number; ownerId: string } | null = null;
@@ -283,7 +286,7 @@ function returnSummary(amount: number, receipts: number, items: number): string 
   return parts.join(" · ");
 }
 
-async function buildReturnsBlock(scope: ReportScope, date: string, dayRows: SalesRow[]): Promise<string> {
+async function buildReturnsBlock(scope: ReportScope, from: string, to: string, dayRows: SalesRow[]): Promise<string> {
   const total = dayRows.reduce(
     (a, r) => ({
       amount: a.amount + (r.returned_amount ?? 0),
@@ -296,7 +299,8 @@ async function buildReturnsBlock(scope: ReportScope, date: string, dayRows: Sale
   const { data, error } = await supabaseAdmin
     .from("moysklad_employee_sales_daily")
     .select("employee_ms_id, employee_name, returned_amount, returned_receipts, returned_items")
-    .eq("sale_date", date)
+    .gte("sale_date", from)
+    .lte("sale_date", to)
     .in("store", scope.cityCodes);
   if (error) throw error;
 
@@ -320,7 +324,7 @@ async function buildReturnsBlock(scope: ReportScope, date: string, dayRows: Sale
   }
 
   if (total.amount === 0 && total.receipts === 0 && total.items === 0 && byEmployee.size === 0) {
-    return `<i>за день возвратов нет</i>`;
+    return `<i>за ${from === to ? "день" : "период"} возвратов нет</i>`;
   }
 
   const lines = [`Всего: ${returnSummary(total.amount, total.receipts, total.items)}`];
@@ -328,6 +332,45 @@ async function buildReturnsBlock(scope: ReportScope, date: string, dayRows: Sale
   if (people.length > 0) lines.push("");
   for (const e of people) lines.push(`${e.name}\n   ${returnSummary(e.amount, e.receipts, e.items)}`);
   return pre(lines.join("\n"));
+}
+
+function shortDate(date: string): string {
+  const [y, m, d] = date.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+// Недельный (7 дней, заканчивая `to`) и месячный (с 1-го числа месяца `to` по
+// `to`) отчёт: те же разделы, что у дневного отчёта Актау, суммы за период, но
+// без метки «бигчек». Для воскресенья/последнего дня месяца `to` = вчера.
+export async function buildPeriodReport(scope: ReportScope, kind: "week" | "month", to: string): Promise<string[]> {
+  const toDate = parseYmd(to);
+  const fromDate = new Date(toDate);
+  fromDate.setUTCDate(fromDate.getUTCDate() - 6);
+  const from = kind === "week" ? ymd(fromDate) : `${to.slice(0, 8)}01`;
+
+  const [rows, trafficRes] = await Promise.all([
+    loadSales(scope, from, to),
+    supabaseAdmin
+      .from("traffic_entries")
+      .select("traffic_plan, traffic_fact")
+      .gte("entry_date", from)
+      .lte("entry_date", to)
+      .in("store", scope.cityCodes),
+  ]);
+  if (trafficRes.error) throw trafficRes.error;
+  const visitors = (trafficRes.data ?? []).reduce((a, r) => a + (Number(r.traffic_fact) || 0), 0);
+  const trafficPlan = (trafficRes.data ?? []).reduce((a, r) => a + (Number(r.traffic_plan) || 0), 0);
+  const receipts = rows.reduce((a, r) => a + r.receipts_count, 0);
+
+  const title = `📊 <b>Продажи · ${escapeHtml(scope.title)}</b>\n<i>${shortDate(from)} – ${shortDate(to)}</i>`;
+  return packSections([
+    title,
+    section(kind === "week" ? "ИТОГИ НЕДЕЛИ" : "ИТОГИ МЕСЯЦА", kpiBlock(rows, visitors, true)),
+    section("ПО СПОСОБУ ОПЛАТЫ", await paymentBlock(rows, from, to)),
+    section("ПО СОТРУДНИКАМ", await buildEmployeeBlock(scope, from, to, false)),
+    section("ВОЗВРАТЫ", await buildReturnsBlock(scope, from, to, rows)),
+    section("ТРАФИК", trafficBlock(receipts, visitors, trafficPlan)),
+  ]);
 }
 
 export async function buildSalesReport(scope: ReportScope, date: string): Promise<string[]> {
@@ -410,9 +453,9 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const publicationsBlock = pubs.length === 0 ? `<i>за день публикаций не внесено</i>` : pre(pubLines.join("\n"));
 
   const compact = !!scope.compact;
-  const employeesBlock = compact ? await buildEmployeeBlock(scope, date) : null;
-  const returnsBlock = compact ? await buildReturnsBlock(scope, date, dayRows) : null;
-  const paymentsBlock = compact ? await paymentBlock(dayRows, date) : null;
+  const employeesBlock = compact ? await buildEmployeeBlock(scope, date, date) : null;
+  const returnsBlock = compact ? await buildReturnsBlock(scope, date, date, dayRows) : null;
+  const paymentsBlock = compact ? await paymentBlock(dayRows, date, date) : null;
   const coreSections = [
     title,
     section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),

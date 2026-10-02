@@ -146,7 +146,14 @@ export async function fetchRetailDemandSummariesForDate(date: string): Promise<R
 export type PaymentSummary = { kind: "sale" | "return"; retailStoreId: string; sum: number; cash: number };
 
 export async function fetchPaymentSummariesForDate(date: string): Promise<PaymentSummary[]> {
-  const { from, to } = dayWindow(date);
+  return fetchPaymentSummariesForRange(date, date);
+}
+
+// То же за несколько дней подряд (недельный и месячный отчёты): окно от начала
+// первого дня до 02:00 после последнего, как у dayWindow.
+export async function fetchPaymentSummariesForRange(fromDate: string, toDate: string): Promise<PaymentSummary[]> {
+  const from = dayWindow(fromDate).from;
+  const to = dayWindow(toDate).to;
   const filter = `moment>=${from};moment<${to}`;
   const limit = 1000;
   const idOf = (ref?: { meta?: { href?: string } } | null) => ref?.meta?.href?.split("/").pop()?.split("?")[0] ?? "";

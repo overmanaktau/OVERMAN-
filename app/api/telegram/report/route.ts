@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { sendTelegramMessages } from "@/lib/telegram";
-import { buildSalesReport, SCOPES, yesterdayInAlmaty } from "@/lib/reports/sales";
+import { buildPeriodReport, buildSalesReport, SCOPES, yesterdayInAlmaty } from "@/lib/reports/sales";
 import { REPORT_ROUTES } from "@/lib/reports/routes";
 
 export const maxDuration = 60;
@@ -24,19 +24,27 @@ async function handle(request: Request) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
   const dry = url.searchParams.get("dry") === "1";
   const onlyChat = url.searchParams.get("chat");
+  // ?period=week|month — недельный/месячный отчёт, заканчивающийся днём `date`
+  // (по умолчанию вчера: в понедельник это воскресенье, 1-го числа — последний
+  // день прошлого месяца). Без period — обычный дневной отчёт.
+  const periodParam = url.searchParams.get("period");
+  if (periodParam && periodParam !== "week" && periodParam !== "month") {
+    return NextResponse.json({ error: "Неверный period." }, { status: 400 });
+  }
+  const period = periodParam as "week" | "month" | null;
 
   const results: { chat: string; scope: string; messages: number; error?: string; preview?: string[] }[] = [];
   const cache = new Map<string, string[]>();
 
   for (const route of REPORT_ROUTES) {
     if (onlyChat && route.chatId !== onlyChat) continue;
-    for (const scopeKey of route.scopes) {
+    for (const scopeKey of period ? route.periodScopes ?? [] : route.scopes) {
       const scope = SCOPES[scopeKey];
       if (!scope) continue;
       try {
         let messages = cache.get(scopeKey);
         if (!messages) {
-          messages = await buildSalesReport(scope, date);
+          messages = period ? await buildPeriodReport(scope, period, date) : await buildSalesReport(scope, date);
           cache.set(scopeKey, messages);
         }
         if (dry) {
