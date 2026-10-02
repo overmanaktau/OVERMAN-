@@ -199,10 +199,10 @@ export default function RequestsPage() {
             ))}
           </div>
         ) : (
-          <div className="overflow-x-auto flex flex-col">
+          <div className="flex flex-col">
             <div
-              className={`min-w-[640px] grid ${
-                canAct ? "grid-cols-[130px_150px_1fr_120px_170px]" : "grid-cols-[130px_150px_1fr_120px]"
+              className={`grid ${
+                canAct ? "grid-cols-[110px_120px_1fr_110px_150px]" : "grid-cols-[110px_120px_1fr_110px]"
               } gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border`}
             >
               <div>Дата запроса</div>
@@ -214,13 +214,13 @@ export default function RequestsPage() {
             {visibleRequests.map((r) => (
               <div
                 key={r.id}
-                className={`min-w-[640px] grid ${
-                  canAct ? "grid-cols-[130px_150px_1fr_120px_170px]" : "grid-cols-[130px_150px_1fr_120px]"
+                className={`grid ${
+                  canAct ? "grid-cols-[110px_120px_1fr_110px_150px]" : "grid-cols-[110px_120px_1fr_110px]"
                 } gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]`}
               >
                 <div className="text-muted">{formatDateTime(r.created_at)}</div>
                 <div>{TABLE_LABEL[r.table_name]}</div>
-                <div className="text-muted">{r.context ?? "—"}</div>
+                <div className="text-muted min-w-0">{r.context ?? "—"}</div>
                 <div>
                   <span
                     className={`text-[11px] font-semibold uppercase tracking-wide rounded-full px-2.5 py-1 ${
@@ -241,7 +241,7 @@ export default function RequestsPage() {
                   )}
                 </div>
                 {canAct && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center flex-wrap gap-1.5">
                     {r.status === "pending" ? (
                       <>
                         <button
