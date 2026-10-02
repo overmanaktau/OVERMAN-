@@ -218,7 +218,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const forecast = dayNumber > 0 ? (mtd / dayNumber) * daysInMonth : 0;
   const forecastBlock =
     pre(`${"С 1 числа".padEnd(14)}${money(mtd).padStart(18)}\n${"Прогноз".padEnd(14)}${money(forecast).padStart(18)}`) +
-    `\n<i>по темпу ${dayNumber} дн. на ${daysInMonth}</i>`;
+    (scope.compact ? "" : `\n<i>по темпу ${dayNumber} дн. на ${daysInMonth}</i>`);
 
   const pubs = (pubRes.data ?? []) as {
     entry_time: string | null;
