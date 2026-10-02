@@ -2,7 +2,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { warehousesForCities } from "@/lib/warehouses";
 import { escapeHtml, packSections } from "@/lib/telegram";
 import {
-  fetchLtvChecksForDate,
+  fetchLtvChecksForRange,
   fetchPaymentSummariesForRange,
   fetchRetailDemandSummariesForDate,
 } from "@/lib/moysklad";
@@ -167,22 +167,26 @@ function trafficBlock(receipts: number, visitors: number, plan: number): string 
   );
 }
 
-// Раздел «LTV» (Актау, после «ТРАФИК»): чеки дня по покупателям.
-//  · Свои — покупатель уже был в базе до этого дня (создан раньше начала дня);
+// Раздел «LTV» (Актау, после «ТРАФИК»; в дневном, недельном и месячном отчётах):
+// чеки периода по покупателям.
+//  · Свои — покупатель уже был в базе до дня этого чека (создан раньше начала дня);
 //  · Новые — все чеки, кроме своих;
-//  · Зарег — новые, кто зарегистрировался в этот день (не «Розничный покупатель»);
+//  · Зарег — новые, кто зарегистрировался в день чека (не «Розничный покупатель»);
 //  · Не зарег — чеки на «Розничного покупателя».
-// Проценты: свои — от всех чеков, зарег и не зарег — от новых. Ниже — сколько
-// розничных чеков провёл каждый сотрудник (кто не проводил — того нет в списке).
-async function ltvBlock(dayRows: SalesRow[], date: string): Promise<string> {
+// Проценты везде: свои и новые — от всех чеков, зарег и не зарег — от новых.
+// Ниже — сколько розничных чеков провёл каждый сотрудник и какую долю это
+// составляет от всех его чеков (кто не проводил — того нет в списке).
+async function ltvBlock(dayRows: SalesRow[], from: string, to: string): Promise<string> {
   const registerIds = new Set(dayRows.map((r) => r.register_id));
-  const checks = (await fetchLtvChecksForDate(date)).filter((c) => registerIds.has(c.retailStoreId));
-  if (checks.length === 0) return `<i>за день продаж нет</i>`;
+  const checks = (await fetchLtvChecksForRange(from, to)).filter((c) => registerIds.has(c.retailStoreId));
+  if (checks.length === 0) return `<i>за ${from === to ? "день" : "период"} продаж нет</i>`;
 
-  const dayStart = `${date} 00:00:00`;
+  // Начало дня чека: у дневного отчёта — сам день отчёта (чеки после полуночи до
+  // 02:00 входят в него же); у периода — календарный день чека.
+  const dayStartOf = (c: { moment: string }) => (from === to ? `${from} 00:00:00` : `${c.moment.slice(0, 10)} 00:00:00`);
   const isRetail = (c: { agentName: string }) => !c.agentName || c.agentName.trim().toLowerCase() === "розничный покупатель";
   const retail = checks.filter(isRetail);
-  const own = checks.filter((c) => !isRetail(c) && c.agentCreated !== null && c.agentCreated < dayStart);
+  const own = checks.filter((c) => !isRetail(c) && c.agentCreated !== null && c.agentCreated < dayStartOf(c));
   const total = checks.length;
   const fresh = total - own.length;
   const registered = fresh - retail.length;
@@ -192,20 +196,24 @@ async function ltvBlock(dayRows: SalesRow[], date: string): Promise<string> {
   const lines = [
     line("Чек", num(total)),
     line("Свои", `${num(own.length)} (${p(own.length, total)})`),
-    line("Новые", num(fresh)),
+    line("Новые", `${num(fresh)} (${p(fresh, total)})`),
     line("Зарег", `${num(registered)} (${p(registered, fresh)})`),
     line("Не зарег", `${num(retail.length)} (${p(retail.length, fresh)})`),
   ];
 
-  const byEmployee = new Map<string, number>();
-  for (const c of retail) {
+  const byEmployee = new Map<string, { retail: number; all: number }>();
+  for (const c of checks) {
     const name = c.ownerName || "—";
-    byEmployee.set(name, (byEmployee.get(name) ?? 0) + 1);
+    const agg = byEmployee.get(name) ?? { retail: 0, all: 0 };
+    agg.all++;
+    if (isRetail(c)) agg.retail++;
+    byEmployee.set(name, agg);
   }
-  if (byEmployee.size > 0) {
+  const withRetail = [...byEmployee.entries()].filter(([, a]) => a.retail > 0).sort((a, b) => b[1].retail - a[1].retail);
+  if (withRetail.length > 0) {
     lines.push("", "Розничный покупатель:");
-    for (const [name, count] of [...byEmployee.entries()].sort((a, b) => b[1] - a[1])) {
-      lines.push(`${fit(name, 15)}${num(count).padStart(17)}`);
+    for (const [name, a] of withRetail) {
+      lines.push(`${fit(name, 15)}${`${num(a.retail)} (${p(a.retail, a.all)})`.padStart(17)}`);
     }
   }
   return pre(lines.join("\n"));
@@ -418,6 +426,7 @@ export async function buildPeriodReport(scope: ReportScope, kind: "week" | "mont
     section("ПО СОТРУДНИКАМ", await buildEmployeeBlock(scope, from, to, false)),
     section("ВОЗВРАТЫ", await buildReturnsBlock(scope, from, to, rows)),
     section("ТРАФИК", trafficBlock(receipts, visitors, trafficPlan)),
+    section("LTV", await ltvBlock(rows, from, to)),
   ]);
 }
 
@@ -504,7 +513,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const employeesBlock = compact ? await buildEmployeeBlock(scope, date, date) : null;
   const returnsBlock = compact ? await buildReturnsBlock(scope, date, date, dayRows) : null;
   const paymentsBlock = compact ? await paymentBlock(dayRows, date, date) : null;
-  const ltvSection = compact ? await ltvBlock(dayRows, date) : null;
+  const ltvSection = compact ? await ltvBlock(dayRows, date, date) : null;
   const coreSections = [
     title,
     section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),

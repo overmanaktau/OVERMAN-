@@ -148,38 +148,57 @@ export type LtvCheck = {
   ownerName: string;
   agentName: string;
   agentCreated: string | null;
+  moment: string;
 };
 
 export async function fetchLtvChecksForDate(date: string): Promise<LtvCheck[]> {
-  const { from, to } = dayWindow(date);
+  return fetchLtvChecksForRange(date, date);
+}
+
+// То же за несколько дней подряд (недельный и месячный отчёты).
+export async function fetchLtvChecksForRange(fromDate: string, toDate: string): Promise<LtvCheck[]> {
+  const from = dayWindow(fromDate).from;
+  const to = dayWindow(toDate).to;
   const filter = `moment>=${from};moment<${to}`;
   const limit = 100;
   const idOf = (ref?: { meta?: { href?: string } } | null) => ref?.meta?.href?.split("/").pop()?.split("?")[0] ?? "";
-  const all: LtvCheck[] = [];
-  let offset = 0;
-  for (;;) {
-    const page = await moyskladFetch("/entity/retaildemand", {
+  type Raw = {
+    moment: string;
+    retailStore?: { meta?: { href?: string } } | null;
+    owner?: { name?: string } | null;
+    agent?: { name?: string; created?: string } | null;
+  };
+  const fetchPage = (offset: number) =>
+    moyskladFetch("/entity/retaildemand", {
       filter,
       limit: String(limit),
       offset: String(offset),
       expand: "agent,owner",
     });
-    type Raw = {
-      retailStore?: { meta?: { href?: string } } | null;
-      owner?: { name?: string } | null;
-      agent?: { name?: string; created?: string } | null;
-    };
-    const rows: Raw[] = page.rows ?? [];
+  const all: LtvCheck[] = [];
+  const take = (rows: Raw[]) => {
     for (const r of rows) {
       all.push({
         retailStoreId: idOf(r.retailStore),
         ownerName: r.owner?.name ?? "",
         agentName: r.agent?.name ?? "",
         agentCreated: r.agent?.created ?? null,
+        moment: r.moment,
       });
     }
-    if (rows.length < limit) break;
-    offset += limit;
+  };
+
+  // Первая страница говорит, сколько всего чеков; остальные берём по 3
+  // параллельно — месяц это ~10 страниц, по одной выходило слишком долго для
+  // лимита в 60 секунд. Больше трёх МойСклад не любит (429).
+  const first = await fetchPage(0);
+  take(first.rows ?? []);
+  const size: number = first.meta?.size ?? (first.rows ?? []).length;
+  const offsets: number[] = [];
+  for (let o = limit; o < size; o += limit) offsets.push(o);
+  for (let i = 0; i < offsets.length; i += 3) {
+    const pages = await Promise.all(offsets.slice(i, i + 3).map(fetchPage));
+    for (const p of pages) take(p.rows ?? []);
   }
   return all;
 }
