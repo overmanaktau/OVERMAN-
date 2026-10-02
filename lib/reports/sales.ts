@@ -244,7 +244,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
     title,
     section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),
     section("ПО КАССАМ", kassaBlock(dayRows, compact)),
-    section("ТОП КАТЕГОРИЙ", categoryBlock),
+    section(compact ? "ПРОДАННЫЕ ТОВАРЫ" : "ТОП КАТЕГОРИЙ", categoryBlock),
     section("ПРОГНОЗ МЕСЯЦА", forecastBlock),
   ];
   if (compact) return packSections(coreSections);
