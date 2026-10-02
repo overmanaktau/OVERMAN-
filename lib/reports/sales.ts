@@ -121,10 +121,13 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
   const items = rows.reduce((a, r) => a + r.items_count, 0);
   const cost = sumCost(rows);
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+  const conversionPct = visitors > 0 ? `${Math.round((receipts / visitors) * 100)}%` : "нет трафика";
+  // Актау (compact): только процент, а посетители — отдельной строкой «Трафик».
   const conversion = line(
     "Конверсия",
-    visitors > 0 ? `${Math.round((receipts / visitors) * 100)}% (${receipts}/${num(visitors)})` : "нет трафика"
+    compact || visitors <= 0 ? conversionPct : `${conversionPct} (${receipts}/${num(visitors)})`
   );
+  const traffic = line("Трафик", visitors > 0 ? num(visitors) : "—");
   const lines = compact
     ? [
         line("Выручка", money(revenue)),
@@ -133,6 +136,7 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
         line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
         line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
         conversion,
+        traffic,
       ]
     : [
         line("Выручка", money(revenue)),
@@ -339,9 +343,11 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const [yy, mm] = date.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
   const forecast = dayNumber > 0 ? (mtd / dayNumber) * daysInMonth : 0;
-  const forecastBlock =
-    pre(`${"С 1 числа".padEnd(14)}${money(mtd).padStart(18)}\n${"Прогноз".padEnd(14)}${money(forecast).padStart(18)}`) +
-    (scope.compact ? "" : `\n<i>по темпу ${dayNumber} дн. на ${daysInMonth}</i>`);
+  const forecastLine = `${"Прогноз".padEnd(14)}${money(forecast).padStart(18)}`;
+  const forecastBlock = scope.compact
+    ? pre(forecastLine)
+    : pre(`${"С 1 числа".padEnd(14)}${money(mtd).padStart(18)}\n${forecastLine}`) +
+      `\n<i>по темпу ${dayNumber} дн. на ${daysInMonth}</i>`;
 
   const pubs = (pubRes.data ?? []) as {
     entry_time: string | null;
