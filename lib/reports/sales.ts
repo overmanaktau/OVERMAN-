@@ -145,17 +145,18 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
   return pre(lines.join("\n"));
 }
 
-// Раздел «ТРАФИК» (Актау, в самом низу): сколько зашло, чеков, конверсия и
-// выполнение плана трафика. План берётся из traffic_entries.traffic_plan.
+// Раздел «ТРАФИК» (Актау, в самом низу): план (в скобках его выполнение в %),
+// факт, чеки и конверсия. План берётся из traffic_entries.traffic_plan.
 function trafficBlock(receipts: number, visitors: number, plan: number): string {
-  const line = (label: string, value: string) => `${label.padEnd(18)}${value.padStart(14)}`;
+  const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+  // Ничего не округляем до целых: везде два знака после точки (х.хх).
+  const planValue = plan > 0 ? `${plan.toFixed(2)} (${((visitors / plan) * 100).toFixed(2)}%)` : "—";
   return pre(
     [
-      line("Зашло", visitors > 0 ? num(visitors) : "—"),
-      line("Чеков", num(receipts)),
+      line("План", planValue),
+      line("Факт", visitors > 0 ? visitors.toFixed(2) : "—"),
+      line("Чек", num(receipts)),
       line("Конверсия", visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "—"),
-      line("Выполнение плана", plan > 0 ? `${Math.round((visitors / plan) * 100)}%` : "—"),
-      line("План трафика", plan > 0 ? num(plan) : "—"),
     ].join("\n")
   );
 }
