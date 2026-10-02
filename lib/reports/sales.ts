@@ -51,12 +51,6 @@ function section(title: string, body: string): string {
 function pre(text: string): string {
   return `<pre>${escapeHtml(text)}</pre>`;
 }
-// Строка «Название: значение» обычным текстом, без <pre>. У блоков <pre> Telegram
-// рисует кнопку «копировать» поверх первой строки, а строки в 32 символа на
-// телефоне переносятся — поэтому отчёт по Актау (compact) их не использует.
-function kv(label: string, value: string): string {
-  return `${escapeHtml(label)}: <b>${escapeHtml(value)}</b>`;
-}
 
 function ymd(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
@@ -132,38 +126,39 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
     "Конверсия",
     visitors > 0 ? `${Math.round((receipts / visitors) * 100)}% (${receipts}/${num(visitors)})` : "нет трафика"
   );
-  if (compact) {
-    return [
-      kv("Выручка", money(revenue)),
-      kv("Чеков", num(receipts)),
-      kv("Товара, шт", num(items)),
-      kv("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
-      kv("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
-    ].join("\n");
-  }
-  return pre(
-    [
-      line("Выручка", money(revenue)),
-      line("Чеков", num(receipts)),
-      line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
-      line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
-      line("Маржа", pct(revenue, cost)),
-      conversion,
-    ].join("\n")
-  );
+  const lines = compact
+    ? [
+        line("Выручка", money(revenue)),
+        line("Чеков", num(receipts)),
+        line("Товара, шт", num(items)),
+        line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
+        line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
+      ]
+    : [
+        line("Выручка", money(revenue)),
+        line("Чеков", num(receipts)),
+        line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
+        line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
+        line("Маржа", pct(revenue, cost)),
+        conversion,
+      ];
+  return pre(lines.join("\n"));
 }
 
 // Раздел «ТРАФИК» (Актау, в самом низу): план (в скобках его выполнение в %),
 // факт, чеки и конверсия. План берётся из traffic_entries.traffic_plan.
 function trafficBlock(receipts: number, visitors: number, plan: number): string {
+  const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
   // Ничего не округляем до целых: везде два знака после точки (х.хх).
   const planValue = plan > 0 ? `${plan.toFixed(2)} (${((visitors / plan) * 100).toFixed(2)}%)` : "—";
-  return [
-    kv("План", planValue),
-    kv("Факт", visitors > 0 ? visitors.toFixed(2) : "—"),
-    kv("Чек", num(receipts)),
-    kv("Конверсия", visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "—"),
-  ].join("\n");
+  return pre(
+    [
+      line("План", planValue),
+      line("Факт", visitors > 0 ? visitors.toFixed(2) : "—"),
+      line("Чек", num(receipts)),
+      line("Конверсия", visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "—"),
+    ].join("\n")
+  );
 }
 
 // «По способу оплаты» (Актау вместо «По кассам»): наличные и безнал по данным
@@ -181,7 +176,8 @@ async function paymentBlock(dayRows: SalesRow[], date: string): Promise<string> 
     total += sign * p.sum;
     cash += sign * p.cash;
   }
-  return [kv("Наличные", money(cash / 100)), kv("Безнал", money((total - cash) / 100))].join("\n");
+  const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+  return pre([line("Наличные", money(cash / 100)), line("Безнал", money((total - cash) / 100))].join("\n"));
 }
 
 function kassaBlock(rows: SalesRow[], compact: boolean): string {
@@ -268,12 +264,11 @@ async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<str
       const avgCheck = e.receipts > 0 ? money(e.revenue / e.receipts) : "—";
       const depth = e.receipts > 0 ? (e.items / e.receipts).toFixed(2) : "—";
       return (
-        `${i + 1}. <b>${escapeHtml(e.name)}</b>${escapeHtml(mark)}\n` +
-        escapeHtml(`${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт`) +
-        `\n${escapeHtml(`ср.чек ${avgCheck} · глубина ${depth}`)}`
+        `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
+        `\n   ср.чек ${avgCheck} · глубина ${depth}`
       );
     });
-  return lines.join("\n\n");
+  return pre(lines.join("\n"));
 }
 
 // Возвраты — как на сайте (Продажа): «сумма · N чек · N тов.», вычитаются из
@@ -326,13 +321,11 @@ async function buildReturnsBlock(scope: ReportScope, date: string, dayRows: Sale
     return `<i>за день возвратов нет</i>`;
   }
 
-  const lines = [kv("Всего", returnSummary(total.amount, total.receipts, total.items))];
+  const lines = [`Всего: ${returnSummary(total.amount, total.receipts, total.items)}`];
   const people = [...byEmployee.values()].sort((a, b) => b.amount - a.amount);
   if (people.length > 0) lines.push("");
-  for (const e of people) {
-    lines.push(`<b>${escapeHtml(e.name)}</b>\n${escapeHtml(returnSummary(e.amount, e.receipts, e.items))}`);
-  }
-  return lines.join("\n");
+  for (const e of people) lines.push(`${e.name}\n   ${returnSummary(e.amount, e.receipts, e.items)}`);
+  return pre(lines.join("\n"));
 }
 
 export async function buildSalesReport(scope: ReportScope, date: string): Promise<string[]> {
