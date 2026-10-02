@@ -30,14 +30,7 @@ export async function sendTelegramMessage(chatId: string, html: string): Promise
   const res = await fetch(`${API}/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // protect_content: запрет пересылки, сохранения и копирования сообщений бота.
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: html,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      protect_content: true,
-    }),
+    body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: "HTML", disable_web_page_preview: true }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) throw new Error(`Telegram: ${data.description ?? res.status}`);
