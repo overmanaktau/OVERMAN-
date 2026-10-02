@@ -37,6 +37,7 @@ export const SECTIONS = [
   { key: "history", label: "История", group: "settings", hasEdit: false },
 
   { key: "requests", label: "Запросы", group: "general", hasEdit: true },
+  { key: "schedule", label: "График смен", group: "general", hasEdit: true },
   { key: "profile.rename", label: "Смена имени сотрудника", group: "general", hasEdit: true, viewless: true },
 ] as const;
 

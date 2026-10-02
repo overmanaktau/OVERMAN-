@@ -75,3 +75,7 @@ export function requireRequestsAccess(request: Request, need: "view" | "edit") {
 export function requireHistoryAccess(request: Request, need: "view" | "edit") {
   return requireSectionAccess(request, "history", need);
 }
+
+export function requireScheduleAccess(request: Request, need: "view" | "edit") {
+  return requireSectionAccess(request, "schedule", need);
+}
