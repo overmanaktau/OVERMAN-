@@ -9,7 +9,7 @@ export const maxDuration = 60;
 
 // Ежедневная рассылка отчётов в группы Telegram. Дёргается по расписанию
 // (pg_cron в Supabase) с CRON_SECRET, вручную — админом. ?dry=1 ничего не
-// отправляет, а возвращает тексты; ?date=YYYY-MM-DD — отчёт за другой день.
+// отправляет, а возвращает тексты; ?date=YYYY-MM-DD — отчёт за другой день, ?chat=<id> — только в одну группу.
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization") ?? "";
@@ -23,11 +23,13 @@ async function handle(request: Request) {
   const date = url.searchParams.get("date") ?? yesterdayInAlmaty();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
   const dry = url.searchParams.get("dry") === "1";
+  const onlyChat = url.searchParams.get("chat");
 
   const results: { chat: string; scope: string; messages: number; error?: string; preview?: string[] }[] = [];
   const cache = new Map<string, string[]>();
 
   for (const route of REPORT_ROUTES) {
+    if (onlyChat && route.chatId !== onlyChat) continue;
     for (const scopeKey of route.scopes) {
       const scope = SCOPES[scopeKey];
       if (!scope) continue;

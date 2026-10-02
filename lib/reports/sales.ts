@@ -2,13 +2,16 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { warehousesForCities } from "@/lib/warehouses";
 import { escapeHtml, packSections } from "@/lib/telegram";
 
-export type ReportScope = { key: string; title: string; cityCodes: string[] };
+// compact: укороченный формат — без маржи, Instagram, публикаций, рекламы и
+// топа товаров, зато с количеством товара в итогах дня. Пока только у Актау;
+// остальные отчёты остаются полными, пока пользователь не скажет их править.
+export type ReportScope = { key: string; title: string; cityCodes: string[]; compact?: boolean };
 
 // cityCodes are the city-level codes (point_1/point_3) moysklad_sales_daily,
 // traffic_entries and publication_entries use; the per-warehouse codes the
 // product tables use come from warehousesForCities.
 export const SCOPES: Record<string, ReportScope> = {
-  point_1: { key: "point_1", title: "Overman Актау", cityCodes: ["point_1"] },
+  point_1: { key: "point_1", title: "Overman Актау", cityCodes: ["point_1"], compact: true },
   point_3: { key: "point_3", title: "Overman Актобе", cityCodes: ["point_3"] },
   all: { key: "all", title: "Overman · все города", cityCodes: ["point_1", "point_3"] },
 };
@@ -106,24 +109,37 @@ function sumCost(rows: { cost: number | null }[]): number | null {
   return sum;
 }
 
-function kpiBlock(rows: SalesRow[], visitors: number): string {
+function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string {
   const revenue = rows.reduce((a, r) => a + r.revenue, 0);
   const receipts = rows.reduce((a, r) => a + r.receipts_count, 0);
   const items = rows.reduce((a, r) => a + r.items_count, 0);
   const cost = sumCost(rows);
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
-  const lines = [
-    line("Выручка", money(revenue)),
-    line("Чеков", num(receipts)),
-    line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
-    line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
-    line("Маржа", pct(revenue, cost)),
-    line("Конверсия", visitors > 0 ? `${Math.round((receipts / visitors) * 100)}% (${receipts}/${num(visitors)})` : "нет трафика"),
-  ];
+  const conversion = line(
+    "Конверсия",
+    visitors > 0 ? `${Math.round((receipts / visitors) * 100)}% (${receipts}/${num(visitors)})` : "нет трафика"
+  );
+  const lines = compact
+    ? [
+        line("Выручка", money(revenue)),
+        line("Чеков", num(receipts)),
+        line("Товара, шт", num(items)),
+        line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
+        line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
+        conversion,
+      ]
+    : [
+        line("Выручка", money(revenue)),
+        line("Чеков", num(receipts)),
+        line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
+        line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
+        line("Маржа", pct(revenue, cost)),
+        conversion,
+      ];
   return pre(lines.join("\n"));
 }
 
-function kassaBlock(rows: SalesRow[]): string {
+function kassaBlock(rows: SalesRow[], compact: boolean): string {
   const byRegister = new Map<string, { revenue: number; items: number; costs: (number | null)[] }>();
   for (const r of rows) {
     const name = registerOf(r)?.name ?? "—";
@@ -133,10 +149,17 @@ function kassaBlock(rows: SalesRow[]): string {
     agg.costs.push(r.cost);
     byRegister.set(name, agg);
   }
-  const list = [...byRegister.entries()]
-    .sort((a, b) => b[1].revenue - a[1].revenue)
-    .map(([name, a]) => [name, num(a.revenue), num(a.items), pct(a.revenue, sumCost(a.costs.map((c) => ({ cost: c }))))]);
-  if (list.length === 0) return `<i>за день продаж нет</i>`;
+  const sorted = [...byRegister.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
+  if (sorted.length === 0) return `<i>за день продаж нет</i>`;
+  if (compact) {
+    return pre(table(["Касса", "Выручка", "Шт"], sorted.map(([name, a]) => [name, num(a.revenue), num(a.items)]), [18, 9, 3], 1));
+  }
+  const list = sorted.map(([name, a]) => [
+    name,
+    num(a.revenue),
+    num(a.items),
+    pct(a.revenue, sumCost(a.costs.map((c) => ({ cost: c })))),
+  ]);
   return pre(table(["Касса", "Выручка", "Шт", "Маржа"], list, [16, 7, 3, 5], 1));
 }
 
@@ -170,14 +193,23 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const categoryBlock =
     categories.length === 0
       ? `<i>за день продаж нет</i>`
-      : pre(
-          table(
-            ["Категория", "Выручка", "Шт", "Маржа"],
-            categories.map((c) => [c.category, num(c.revenue), num(c.quantity), pct(c.revenue, c.cost)]),
-            [16, 7, 3, 5],
-            1
+      : scope.compact
+        ? pre(
+            table(
+              ["Категория", "Выручка", "Шт"],
+              categories.map((c) => [c.category, num(c.revenue), num(c.quantity)]),
+              [18, 9, 3],
+              1
+            )
           )
-        );
+        : pre(
+            table(
+              ["Категория", "Выручка", "Шт", "Маржа"],
+              categories.map((c) => [c.category, num(c.revenue), num(c.quantity), pct(c.revenue, c.cost)]),
+              [16, 7, 3, 5],
+              1
+            )
+          );
 
   const mtd = monthRows.reduce((a, r) => a + r.revenue, 0);
   const dayNumber = Number(date.slice(8, 10));
@@ -207,12 +239,18 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   });
   const publicationsBlock = pubs.length === 0 ? `<i>за день публикаций не внесено</i>` : pre(pubLines.join("\n"));
 
-  const salesMessages = packSections([
+  const compact = !!scope.compact;
+  const coreSections = [
     title,
-    section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors)),
-    section("ПО КАССАМ", kassaBlock(dayRows)),
+    section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),
+    section("ПО КАССАМ", kassaBlock(dayRows, compact)),
     section("ТОП КАТЕГОРИЙ", categoryBlock),
     section("ПРОГНОЗ МЕСЯЦА", forecastBlock),
+  ];
+  if (compact) return packSections(coreSections);
+
+  const salesMessages = packSections([
+    ...coreSections,
     section("INSTAGRAM", NOT_CONFIGURED),
     section("ПУБЛИКАЦИИ ДНЯ", publicationsBlock),
     section("РЕКЛАМА", NOT_CONFIGURED),
