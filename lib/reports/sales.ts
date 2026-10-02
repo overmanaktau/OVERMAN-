@@ -121,13 +121,10 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
   const items = rows.reduce((a, r) => a + r.items_count, 0);
   const cost = sumCost(rows);
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
-  const conversionPct = visitors > 0 ? `${Math.round((receipts / visitors) * 100)}%` : "нет трафика";
-  // Актау (compact): только процент, а посетители — отдельной строкой «Трафик».
   const conversion = line(
     "Конверсия",
-    compact || visitors <= 0 ? conversionPct : `${conversionPct} (${receipts}/${num(visitors)})`
+    visitors > 0 ? `${Math.round((receipts / visitors) * 100)}% (${receipts}/${num(visitors)})` : "нет трафика"
   );
-  const traffic = line("Трафик", visitors > 0 ? num(visitors) : "—");
   const lines = compact
     ? [
         line("Выручка", money(revenue)),
@@ -135,8 +132,6 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
         line("Товара, шт", num(items)),
         line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
         line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
-        conversion,
-        traffic,
       ]
     : [
         line("Выручка", money(revenue)),
@@ -147,6 +142,21 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
         conversion,
       ];
   return pre(lines.join("\n"));
+}
+
+// Раздел «ТРАФИК» (Актау, в самом низу): сколько зашло, чеков, конверсия и
+// выполнение плана трафика. План берётся из traffic_entries.traffic_plan.
+function trafficBlock(receipts: number, visitors: number, plan: number): string {
+  const line = (label: string, value: string) => `${label.padEnd(18)}${value.padStart(14)}`;
+  return pre(
+    [
+      line("Зашло", visitors > 0 ? num(visitors) : "—"),
+      line("Чеков", num(receipts)),
+      line("Конверсия", visitors > 0 ? `${Math.round((receipts / visitors) * 100)}%` : "—"),
+      line("Выполнение плана", plan > 0 ? `${Math.round((visitors / plan) * 100)}%` : "—"),
+      line("План трафика", plan > 0 ? num(plan) : "—"),
+    ].join("\n")
+  );
 }
 
 function kassaBlock(rows: SalesRow[], compact: boolean): string {
@@ -301,7 +311,11 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const skipped = { data: [] as never[], error: null };
   const [monthRows, trafficRes, pubRes, catRes, prodRes] = await Promise.all([
     loadSales(scope, monthStart, date),
-    supabaseAdmin.from("traffic_entries").select("traffic_fact").eq("entry_date", date).in("store", scope.cityCodes),
+    supabaseAdmin
+      .from("traffic_entries")
+      .select("traffic_plan, traffic_fact")
+      .eq("entry_date", date)
+      .in("store", scope.cityCodes),
     scope.compact
       ? skipped
       : supabaseAdmin
@@ -322,6 +336,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
 
   const dayRows = monthRows.filter((r) => r.sale_date === date);
   const visitors = (trafficRes.data ?? []).reduce((a, r) => a + (Number(r.traffic_fact) || 0), 0);
+  const trafficPlan = (trafficRes.data ?? []).reduce((a, r) => a + (Number(r.traffic_plan) || 0), 0);
 
   const title = `📊 <b>Продажи · ${escapeHtml(scope.title)}</b>\n<i>${dateLabel(date)}</i>`;
 
@@ -343,11 +358,9 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const [yy, mm] = date.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
   const forecast = dayNumber > 0 ? (mtd / dayNumber) * daysInMonth : 0;
-  const forecastLine = `${"Прогноз".padEnd(14)}${money(forecast).padStart(18)}`;
-  const forecastBlock = scope.compact
-    ? pre(forecastLine)
-    : pre(`${"С 1 числа".padEnd(14)}${money(mtd).padStart(18)}\n${forecastLine}`) +
-      `\n<i>по темпу ${dayNumber} дн. на ${daysInMonth}</i>`;
+  const forecastBlock =
+    pre(`${"С 1 числа".padEnd(14)}${money(mtd).padStart(18)}\n${"Прогноз".padEnd(14)}${money(forecast).padStart(18)}`) +
+    `\n<i>по темпу ${dayNumber} дн. на ${daysInMonth}</i>`;
 
   const pubs = (pubRes.data ?? []) as {
     entry_time: string | null;
@@ -378,7 +391,10 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
     ...(employeesBlock ? [section("ПО СОТРУДНИКАМ", employeesBlock)] : []),
     ...(returnsBlock ? [section("ВОЗВРАТЫ", returnsBlock)] : []),
     ...(compact ? [] : [section("ТОП КАТЕГОРИЙ", categoryBlock)]),
-    section("ПРОГНОЗ МЕСЯЦА", forecastBlock),
+    ...(compact ? [] : [section("ПРОГНОЗ МЕСЯЦА", forecastBlock)]),
+    ...(compact
+      ? [section("ТРАФИК", trafficBlock(dayRows.reduce((a, r) => a + r.receipts_count, 0), visitors, trafficPlan))]
+      : []),
   ];
   if (compact) return packSections(coreSections);
 
