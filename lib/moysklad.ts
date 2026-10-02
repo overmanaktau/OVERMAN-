@@ -154,27 +154,49 @@ export type ProductCatalogRow = {
   id: string;
   name: string;
   category: string | null;
+  // The top-level ancestor folder (Верхняя/Плечевая/Брюки/Обувь/Аксессуары,
+  // or whatever else sits at the root, e.g. "OVERMAN") — derived from
+  // pathName below, not hand-maintained. Lets "Оборачиваемость по
+  // категориям" on Обзор scope to exactly those 5 root folders and
+  // everything under them, however their subfolders get renamed or
+  // reorganized, instead of matching a flat list of leaf category strings
+  // that silently drifted out of date twice (missed a renamed "Рубашка"
+  // subfolder, and wrongly bucketed "Кэжуал"/"Классика" as Плечевой when
+  // МойСклад actually has them under Брюки).
+  topCategory: string | null;
   buyPrice: number | null; // tenge (already /100 from kopecks)
   archived: boolean;
 };
+
+type FolderInfo = { name: string; top: string };
 
 // Only ~40 folders total — one cheap page, used to resolve each product's
 // category without needing expand=productFolder (which forced limit=100 on
 // the ~5,800-row product fetch below; productFolder is a bare {meta} ref
 // even without expand, so this trades one small extra request for letting
-// that fetch run at the full page size instead).
-async function fetchProductFolderNames(): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
+// that fetch run at the full page size instead). pathName is the full
+// ancestor chain МойСклад already computes ("Брюки", or "OVERMAN/Скидка
+// товары" for a deeper one) — its first segment is the root folder; empty
+// pathName means the folder itself is a root. byName mirrors byId keyed by
+// the folder's own name instead of id, for /report/stock/all below, which
+// only ever gives a folder's bare name, never its id.
+async function fetchProductFolders(): Promise<{ byId: Map<string, FolderInfo>; byName: Map<string, string> }> {
+  const byId = new Map<string, FolderInfo>();
+  const byName = new Map<string, string>();
   let offset = 0;
   for (;;) {
     const page = await moyskladFetch("/entity/productfolder", { limit: "1000", offset: String(offset) });
-    type Raw = { id: string; name: string };
+    type Raw = { id: string; name: string; pathName?: string };
     const rows: Raw[] = page.rows ?? [];
-    for (const f of rows) map.set(f.id, f.name);
+    for (const f of rows) {
+      const top = f.pathName ? f.pathName.split("/")[0] : f.name;
+      byId.set(f.id, { name: f.name, top });
+      byName.set(f.name, top);
+    }
     if (rows.length < 1000) break;
     offset += 1000;
   }
-  return map;
+  return { byId, byName };
 }
 
 // МойСклад's default /entity/product listing silently excludes archived
@@ -182,8 +204,8 @@ async function fetchProductFolderNames(): Promise<Map<string, string>> {
 // same count) — an archived item can still have real leftover stock sitting
 // on a shelf, which is exactly what "Зависшие остатки" needs to catch, so
 // this fetches both and merges them rather than trusting the default.
-async function fetchProductPage(archived: boolean, folderNames: Map<string, string>): Promise<ProductCatalogRow[]> {
-  const limit = 1000; // safe at max page size — no expand needed (see fetchProductFolderNames)
+async function fetchProductPage(archived: boolean, folders: Map<string, FolderInfo>): Promise<ProductCatalogRow[]> {
+  const limit = 1000; // safe at max page size — no expand needed (see fetchProductFolders)
   let offset = 0;
   const all: ProductCatalogRow[] = [];
   for (;;) {
@@ -203,10 +225,12 @@ async function fetchProductPage(archived: boolean, folderNames: Map<string, stri
     for (const p of rows) {
       const folderHref = p.productFolder?.meta?.href ?? "";
       const folderId = folderHref.split("/").pop()?.split("?")[0] ?? "";
+      const folder = folderId ? folders.get(folderId) : undefined;
       all.push({
         id: p.id,
         name: p.name,
-        category: folderId ? folderNames.get(folderId) ?? null : null,
+        category: folder?.name ?? null,
+        topCategory: folder?.top ?? null,
         buyPrice: p.buyPrice?.value != null ? p.buyPrice.value / 100 : null,
         archived: p.archived ?? false,
       });
@@ -218,8 +242,8 @@ async function fetchProductPage(archived: boolean, folderNames: Map<string, stri
 }
 
 export async function fetchAllProducts(): Promise<ProductCatalogRow[]> {
-  const folderNames = await fetchProductFolderNames();
-  const [active, archived] = await Promise.all([fetchProductPage(false, folderNames), fetchProductPage(true, folderNames)]);
+  const { byId } = await fetchProductFolders();
+  const [active, archived] = await Promise.all([fetchProductPage(false, byId), fetchProductPage(true, byId)]);
   return [...active, ...archived];
 }
 
@@ -231,6 +255,7 @@ export type StockReportRow = {
   productMsId: string;
   name: string;
   category: string | null;
+  topCategory: string | null; // see ProductCatalogRow.topCategory above
   stock: number;
   buyPrice: number | null; // tenge — "price" field in the report is cost, not sale price
   salePrice: number | null; // tenge — "salePrice" field, the retail price
@@ -240,6 +265,10 @@ export type StockReportRow = {
 };
 
 export async function fetchStockAll(): Promise<StockReportRow[]> {
+  // This report embeds each item's folder by name only, never its id (unlike
+  // /entity/product above), so topCategory here is resolved by name through
+  // byName — see fetchProductFolders.
+  const { byName } = await fetchProductFolders();
   const limit = 1000; // safe at max page size — this report doesn't use expand, unlike the entity endpoints above
   let offset = 0;
   const all: StockReportRow[] = [];
@@ -267,6 +296,7 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
         productMsId: id,
         name: r.name,
         category: r.folder?.name ?? null,
+        topCategory: r.folder?.name ? byName.get(r.folder.name) ?? null : null,
         stock: r.stock ?? 0,
         buyPrice: r.price != null ? r.price / 100 : null,
         salePrice: r.salePrice != null ? r.salePrice / 100 : null,
