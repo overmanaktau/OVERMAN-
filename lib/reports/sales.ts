@@ -48,8 +48,10 @@ function table(headers: string[], rows: string[][], widths: number[], leftCols: 
 function section(title: string, body: string): string {
   return `<b>—— ${title} ——</b>\n${body}`;
 }
+// Первой строкой блока идёт пустая (невидимый символ U+2800: обычный перевод
+// строки Telegram срезает), чтобы кнопка «копировать» поверх блока не мешала тексту.
 function pre(text: string): string {
-  return `<pre>${escapeHtml(text)}</pre>`;
+  return `<pre>⠀\n${escapeHtml(text)}</pre>`;
 }
 
 function ymd(d: Date): string {
