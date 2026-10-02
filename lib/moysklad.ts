@@ -140,6 +140,36 @@ export async function fetchRetailDemandSummariesForDate(date: string): Promise<R
   return all;
 }
 
+// Способы оплаты по документам дня: чек (sale) или возврат (return), его сумма
+// и сколько из неё наличными (cashSum) — всё остальное (карта, QR) безнал.
+// Лёгкая выгрузка без expand и позиций, как у fetchRetailDemandSummariesForDate.
+export type PaymentSummary = { kind: "sale" | "return"; retailStoreId: string; sum: number; cash: number };
+
+export async function fetchPaymentSummariesForDate(date: string): Promise<PaymentSummary[]> {
+  const { from, to } = dayWindow(date);
+  const filter = `moment>=${from};moment<${to}`;
+  const limit = 1000;
+  const idOf = (ref?: { meta?: { href?: string } } | null) => ref?.meta?.href?.split("/").pop()?.split("?")[0] ?? "";
+  const all: PaymentSummary[] = [];
+  for (const [path, kind] of [
+    ["/entity/retaildemand", "sale"],
+    ["/entity/retailsalesreturn", "return"],
+  ] as const) {
+    let offset = 0;
+    for (;;) {
+      const page = await moyskladFetch(path, { filter, limit: String(limit), offset: String(offset) });
+      type Raw = { sum?: number; cashSum?: number; retailStore?: { meta?: { href?: string } } | null };
+      const rows: Raw[] = page.rows ?? [];
+      for (const r of rows) {
+        all.push({ kind, retailStoreId: idOf(r.retailStore), sum: r.sum ?? 0, cash: r.cashSum ?? 0 });
+      }
+      if (rows.length < limit) break;
+      offset += limit;
+    }
+  }
+  return all;
+}
+
 // A return (retailsalesreturn) always references the original sale via
 // "demand". It always adjusts revenue/items on the day the RETURN itself
 // happened (not the original sale's day) — a return processed today reduces

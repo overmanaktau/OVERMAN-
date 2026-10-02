@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { warehousesForCities } from "@/lib/warehouses";
 import { escapeHtml, packSections } from "@/lib/telegram";
-import { fetchRetailDemandSummariesForDate } from "@/lib/moysklad";
+import { fetchPaymentSummariesForDate, fetchRetailDemandSummariesForDate } from "@/lib/moysklad";
 
 // compact: укороченный формат — без маржи, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. Пока только у Актау;
@@ -75,6 +75,7 @@ export function yesterdayInAlmaty(): string {
 }
 
 type SalesRow = {
+  register_id: string;
   revenue: number;
   receipts_count: number;
   items_count: number;
@@ -95,7 +96,7 @@ async function loadSales(scope: ReportScope, from: string, to: string): Promise<
   const { data, error } = await supabaseAdmin
     .from("moysklad_sales_daily")
     .select(
-      "revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items, sale_date, moysklad_registers(name, store)"
+      "register_id, revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items, sale_date, moysklad_registers(name, store)"
     )
     .gte("sale_date", from)
     .lte("sale_date", to);
@@ -152,11 +153,30 @@ function trafficBlock(receipts: number, visitors: number, plan: number): string 
     [
       line("Зашло", visitors > 0 ? num(visitors) : "—"),
       line("Чеков", num(receipts)),
-      line("Конверсия", visitors > 0 ? `${Math.round((receipts / visitors) * 100)}%` : "—"),
+      line("Конверсия", visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "—"),
       line("Выполнение плана", plan > 0 ? `${Math.round((visitors / plan) * 100)}%` : "—"),
       line("План трафика", plan > 0 ? num(plan) : "—"),
     ].join("\n")
   );
+}
+
+// «По способу оплаты» (Актау вместо «По кассам»): наличные и безнал по данным
+// МойСклад за те же кассы, что вошли в итоги дня. Возвраты вычитаются, как и из
+// выручки, так что нал + безнал = выручка дня. Безнал = всё, что не наличные
+// (карта, QR).
+async function paymentBlock(dayRows: SalesRow[], date: string): Promise<string> {
+  const registerIds = new Set(dayRows.map((r) => r.register_id));
+  const payments = await fetchPaymentSummariesForDate(date);
+  let total = 0;
+  let cash = 0;
+  for (const p of payments) {
+    if (!registerIds.has(p.retailStoreId)) continue;
+    const sign = p.kind === "sale" ? 1 : -1;
+    total += sign * p.sum;
+    cash += sign * p.cash;
+  }
+  const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+  return pre([line("Наличные", money(cash / 100)), line("Безнал", money((total - cash) / 100))].join("\n"));
 }
 
 function kassaBlock(rows: SalesRow[], compact: boolean): string {
@@ -240,7 +260,12 @@ async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<str
     .sort((a, b) => b[1].revenue - a[1].revenue)
     .map(([id, e], i) => {
       const mark = bigCheck && bigCheck.ownerId === id ? ` (бигчек ${num(bigCheck.sum / 100)})` : "";
-      return `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт`;
+      const avgCheck = e.receipts > 0 ? money(e.revenue / e.receipts) : "—";
+      const depth = e.receipts > 0 ? (e.items / e.receipts).toFixed(2) : "—";
+      return (
+        `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
+        `\n   ср.чек ${avgCheck} · глубина ${depth}`
+      );
     });
   return pre(lines.join("\n"));
 }
@@ -384,10 +409,11 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const compact = !!scope.compact;
   const employeesBlock = compact ? await buildEmployeeBlock(scope, date) : null;
   const returnsBlock = compact ? await buildReturnsBlock(scope, date, dayRows) : null;
+  const paymentsBlock = compact ? await paymentBlock(dayRows, date) : null;
   const coreSections = [
     title,
     section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),
-    section("ПО КАССАМ", kassaBlock(dayRows, compact)),
+    section(paymentsBlock ? "ПО СПОСОБУ ОПЛАТЫ" : "ПО КАССАМ", paymentsBlock ?? kassaBlock(dayRows, compact)),
     ...(employeesBlock ? [section("ПО СОТРУДНИКАМ", employeesBlock)] : []),
     ...(returnsBlock ? [section("ВОЗВРАТЫ", returnsBlock)] : []),
     ...(compact ? [] : [section("ТОП КАТЕГОРИЙ", categoryBlock)]),
