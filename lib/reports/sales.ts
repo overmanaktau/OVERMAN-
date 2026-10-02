@@ -79,6 +79,9 @@ type SalesRow = {
   receipts_count: number;
   items_count: number;
   cost: number | null;
+  returned_amount: number | null;
+  returned_receipts: number | null;
+  returned_items: number | null;
   sale_date: string;
   moysklad_registers: { name: string; store: string | null } | { name: string; store: string | null }[] | null;
 };
@@ -91,7 +94,9 @@ function registerOf(row: SalesRow) {
 async function loadSales(scope: ReportScope, from: string, to: string): Promise<SalesRow[]> {
   const { data, error } = await supabaseAdmin
     .from("moysklad_sales_daily")
-    .select("revenue, receipts_count, items_count, cost, sale_date, moysklad_registers(name, store)")
+    .select(
+      "revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items, sale_date, moysklad_registers(name, store)"
+    )
     .gte("sale_date", from)
     .lte("sale_date", to);
   if (error) throw error;
@@ -216,6 +221,63 @@ async function buildEmployeeBlock(scope: ReportScope, date: string): Promise<str
   return pre(lines.join("\n"));
 }
 
+// Возвраты — как на сайте (Продажа): «сумма · N чек · N тов.», вычитаются из
+// дня, когда произошёл сам возврат (выручка и чеки выше уже с их учётом).
+// Итог по городу плюс те сотрудники, кто оформлял возврат.
+function returnSummary(amount: number, receipts: number, items: number): string {
+  const parts = [money(amount)];
+  if (receipts > 0) parts.push(`${num(receipts)} чек`);
+  if (items > 0) parts.push(`${num(items)} тов.`);
+  return parts.join(" · ");
+}
+
+async function buildReturnsBlock(scope: ReportScope, date: string, dayRows: SalesRow[]): Promise<string> {
+  const total = dayRows.reduce(
+    (a, r) => ({
+      amount: a.amount + (r.returned_amount ?? 0),
+      receipts: a.receipts + (r.returned_receipts ?? 0),
+      items: a.items + (r.returned_items ?? 0),
+    }),
+    { amount: 0, receipts: 0, items: 0 }
+  );
+
+  const { data, error } = await supabaseAdmin
+    .from("moysklad_employee_sales_daily")
+    .select("employee_ms_id, employee_name, returned_amount, returned_receipts, returned_items")
+    .eq("sale_date", date)
+    .in("store", scope.cityCodes);
+  if (error) throw error;
+
+  const byEmployee = new Map<string, { name: string; amount: number; receipts: number; items: number }>();
+  for (const r of (data ?? []) as {
+    employee_ms_id: string;
+    employee_name: string;
+    returned_amount: number | null;
+    returned_receipts: number | null;
+    returned_items: number | null;
+  }[]) {
+    const amount = r.returned_amount ?? 0;
+    const receipts = r.returned_receipts ?? 0;
+    const items = r.returned_items ?? 0;
+    if (amount === 0 && receipts === 0 && items === 0) continue;
+    const agg = byEmployee.get(r.employee_ms_id) ?? { name: r.employee_name, amount: 0, receipts: 0, items: 0 };
+    agg.amount += amount;
+    agg.receipts += receipts;
+    agg.items += items;
+    byEmployee.set(r.employee_ms_id, agg);
+  }
+
+  if (total.amount === 0 && total.receipts === 0 && total.items === 0 && byEmployee.size === 0) {
+    return `<i>за день возвратов нет</i>`;
+  }
+
+  const lines = [`Всего: ${returnSummary(total.amount, total.receipts, total.items)}`];
+  const people = [...byEmployee.values()].sort((a, b) => b.amount - a.amount);
+  if (people.length > 0) lines.push("");
+  for (const e of people) lines.push(`${e.name}\n   ${returnSummary(e.amount, e.receipts, e.items)}`);
+  return pre(lines.join("\n"));
+}
+
 export async function buildSalesReport(scope: ReportScope, date: string): Promise<string[]> {
   const monthStart = `${date.slice(0, 8)}01`;
   const warehouses = warehousesForCities(scope.cityCodes);
@@ -292,11 +354,13 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
 
   const compact = !!scope.compact;
   const employeesBlock = compact ? await buildEmployeeBlock(scope, date) : null;
+  const returnsBlock = compact ? await buildReturnsBlock(scope, date, dayRows) : null;
   const coreSections = [
     title,
     section("ИТОГИ ДНЯ", kpiBlock(dayRows, visitors, compact)),
     section("ПО КАССАМ", kassaBlock(dayRows, compact)),
     ...(employeesBlock ? [section("ПО СОТРУДНИКАМ", employeesBlock)] : []),
+    ...(returnsBlock ? [section("ВОЗВРАТЫ", returnsBlock)] : []),
     ...(compact ? [] : [section("ТОП КАТЕГОРИЙ", categoryBlock)]),
     section("ПРОГНОЗ МЕСЯЦА", forecastBlock),
   ];
