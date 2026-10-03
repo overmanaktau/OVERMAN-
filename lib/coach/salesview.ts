@@ -13,6 +13,8 @@ type Period = "y" | "w" | "m" | "c"; // c — свой период (даты в
 const PERIOD_LABEL: Record<Period, string> = { y: "Вчера", w: "Последние 7 дней", m: "Месяц", c: "Свой период" };
 type Range = { from: string; to: string };
 const MAX_CUSTOM_DAYS = 366;
+const CASH_MAX_DAYS = 31; // касса города (оплаты и возвраты тянутся из МойСклад — дольше не успевает)
+const CASH_MAX_DAYS_ALL = 20; // касса по всем городам (два города подряд)
 
 export const ALL_STORES = Object.keys(CITY);
 
@@ -150,8 +152,21 @@ async function buildCashMessages(store: string, period: Period, custom?: Range):
   const { from, to } = rangeFor(period, custom);
   if (from > to) return ["📊 <b>Касса</b>\n\nЗа этот период данных ещё нет."];
   const scopes = store === "all" ? [SCOPES.point_1, SCOPES.point_3, SCOPES.all] : [SCOPES[store]];
+  // Оплаты, возвраты и LTV тянутся из МойСклад, и на длинном периоде бот не успевает
+  // ответить (за 9 месяцев — больше двух минут). Поэтому для длинного периода показываем
+  // облегчённую кассу (итоги и трафик — из базы) с пометкой.
+  const days = daysBetween(from, to) + 1;
+  const heavyLimit = store === "all" ? CASH_MAX_DAYS_ALL : CASH_MAX_DAYS;
+  const tooLong = days > heavyLimit;
+  // По очереди, не одновременно: МойСклад отвечает 429 на параллельные запросы. Общий итог
+  // по всем городам всегда облегчённый — остальное уже показано по каждому городу.
   const messages: string[] = [];
-  for (const scope of scopes) messages.push(...(await buildCashReport(scope, from, to)));
+  for (const scope of scopes) messages.push(...(await buildCashReport(scope, from, to, tooLong || scope.key === "all")));
+  if (tooLong) {
+    messages.push(
+      `<i>Период ${days} дн.: показаны итоги и трафик. Оплаты, возвраты и LTV считаются за период до ${heavyLimit} дней${store === "all" ? " (для всех городов)" : ""}.</i>`
+    );
+  }
   return messages;
 }
 

@@ -431,9 +431,9 @@ export async function buildPeriodReport(scope: ReportScope, kind: "week" | "mont
 }
 
 // Касса города (или всех городов) за произвольный период: итоги, способы оплаты,
-// возвраты и трафик — без разбивки по сотрудникам и LTV. Используется в боте
+// возвраты, трафик и LTV — без разбивки по сотрудникам. Используется в боте
 // («Продажи» → «По городу»).
-export async function buildCashReport(scope: ReportScope, from: string, to: string): Promise<string[]> {
+export async function buildCashReport(scope: ReportScope, from: string, to: string, lite = false): Promise<string[]> {
   const [rows, trafficRes] = await Promise.all([
     loadSales(scope, from, to),
     supabaseAdmin
@@ -450,12 +450,23 @@ export async function buildCashReport(scope: ReportScope, from: string, to: stri
 
   const period = from === to ? shortDate(from) : `${shortDate(from)} – ${shortDate(to)}`;
   const title = `📊 <b>Касса · ${escapeHtml(scope.title)}</b>\n<i>${period}</i>`;
+  // lite — только то, что считается из базы без МойСклад (общий итог по всем городам:
+  // оплаты, возвраты и LTV уже показаны отдельно по каждому городу).
+  if (lite) {
+    return packSections([
+      title,
+      section("ИТОГИ", kpiBlock(rows, visitors, true)),
+      section("ТРАФИК", trafficBlock(receipts, visitors, trafficPlan)),
+    ]);
+  }
   return packSections([
     title,
     section("ИТОГИ", kpiBlock(rows, visitors, true)),
     section("ПО СПОСОБУ ОПЛАТЫ", await paymentBlock(rows, from, to)),
     section("ВОЗВРАТЫ", await buildReturnsBlock(scope, from, to, rows)),
     section("ТРАФИК", trafficBlock(receipts, visitors, trafficPlan)),
+    // LTV видит только руководящий состав: отчёт «по городу» консультантам недоступен.
+    section("LTV", await ltvBlock(rows, from, to)),
   ]);
 }
 
