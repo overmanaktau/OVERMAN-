@@ -18,17 +18,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Нет доступа." }, { status: 403 });
     }
     const sent: { chat: number | string; html: string; markup?: ReplyMarkup }[] = [];
+    const deleted: { chat: number | string; messageId: number }[] = [];
     const mock: Transport = {
       async send(chat, html, markup) {
         sent.push({ chat, html, markup });
       },
       async answerCallback() {},
+      async deleteMessage(chat, messageId) {
+        deleted.push({ chat, messageId });
+      },
     };
     try {
       await handleUpdate((await request.json()) as TgUpdate, mock);
-      return NextResponse.json({ ok: true, sent });
+      return NextResponse.json({ ok: true, sent, deleted });
     } catch (e) {
-      return NextResponse.json({ error: getErrorMessage(e), sent }, { status: 500 });
+      return NextResponse.json({ error: getErrorMessage(e), sent, deleted }, { status: 500 });
     }
   }
 

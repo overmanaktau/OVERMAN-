@@ -142,7 +142,6 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeFilterFailed, setActiveFilterFailed] = useState(false);
   const [periods, setPeriods] = useState<PeriodsDraft>(EMPTY_PERIODS);
   const [originalPeriods, setOriginalPeriods] = useState<PeriodsDraft>(EMPTY_PERIODS);
 
@@ -217,7 +216,7 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
       setOriginalPeriods(loadedPeriods);
 
       // В списке остаются только активные сотрудники МойСклад. Если МойСклад не
-      // ответил, показываем всех, но предупреждаем об этом на странице.
+      // ответил — ошибка и пустой список (неактивных показывать нельзя).
       let activeIds: Set<string> | null = null;
       try {
         const {
@@ -228,9 +227,9 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
         });
         if (res.ok) activeIds = new Set(((await res.json()) as { activeIds: string[] }).activeIds);
       } catch {
-        // оставляем activeIds = null
+        // activeIds останется null
       }
-      setActiveFilterFailed(activeIds === null);
+      if (!activeIds) throw new Error("не удалось получить активных сотрудников из МойСклад");
 
       const pendingRowIds = new Set((requestsRes.data ?? []).map((r) => r.row_id));
       const byId = new Map<string, Employee>();
@@ -251,13 +250,14 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
         };
       }
       const list = [...byId.values()]
-        .filter((e) => !activeIds || activeIds.has(e.id))
+        .filter((e) => activeIds.has(e.id))
         .sort((a, b) => a.name.localeCompare(b.name, "ru"));
       setEmployees(list);
       setCells(next);
       setOriginalCells(next);
     } catch (e) {
       setError(`Не удалось загрузить план: ${getErrorMessage(e)}`);
+      setEmployees([]);
       setCells({});
       setOriginalCells({});
       setPeriods(EMPTY_PERIODS);
@@ -546,12 +546,6 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
               <button type="button" onClick={load} className="font-semibold underline">
                 Повторить
               </button>
-            </div>
-          )}
-          {activeFilterFailed && (
-            <div className="text-[12.5px] text-[#A34B36]">
-              Не удалось получить активных сотрудников из МойСклад — показаны все, кто продавал недавно, в том
-              числе возможно уже неактивные.
             </div>
           )}
 

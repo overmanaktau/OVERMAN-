@@ -10,7 +10,7 @@ import { type EmployeeRef, addDays, buildAdvice, monthStatus, todayInAlmaty, wee
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
 export type TgUpdate = {
   message?: { chat: { id: number; type: string }; from?: TgUser; text?: string };
-  callback_query?: { id: string; from: TgUser; data?: string; message?: { chat: { id: number; type: string } } };
+  callback_query?: { id: string; from: TgUser; data?: string; message?: { message_id?: number; chat: { id: number; type: string } } };
 };
 
 export type CoachUser = {
@@ -50,18 +50,15 @@ async function selectableEmployees(store: string): Promise<{ id: string; name: s
   ]);
   if (staff.error) throw staff.error;
   if (taken.error) throw taken.error;
-  let activeIds: Set<string> | null = null;
-  try {
-    activeIds = new Set(await fetchActiveEmployeeIds());
-  } catch {
-    activeIds = null; // МойСклад не ответил — показываем всех недавних
-  }
+  // Только активные в МойСклад. Если МойСклад не ответил — ошибка, а не список
+  // «на всякий случай»: неактивных сотрудников показывать нельзя.
+  const activeIds = new Set(await fetchActiveEmployeeIds());
   const takenIds = new Set((taken.data ?? []).map((r) => r.employee_ms_id as string));
   const byId = new Map<string, string>();
   for (const r of (staff.data ?? []) as { employee_ms_id: string; employee_name: string }[]) {
     if (HIDDEN_NAME.test(r.employee_name)) continue;
     if (takenIds.has(r.employee_ms_id)) continue;
-    if (activeIds && !activeIds.has(r.employee_ms_id)) continue;
+    if (!activeIds.has(r.employee_ms_id)) continue;
     byId.set(r.employee_ms_id, r.employee_name);
   }
   return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ru"));
@@ -74,7 +71,7 @@ function cityKeyboard(): ReplyMarkup {
 async function askCity(t: Transport, chatId: number) {
   await t.send(
     chatId,
-    "Здравствуйте! Я помощник продавца Overman: показываю план/факт и подсказываю, что повысить, чтобы закрыть план.\n\nВыберите ваш город:",
+    "Здравствуйте! Я помощник стилиста-консультанта Overman: показываю план/факт и подсказываю, что повысить, чтобы закрыть план.\n\nВыберите ваш город:",
     cityKeyboard()
   );
 }
@@ -164,30 +161,69 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   if (!chatId || cb.message?.chat.type !== "private" || !cb.data) return;
   await t.answerCallback(cb.id);
 
+  // Выбор сделан — сообщение с кнопками сразу убираем, на его месте появляется
+  // следующий шаг. Удалить можно не всегда (старше 48 часов) — это не критично.
+  const messageId = cb.message?.message_id;
+  const dropCurrent = async () => {
+    if (messageId === undefined) return;
+    try {
+      await t.deleteMessage(chatId, messageId);
+    } catch {
+      // оставляем как есть
+    }
+  };
+
   const existing = await findUser(cb.from.id);
   if (existing && existing.status !== "rejected") {
+    await dropCurrent();
     await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? MENU_MARKUP : undefined);
+    return;
+  }
+
+  if (cb.data === "back") {
+    await dropCurrent();
+    await t.send(chatId, "Выберите ваш город:", cityKeyboard());
     return;
   }
 
   if (cb.data.startsWith("city:")) {
     const store = cb.data.slice(5);
     if (!CITIES.some((c) => c.store === store)) return;
-    const employees = await selectableEmployees(store);
-    if (employees.length === 0) {
-      await t.send(chatId, "В этом городе пока нет свободных сотрудников для выбора. Обратитесь к руководителю.");
+    let employees: { id: string; name: string }[];
+    try {
+      employees = await selectableEmployees(store);
+    } catch {
+      await t.send(chatId, "Не удалось получить список сотрудников из МойСклад. Нажмите на город ещё раз через минуту.");
       return;
     }
-    await t.send(chatId, "Выберите себя в списке:", {
-      inline_keyboard: employees.map((e) => [{ text: e.name, callback_data: `emp:${store}:${e.id}` }]),
+    await dropCurrent();
+    if (employees.length === 0) {
+      await t.send(chatId, "В этом городе пока нет свободных сотрудников для выбора. Обратитесь к руководителю.", {
+        inline_keyboard: [[{ text: "← Назад", callback_data: "back" }]],
+      });
+      return;
+    }
+    const city = CITIES.find((c) => c.store === store)?.label ?? "";
+    await t.send(chatId, `Город: <b>${city}</b>. Выберите себя в списке:`, {
+      inline_keyboard: [
+        ...employees.map((e) => [{ text: e.name, callback_data: `emp:${store}:${e.id}` }]),
+        [{ text: "← Назад", callback_data: "back" }],
+      ],
     });
     return;
   }
 
   if (cb.data.startsWith("emp:")) {
     const [, store, employeeId] = cb.data.split(":");
-    const employees = await selectableEmployees(store);
+    let employees: { id: string; name: string }[];
+    try {
+      employees = await selectableEmployees(store);
+    } catch {
+      await t.send(chatId, "Не удалось проверить сотрудника в МойСклад. Нажмите на своё имя ещё раз через минуту.");
+      return;
+    }
     const chosen = employees.find((e) => e.id === employeeId);
+    await dropCurrent();
     if (!chosen) {
       await t.send(chatId, "Этот сотрудник уже занят или недоступен. Нажмите /start и выберите ещё раз, либо обратитесь к руководителю.");
       return;

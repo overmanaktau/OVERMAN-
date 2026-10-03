@@ -31,6 +31,8 @@ export type ReplyMarkup = Record<string, unknown>;
 export type Transport = {
   send(chatId: number | string, html: string, markup?: ReplyMarkup): Promise<void>;
   answerCallback(callbackId: string, text?: string): Promise<void>;
+  // Удалить сообщение (выбор сделан — кнопки больше не нужны). Ошибки не критичны.
+  deleteMessage(chatId: number | string, messageId: number): Promise<void>;
 };
 
 export const telegramTransport: Transport = {
@@ -46,6 +48,9 @@ export const telegramTransport: Transport = {
   },
   async answerCallback(callbackId, text) {
     await coachApi("answerCallbackQuery", { callback_query_id: callbackId, ...(text ? { text } : {}) });
+  },
+  async deleteMessage(chatId, messageId) {
+    await coachApi("deleteMessage", { chat_id: chatId, message_id: messageId });
   },
 };
 
