@@ -10,6 +10,11 @@ const STORE_BY_OBJECT_CODE: Record<string, string> = {
   "Overman Aktobe": "point_3", // Актобе
 };
 
+// Считаются только часы рабочего времени 10:00–23:59 (часы с 10 по 23) —
+// одинаково для всех точек, сейчас и в будущем (решение владельца). Всё, что
+// счётчик насчитал до 10:00, в трафик не идёт.
+const WORK_FROM_HOUR = 10;
+
 // Сколько процентов «вошло» вычитается по точке. Актау: счётчик у входа
 // считает и тех, кто зашёл не за покупкой (сотрудники и т.п.), — по решению
 // владельца в трафик идёт «вошло» минус 5%. Актобе — по факту.
@@ -40,10 +45,10 @@ export type DailyTraffic = {
 
 // «Вошло» (Income) по суткам для каждой точки за последние `days` дней
 // (максимум 20 — ограничение метода сервиса). Текущие незавершённые сутки в
-// ответ не включаются. Часы суммируются все (без фильтра рабочего времени),
-// как у сервиса по умолчанию: именно так сходятся ранее внесённые вручную
-// цифры по Актау.
-export async function fetchDailyTraffic(days: number, todayYmd: string): Promise<DailyTraffic[]> {
+// ответ не включаются. Суммируются часы с 10:00 до 23:59 (WORK_FROM_HOUR);
+// собственный фильтр рабочего времени сервиса не используется — у него своё
+// расписание по каждому счётчику.
+export async function fetchDailyTraffic(days: number, todayYmd: string, fromYmd?: string): Promise<DailyTraffic[]> {
   const key = orgKey();
   const [devices, data] = await Promise.all([
     getJson<DeviceInfo[]>(`/device/list/${key}`),
@@ -57,11 +62,13 @@ export async function fetchDailyTraffic(days: number, todayYmd: string): Promise
     if (!info || !store) continue;
     const byDate = new Map<string, number>();
     for (const item of device.Items) {
+      if (Number(item.DTime.slice(11, 13)) < WORK_FROM_HOUR) continue;
       const date = item.DTime.slice(0, 10);
       byDate.set(date, (byDate.get(date) ?? 0) + (Number(item.Income) || 0));
     }
     for (const [date, income] of byDate) {
       if (date >= todayYmd) continue; // сегодня ещё идёт
+      if (fromYmd && date < fromYmd) continue; // более ранние дни не трогаем
       const percent = DEDUCT_PERCENT[store] ?? 0;
       const fact = Math.round(income * (1 - percent / 100) * 100) / 100;
       // Данные суток полные, если последняя запись счётчика не раньше 23:00

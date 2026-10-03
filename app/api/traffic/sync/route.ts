@@ -7,14 +7,15 @@ import { yesterdayInAlmaty } from "@/lib/reports/sales";
 
 export const maxDuration = 60;
 
-// Автоматическое внесение «Трафик факт» из счётчиков посетителей: за последние
-// завершённые сутки (по умолчанию 3, чтобы пропущенный запуск догнался)
-// пишет в traffic_entries.traffic_fact «вошло» с вычетом процента точки
-// (Актау −5%, Актобе по факту — см. lib/trafficCounters.ts).
+// Автоматическое внесение «Трафик факт» из счётчиков посетителей: каждый день
+// в 03:00 за вчера (по умолчанию 1 день) пишет в traffic_entries.traffic_fact
+// «вошло» за рабочие часы 10:00–23:59 с вычетом процента точки (Актау −5%,
+// Актобе по факту — см. lib/trafficCounters.ts).
 // Уже внесённый факт (вручную или раньше) не перезаписывается — только
 // пустой. Сутки, по которым счётчик ещё не передал данные до конца дня,
 // пропускаются. Расписание — pg_cron (CRON_SECRET) или админ вручную.
-// ?days=N — сколько суток назад смотреть (1–20); ?dry=1 — только показать.
+// ?days=N — сколько суток назад смотреть (1–20); ?from=YYYY-MM-DD — не трогать
+// дни раньше этой даты (для разового заполнения месяца); ?dry=1 — только показать.
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization") ?? "";
@@ -25,15 +26,17 @@ async function handle(request: Request) {
   }
 
   const url = new URL(request.url);
-  const days = Math.min(Math.max(Number(url.searchParams.get("days")) || 3, 1), 20);
+  const days = Math.min(Math.max(Number(url.searchParams.get("days")) || 1, 1), 20);
   const dry = url.searchParams.get("dry") === "1";
+  const fromParam = url.searchParams.get("from");
+  const fromYmd = fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam) ? fromParam : undefined;
 
   try {
     const today = new Date(`${yesterdayInAlmaty()}T00:00:00Z`);
     today.setUTCDate(today.getUTCDate() + 1);
     const todayYmd = today.toISOString().slice(0, 10);
 
-    const rows = await fetchDailyTraffic(days, todayYmd);
+    const rows = await fetchDailyTraffic(days, todayYmd, fromYmd);
     const results: { store: string; date: string; income: number; fact: number; action: string }[] = [];
 
     for (const r of rows) {
