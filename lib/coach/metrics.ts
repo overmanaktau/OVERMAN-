@@ -375,16 +375,22 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
     return any ? total : null;
   };
 
+  // С планом сравниваем только дни, на которые план есть (например, неделя на
+  // стыке месяцев, когда на прошлый месяц план не вносили).
+  const planned = (d: DayRow): boolean => planPerDay(d.date) !== null;
   const lastPlan = sumPlan(lastFrom, lastTo);
   const lastFact = lastDays.reduce((a, d) => a + d.revenue, 0);
-  const shortfall = lastPlan === null ? 0 : Math.max(0, lastPlan - lastFact);
+  const lastFactPlanned = lastDays.filter(planned).reduce((a, d) => a + d.revenue, 0);
+  const shortfall = lastPlan === null ? 0 : Math.max(0, lastPlan - lastFactPlanned);
 
   const base = sumPlan(monday, thisTo);
   const remainingInMonth = daysBetween(monday, monthEndOf(monday)) + 1;
   const weekDaysInMonth = Math.min(7, remainingInMonth);
   const extra = shortfall > 0 ? (shortfall * weekDaysInMonth) / remainingInMonth : 0;
   const target = base === null ? null : base + extra;
-  const factSoFar = thisDays.filter((d) => d.date < today).reduce((a, d) => a + d.revenue, 0);
+  const factSoFar = thisDays
+    .filter((d) => d.date < today && (base === null || planned(d)))
+    .reduce((a, d) => a + d.revenue, 0);
   const shiftsPerWeek = Math.max(1, Math.round(days28.filter(isShift).length / 4));
 
   return {
