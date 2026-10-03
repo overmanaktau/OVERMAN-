@@ -28,6 +28,7 @@ export const SECTIONS = [
 
   { key: "marketing.statistics", label: "Статистика (+ Обзор, Продажа)", group: "marketing", hasEdit: false },
   { key: "marketing.data_entry", label: "Внесение данных", group: "marketing", hasEdit: true },
+  { key: "sales.plan", label: "Внесение плана продаж (раздел Продажа)", group: "marketing", hasEdit: true },
   { key: "marketing.publications", label: "Публикации", group: "marketing", hasEdit: true },
   { key: "marketing.instagram_target", label: "Инстаграм таргет", group: "marketing", hasEdit: false },
   { key: "marketing.competitor_analytics", label: "Аналитика конкурентов", group: "marketing", hasEdit: true },

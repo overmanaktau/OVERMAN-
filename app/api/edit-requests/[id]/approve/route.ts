@@ -25,6 +25,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
     if (!req.entry_date) {
       return NextResponse.json({ error: "В заявке не указана дата строки." }, { status: 400 });
     }
+    // План продаж просят изменить только когда он уже внесён (строка есть).
+    if (req.table_name === "sales_plan_entries") {
+      return NextResponse.json({ error: "В заявке на план продаж не указана строка." }, { status: 400 });
+    }
     const inserted =
       req.table_name === "traffic_entries"
         ? await supabaseAdmin

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
+import { SalesPlanWindow } from "@/components/SalesPlanWindow";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { warehousesForCities } from "@/lib/warehouses";
@@ -483,6 +484,8 @@ export default function ObzorPage() {
           )}
         </div>
       </div>
+
+      <SalesPlanWindow stores={selectedStores} />
 
       {loading ? (
         <div className="text-sm text-muted">Загрузка…</div>

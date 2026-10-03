@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
 import { useStoreSelection } from "@/components/StoreSelection";
+import { SalesPlanWindow } from "@/components/SalesPlanWindow";
+import { SalesPlanEntry } from "@/components/SalesPlanEntry";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -133,6 +135,8 @@ export default function SalesPage() {
   const { mobileLayout } = useSiteVersion();
   const { selected: selectedStores } = useStoreSelection();
   const canView = isAdmin || permissions["marketing.statistics"].canView;
+  // Меняется, когда план продаж внесли заново, — окно «План продаж» перечитывает данные.
+  const [planVersion, setPlanVersion] = useState(0);
 
   const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
   const [activeCustom, setActiveCustom] = useState<{ start: string; end: string } | null>(null);
@@ -645,6 +649,8 @@ export default function SalesPage() {
           )}
         </div>
       </div>
+
+      <SalesPlanWindow stores={selectedStores} refreshKey={planVersion} />
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-1.5 w-fit">
         <div className="text-xs text-muted">Конверсия (чек / посетитель)</div>
@@ -1166,6 +1172,8 @@ export default function SalesPage() {
           </div>
         )}
       </div>
+
+      <SalesPlanEntry onSaved={() => setPlanVersion((v) => v + 1)} />
     </>
   );
 }
