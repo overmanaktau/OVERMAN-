@@ -21,7 +21,10 @@ export async function sendSalesStart(t: Transport, chatId: number | string, stor
     return;
   }
   await t.send(chatId, "📊 <b>Продажи</b>\nВыберите город:", {
-    inline_keyboard: stores.map((s) => [{ text: CITY[s] ?? s, callback_data: `adm:s:c:${s}` }]),
+    inline_keyboard: [
+      ...stores.map((s) => [{ text: CITY[s] ?? s, callback_data: `adm:s:c:${s}` }]),
+      [{ text: "Все города", callback_data: "adm:s:c:all" }],
+    ],
   });
 }
 
@@ -30,7 +33,9 @@ async function sendPeriodMenu(t: Transport, chatId: number | string, store: stri
     { text: PERIOD_LABEL[p], callback_data: `adm:s:p:${store}:${p}` },
   ]);
   if (canGoBack) rows.push([{ text: "← Другой город", callback_data: "adm:s" }]);
-  await t.send(chatId, `📊 <b>Продажи · ${CITY[store] ?? store}</b>\nЗа какой период?`, { inline_keyboard: rows });
+  await t.send(chatId, `📊 <b>Продажи · ${store === "all" ? "Все города" : (CITY[store] ?? store)}</b>\nЗа какой период?`, {
+    inline_keyboard: rows,
+  });
 }
 
 function rangeFor(period: Period): { from: string; to: string } {
@@ -43,11 +48,12 @@ function rangeFor(period: Period): { from: string; to: string } {
 
 type Agg = { id: string; name: string; revenue: number; receipts: number };
 
-async function buildReport(store: string, period: Period): Promise<string> {
-  const { from, to } = rangeFor(period);
-  const title = `📊 <b>Продажи · ${CITY[store] ?? store}</b>\n${PERIOD_LABEL[period]}: ${from === to ? shortDate(from) : `${shortDate(from)}–${shortDate(to)}`} (по вчера)`;
-  if (from > to) return `${title}\n\nЗа этот период данных ещё нет.`;
+type Total = { revenue: number; receipts: number };
+const avgCheck = (a: Total) => (a.receipts > 0 ? money(a.revenue / a.receipts) : "—");
 
+// Стилисты одного города за период: список по убыванию выручки и планы месяца.
+async function cityData(store: string, period: Period): Promise<{ list: Agg[]; planOf: Map<string, number> }> {
+  const { from, to } = rangeFor(period);
   const [sales, plans] = await Promise.all([
     supabaseAdmin
       .from("moysklad_employee_sales_daily")
@@ -74,24 +80,52 @@ async function buildReport(store: string, period: Period): Promise<string> {
     a.receipts += Number(r.receipts_count) || 0;
     byId.set(r.employee_ms_id, a);
   }
-  const list = [...byId.values()].sort((a, b) => b.revenue - a.revenue);
-  if (list.length === 0) return `${title}\n\nПродаж за этот период нет.`;
+  return { list: [...byId.values()].sort((a, b) => b.revenue - a.revenue), planOf };
+}
 
-  const avg = (a: { revenue: number; receipts: number }) => (a.receipts > 0 ? money(a.revenue / a.receipts) : "—");
+function sumOf(list: Total[]): Total {
+  return list.reduce((s, a) => ({ revenue: s.revenue + a.revenue, receipts: s.receipts + a.receipts }), { revenue: 0, receipts: 0 });
+}
+
+function totalLines(label: string, total: Total): string[] {
+  return [`${label.padEnd(13)}${money(total.revenue).padStart(13)}`, `  чеков ${num(total.receipts)} · ср.чек ${avgCheck(total)}`];
+}
+
+// Таблица стилистов города (с планом за месяц) и итог по городу.
+function cityLines(list: Agg[], planOf: Map<string, number>, period: Period): string[] {
   const lines: string[] = [];
   for (const a of list) {
     lines.push(`${a.name.slice(0, 13).padEnd(13)}${money(a.revenue).padStart(13)}`);
-    lines.push(`  чеков ${num(a.receipts)} · ср.чек ${avg(a)}`);
+    lines.push(`  чеков ${num(a.receipts)} · ср.чек ${avgCheck(a)}`);
     const plan = planOf.get(a.id);
     if (period === "m" && plan !== undefined && plan > 0) {
       lines.push(`  план ${money(plan)} · ${((a.revenue / plan) * 100).toFixed(1)}%`);
     }
   }
-  const total = list.reduce((s, a) => ({ revenue: s.revenue + a.revenue, receipts: s.receipts + a.receipts }), { revenue: 0, receipts: 0 });
-  lines.push("─".repeat(26));
-  lines.push(`${"Итого".padEnd(13)}${money(total.revenue).padStart(13)}`);
-  lines.push(`  чеков ${num(total.receipts)} · ср.чек ${avg(total)}`);
-  return `${title}\n${pre(lines.join("\n"))}`;
+  lines.push("─".repeat(26), ...totalLines("Итого", sumOf(list)));
+  return lines;
+}
+
+// store — код города или "all" (все города, каждый отдельным блоком и общий итог).
+async function buildReport(store: string, period: Period): Promise<string> {
+  const { from, to } = rangeFor(period);
+  const label = store === "all" ? "Все города" : (CITY[store] ?? store);
+  const title = `📊 <b>Продажи · ${label}</b>\n${PERIOD_LABEL[period]}: ${from === to ? shortDate(from) : `${shortDate(from)}–${shortDate(to)}`} (по вчера)`;
+  if (from > to) return `${title}\n\nЗа этот период данных ещё нет.`;
+
+  const cities = store === "all" ? ALL_STORES : [store];
+  const data = await Promise.all(cities.map((c) => cityData(c, period)));
+  if (data.every((d) => d.list.length === 0)) return `${title}\n\nПродаж за этот период нет.`;
+
+  if (store !== "all") return `${title}\n${pre(cityLines(data[0].list, data[0].planOf, period).join("\n"))}`;
+
+  const blocks = cities.map((c, i) =>
+    data[i].list.length === 0
+      ? `<b>${CITY[c]}</b>: продаж нет.`
+      : `<b>${CITY[c]}</b>${pre(cityLines(data[i].list, data[i].planOf, period).join("\n"))}`
+  );
+  const all = sumOf(data.flatMap((d) => d.list));
+  return `${title}\n\n${blocks.join("\n")}\n<b>Всего по городам</b>${pre(totalLines("Итого", all).join("\n"))}`;
 }
 
 // Нажатия adm:s… ; stores — города, доступные этому администратору.
@@ -103,7 +137,8 @@ export async function handleSalesCallback(parts: string[], t: Transport, chatId:
     return;
   }
   const store = parts[3];
-  if (!stores.includes(store)) return; // чужой город — игнорируем
+  // Чужой город — игнорируем; «Все города» — только тому, у кого их больше одного.
+  if (store === "all" ? stores.length < 2 : !stores.includes(store)) return;
   if (kind === "c") {
     await sendPeriodMenu(t, chatId, store, stores.length > 1);
     return;
