@@ -5,25 +5,30 @@ import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
 import { getErrorMessage } from "@/lib/errors";
 
-type DayRow = {
+type Employee = { id: string; name: string };
+
+// Одна ячейка плана: сотрудник + дата. План вносится свободно один раз, а
+// изменить уже внесённый можно только по одобренному запросу (как план трафика).
+type Cell = {
   id?: number;
-  entryDate: string; // "YYYY-MM-DD" — ключ в базе
-  date: string; // "DD.MM" — только для показа
-  weekday: string;
-  weekend: boolean;
   plan: number | "";
-  // Был ли план уже внесён: первый раз — свободно на любую дату, а изменить
-  // внесённый можно только по одобренному запросу (как у плана трафика).
-  planEverEntered: boolean;
+  everEntered: boolean;
   requestPending: boolean;
   unlockExpiresAt: string | null;
 };
 
-const WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]; // как у Date#getDay()
+const EMPTY_CELL: Cell = { plan: "", everEntered: false, requestPending: false, unlockExpiresAt: null };
+
+const WEEKDAYS_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
 ];
+
+// Сотрудники берутся из МойСклад по продажам точки за последние дни. Бывшие
+// кассиры закрытой кассы Saya Park в список не попадают (если у них нет плана).
+const EMPLOYEE_LOOKBACK_DAYS = 45;
+const HIDDEN_EMPLOYEE_NAME = /саяпарк|saya/i;
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -36,6 +41,9 @@ function daysInMonth(year: number, monthIndex: number) {
 }
 function minutesLeft(iso: string, nowMs: number) {
   return Math.max(0, Math.ceil((new Date(iso).getTime() - nowMs) / 60000));
+}
+function money(n: number) {
+  return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
 
 // Цифры и одна запятая-разделитель (точка тоже печатается как запятая), до двух
@@ -70,34 +78,17 @@ function amountKeyDown(currentText: string) {
   };
 }
 
-function buildMonthRows(year: number, monthIndex: number): DayRow[] {
-  const rows: DayRow[] = [];
-  for (let d = 1; d <= daysInMonth(year, monthIndex); d++) {
-    const weekday = WEEKDAYS[new Date(year, monthIndex, d).getDay()];
-    rows.push({
-      entryDate: ymd(year, monthIndex, d),
-      date: `${pad2(d)}.${pad2(monthIndex + 1)}`,
-      weekday,
-      weekend: weekday === "Сб" || weekday === "Вс",
-      plan: "",
-      planEverEntered: false,
-      requestPending: false,
-      unlockExpiresAt: null,
-    });
-  }
-  return rows;
-}
-
-// Внесение плана продаж по датам (страница «Продажа»). Вносится отдельно на
-// каждую дату и каждую точку, как трафик в «Внесении данных» маркетинга:
-// первый раз — свободно, любая дата; изменить внесённый — только по
-// одобренному запросу (30 минут на правку после одобрения).
+// Внесение плана продаж по сотрудникам (страница «Продажа»). По умолчанию
+// свёрнуто — открывается кнопкой. Внутри: месяц, точка, имена сотрудников; по
+// нажатию на имя — календарь месяца с планом этого сотрудника на каждую дату.
+// План точки и месяца в окне «План продаж» — сумма планов сотрудников.
 export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   const { isAdmin, permissions, stores, accessibleStoreCodes, fullName, email } = useAuth();
   const canEdit = isAdmin || permissions["sales.plan"].canEdit;
   const requesterLabel = fullName || email || "Пользователь";
   const accessibleStores = stores.filter((s) => accessibleStoreCodes.includes(s.code));
 
+  const [open, setOpen] = useState(false);
   const [store, setStore] = useState("");
   useEffect(() => {
     if (!store && accessibleStores.length > 0) setStore(accessibleStores[0].code);
@@ -112,11 +103,13 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   const [year, setYear] = useState(today.getFullYear());
   const [monthIndex, setMonthIndex] = useState(today.getMonth());
 
-  const [rows, setRows] = useState<DayRow[]>([]);
-  const [originalRows, setOriginalRows] = useState<DayRow[]>([]);
-  const [editingField, setEditingField] = useState<string | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [selectedEmployee, setSelectedEmployee] = useState<string>("");
+  const [cells, setCells] = useState<Record<string, Cell>>({});
+  const [originalCells, setOriginalCells] = useState<Record<string, Cell>>({});
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,14 +120,12 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
     return () => clearInterval(id);
   }, []);
 
-  function rowIsExpired(unlockExpiresAt: string | null) {
-    return !!unlockExpiresAt && new Date(unlockExpiresAt).getTime() <= nowTick;
-  }
-  // Уже внесённый план закрыт, пока нет действующего (не истёкшего) окна
-  // после одобренного запроса.
-  function planLocked(row: DayRow) {
-    if (!row.planEverEntered) return false;
-    return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
+  const keyOf = (employeeId: string, date: string) => `${employeeId}|${date}`;
+  const cellOf = (employeeId: string, date: string): Cell => cells[keyOf(employeeId, date)] ?? EMPTY_CELL;
+
+  function isLocked(cell: Cell) {
+    if (!cell.everEntered) return false;
+    return !cell.unlockExpiresAt || new Date(cell.unlockExpiresAt).getTime() <= nowTick;
   }
 
   const load = useCallback(async () => {
@@ -144,107 +135,130 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
     try {
       const firstStr = ymd(year, monthIndex, 1);
       const lastStr = ymd(year, monthIndex, daysInMonth(year, monthIndex));
-      const [entriesRes, requestsRes] = await Promise.all([
+      const lookbackFrom = new Date();
+      lookbackFrom.setDate(lookbackFrom.getDate() - EMPLOYEE_LOOKBACK_DAYS);
+      const lookbackStr = ymd(lookbackFrom.getFullYear(), lookbackFrom.getMonth(), lookbackFrom.getDate());
+
+      const [entriesRes, requestsRes, staffRes] = await Promise.all([
         supabase.from("sales_plan_entries").select("*").eq("store", store).gte("entry_date", firstStr).lte("entry_date", lastStr),
         supabase
           .from("edit_requests")
-          .select("entry_date")
+          .select("row_id")
           .eq("table_name", "sales_plan_entries")
           .eq("status", "pending")
           .eq("store", store)
           .gte("entry_date", firstStr)
           .lte("entry_date", lastStr),
+        supabase
+          .from("moysklad_employee_sales_daily")
+          .select("employee_ms_id, employee_name")
+          .eq("store", store)
+          .gte("sale_date", lookbackStr),
       ]);
       if (entriesRes.error) throw entriesRes.error;
       if (requestsRes.error) throw requestsRes.error;
+      if (staffRes.error) throw staffRes.error;
 
-      const pendingDates = new Set((requestsRes.data ?? []).map((r) => r.entry_date));
-      const byDate = new Map((entriesRes.data ?? []).map((e) => [e.entry_date, e]));
-      const merged = buildMonthRows(year, monthIndex).map((row) => {
-        const db = byDate.get(row.entryDate);
-        if (!db) return { ...row, requestPending: pendingDates.has(row.entryDate) };
-        return {
-          ...row,
-          id: db.id,
-          plan: db.sales_plan ?? "",
-          planEverEntered: db.sales_plan !== null,
-          requestPending: pendingDates.has(row.entryDate),
-          unlockExpiresAt: db.unlock_expires_at ?? null,
-        } as DayRow;
-      });
-      setRows(merged);
-      setOriginalRows(merged);
+      const pendingRowIds = new Set((requestsRes.data ?? []).map((r) => r.row_id));
+      const next: Record<string, Cell> = {};
+      const byId = new Map<string, Employee>();
+      for (const row of (staffRes.data ?? []) as { employee_ms_id: string; employee_name: string }[]) {
+        if (HIDDEN_EMPLOYEE_NAME.test(row.employee_name)) continue;
+        byId.set(row.employee_ms_id, { id: row.employee_ms_id, name: row.employee_name });
+      }
+      for (const e of entriesRes.data ?? []) {
+        // Кто уже получил план, остаётся в списке, даже если давно не продавал.
+        if (!byId.has(e.employee_ms_id)) byId.set(e.employee_ms_id, { id: e.employee_ms_id, name: e.employee_name });
+        next[keyOf(e.employee_ms_id, e.entry_date)] = {
+          id: e.id,
+          plan: e.sales_plan ?? "",
+          everEntered: e.sales_plan !== null,
+          requestPending: pendingRowIds.has(e.id),
+          unlockExpiresAt: e.unlock_expires_at ?? null,
+        };
+      }
+      const list = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+      setEmployees(list);
+      setSelectedEmployee((prev) => (prev && list.some((x) => x.id === prev) ? prev : list[0]?.id ?? ""));
+      setCells(next);
+      setOriginalCells(next);
     } catch (e) {
       setError(`Не удалось загрузить план: ${getErrorMessage(e)}`);
-      const empty = buildMonthRows(year, monthIndex);
-      setRows(empty);
-      setOriginalRows(empty);
+      setCells({});
+      setOriginalCells({});
     } finally {
       setLoading(false);
     }
   }, [year, monthIndex, store]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (open) load();
+  }, [open, load]);
 
-  const dirtyCount = useMemo(() => {
-    let count = 0;
-    for (const row of rows) {
-      if (planLocked(row)) continue;
-      const original = originalRows.find((o) => o.entryDate === row.entryDate);
-      if (original && original.plan !== row.plan) count++;
+  const dirtyKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const key of Object.keys(cells)) {
+      if (isLocked(cells[key])) continue;
+      if ((originalCells[key] ?? EMPTY_CELL).plan !== cells[key].plan) keys.push(key);
     }
-    return count;
+    return keys;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, originalRows, nowTick]);
+  }, [cells, originalCells, nowTick]);
 
   useEffect(() => {
-    if (dirtyCount > 0) setJustSaved(false);
-  }, [dirtyCount]);
+    if (dirtyKeys.length > 0) setJustSaved(false);
+  }, [dirtyKeys.length]);
 
-  const total = rows.reduce((acc, r) => acc + (typeof r.plan === "number" ? r.plan : 0), 0);
+  const monthTotal = Object.values(cells).reduce((acc, c) => acc + (typeof c.plan === "number" ? c.plan : 0), 0);
+  const employeeTotal = (employeeId: string) =>
+    Object.entries(cells).reduce(
+      (acc, [key, c]) => (key.startsWith(`${employeeId}|`) && typeof c.plan === "number" ? acc + c.plan : acc),
+      0
+    );
 
+  function confirmLeave() {
+    return dirtyKeys.length === 0 || window.confirm("У вас есть несохранённые изменения. Перейти и потерять их?");
+  }
   function shiftMonth(delta: number) {
-    if (dirtyCount > 0 && !window.confirm("У вас есть несохранённые изменения. Перейти и потерять их?")) return;
+    if (!confirmLeave()) return;
     const t = year * 12 + monthIndex + delta;
     setYear(Math.floor(t / 12));
     setMonthIndex(((t % 12) + 12) % 12);
   }
   function changeStore(next: string) {
-    if (dirtyCount > 0 && !window.confirm("У вас есть несохранённые изменения. Перейти и потерять их?")) return;
+    if (!confirmLeave()) return;
     setStore(next);
   }
 
-  function updateCell(index: number, rawValue: string) {
-    if (!canEdit || !rows[index] || planLocked(rows[index])) return;
+  function updateCell(employeeId: string, date: string, rawValue: string) {
+    const key = keyOf(employeeId, date);
+    const current = cells[key] ?? EMPTY_CELL;
+    if (!canEdit || isLocked(current)) return;
     const text = sanitizeAmountText(rawValue);
     setEditingText(text);
-    setRows((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], plan: parseAmountText(text) };
-      return next;
-    });
+    setCells((prev) => ({ ...prev, [key]: { ...(prev[key] ?? EMPTY_CELL), plan: parseAmountText(text) } }));
   }
 
-  async function requestUnlock(row: DayRow) {
-    if (saving || !row.id) return;
+  async function requestUnlock(employee: Employee, date: string) {
+    const cell = cellOf(employee.id, date);
+    if (saving || !cell.id) return;
     setError(null);
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
       const uid = userData.user?.id;
       if (!uid) throw new Error("Нет активной сессии.");
+      const [y, m, d] = date.split("-");
       const { error: insertError } = await supabase.from("edit_requests").insert({
         table_name: "sales_plan_entries",
-        row_id: row.id,
-        entry_date: row.entryDate,
+        row_id: cell.id,
+        entry_date: date,
         store,
-        context: `Точка «${storeName}», план продаж за ${row.date}.${year}. Заявитель: ${requesterLabel}`,
+        context: `Точка «${storeName}», сотрудник «${employee.name}», план продаж за ${d}.${m}.${y}. Заявитель: ${requesterLabel}`,
         requested_by: uid,
       });
       if (insertError) throw insertError;
-      setRows((prev) => prev.map((r) => (r.entryDate === row.entryDate ? { ...r, requestPending: true } : r)));
+      setCells((prev) => ({ ...prev, [keyOf(employee.id, date)]: { ...cell, requestPending: true } }));
     } catch (e) {
       setError(`Не удалось отправить запрос: ${getErrorMessage(e)}`);
     }
@@ -256,29 +270,35 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
     setError(null);
     const failed: string[] = [];
     try {
-      for (const row of rows) {
-        if (planLocked(row)) continue;
-        const original = originalRows.find((o) => o.entryDate === row.entryDate);
-        if (!original || original.plan === row.plan) continue;
+      for (const key of dirtyKeys) {
+        const [employeeId, date] = key.split("|");
+        const employee = employees.find((e) => e.id === employeeId);
+        if (!employee) continue;
+        const cell = cells[key];
+        const original = originalCells[key] ?? EMPTY_CELL;
+        const [y, m, d] = date.split("-");
+        const label = `${employee.name}, ${d}.${m}.${y}`;
 
         const payload: Record<string, unknown> = {
           store,
-          entry_date: row.entryDate,
-          sales_plan: row.plan === "" ? null : row.plan,
+          employee_ms_id: employee.id,
+          employee_name: employee.name,
+          entry_date: date,
+          sales_plan: cell.plan === "" ? null : cell.plan,
         };
         // Изменённый уже внесённый план снова закрывается: следующая правка —
         // только по новому запросу.
-        const planWasChanged = original.planEverEntered && row.plan !== original.plan;
+        const planWasChanged = original.everEntered && cell.plan !== original.plan;
         if (planWasChanged) {
           payload.locked = true;
           payload.unlock_expires_at = null;
         }
         try {
-          if (row.id) {
+          if (cell.id) {
             const { data: updated, error: updateError } = await supabase
               .from("sales_plan_entries")
               .update(payload)
-              .eq("id", row.id)
+              .eq("id", cell.id)
               .select("id");
             if (updateError) throw updateError;
             if (!updated || updated.length === 0) throw new Error("время на изменение истекло — запросите доступ снова");
@@ -286,9 +306,9 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
               const { data: userData } = await supabase.auth.getUser();
               await supabase.from("edit_history").insert({
                 table_name: "sales_plan_entries",
-                row_id: row.id,
+                row_id: cell.id,
                 store,
-                summary: `Точка «${storeName}», план продаж за ${row.date}.${year}: ${original.plan === "" ? "—" : original.plan} → ${row.plan === "" ? "—" : row.plan}`,
+                summary: `Точка «${storeName}», сотрудник «${employee.name}», план продаж за ${d}.${m}.${y}: ${original.plan === "" ? "—" : original.plan} → ${cell.plan === "" ? "—" : cell.plan}`,
                 changed_by: userData.user?.id ?? null,
                 changed_by_name: requesterLabel,
               });
@@ -298,13 +318,13 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
             if (insertError) throw insertError;
           }
         } catch (rowError) {
-          failed.push(`${row.date}.${year} (${getErrorMessage(rowError)})`);
+          failed.push(`${label} (${getErrorMessage(rowError)})`);
         }
       }
     } finally {
       await load();
       if (failed.length > 0) {
-        setError(`Не удалось сохранить: ${failed.join(", ")}. Остальные даты сохранены — попробуйте ещё раз для этих.`);
+        setError(`Не удалось сохранить: ${failed.join("; ")}. Остальное сохранено — попробуйте ещё раз для этих.`);
       } else {
         setJustSaved(true);
         onSaved?.();
@@ -315,141 +335,211 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
 
   if (accessibleStores.length === 0) return null;
 
+  const employee = employees.find((e) => e.id === selectedEmployee) ?? null;
+  const firstWeekdayOffset = (new Date(year, monthIndex, 1).getDay() + 6) % 7; // неделя с понедельника
+  const dayCount = daysInMonth(year, monthIndex);
+
   return (
-    <div className="bg-surface border border-border rounded-card p-5 flex flex-col gap-3.5">
-      <div className="flex flex-col gap-1">
-        <div className="text-sm font-bold">Внесение плана продаж</div>
-        <p className="text-[12.5px] text-muted max-w-2xl m-0">
-          План вносится отдельно на каждую дату и точку. Внести план на дату можно свободно один раз
-          (любая дата, в том числе вперёд); изменить уже внесённый — только по одобренному запросу.
-          {!canEdit && " У вас только просмотр — вносить план может сотрудник с доступом «Внесение плана продаж»."}
-        </p>
-        {error && (
-          <div className="flex items-center gap-3 text-sm text-[#A34B36]">
-            <span>{error}</span>
-            <button type="button" onClick={load} className="font-semibold underline">
-              Повторить
-            </button>
-          </div>
-        )}
-      </div>
+    <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-4">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between gap-3 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-[15px] font-bold">Внесение плана продаж по сотрудникам</span>
+        <span className="text-[12.5px] font-semibold text-accent border border-accent rounded-md px-3 py-1.5">
+          {open ? "Свернуть" : "Открыть"}
+        </span>
+      </button>
 
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-3 bg-paper border border-border rounded-card p-1.5">
-          <button
-            type="button"
-            aria-label="Предыдущий месяц"
-            onClick={() => shiftMonth(-1)}
-            disabled={loading}
-            className="w-[30px] h-[30px] rounded-md text-muted disabled:opacity-50"
-          >
-            ‹
-          </button>
-          <div className="text-[15px] font-bold min-w-[150px] text-center">
-            {MONTH_NAMES[monthIndex]} {year}
-          </div>
-          <button
-            type="button"
-            aria-label="Следующий месяц"
-            onClick={() => shiftMonth(1)}
-            disabled={loading}
-            className="w-[30px] h-[30px] rounded-md text-muted disabled:opacity-50"
-          >
-            ›
-          </button>
-        </div>
-        <select
-          value={store}
-          onChange={(e) => changeStore(e.target.value)}
-          disabled={loading || accessibleStores.length <= 1}
-          className="text-[13px] font-semibold bg-paper border border-border rounded-lg px-3 py-2 disabled:opacity-70"
-        >
-          {accessibleStores.map((s) => (
-            <option key={s.code} value={s.code}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-[60px_46px_minmax(110px,200px)_1fr] gap-2 pb-2 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-        <div>Дата</div>
-        <div>День</div>
-        <div>План продаж, ₸</div>
-        <div className="text-right">Строка</div>
-      </div>
-
-      {rows.map((row, i) => {
-        const locked = planLocked(row);
-        const showCountdown = !locked && row.planEverEntered && row.unlockExpiresAt;
-        const cellKey = `plan-${i}`;
-        const isEditing = editingField === cellKey;
-        return (
-          <div
-            key={row.entryDate}
-            className={`grid grid-cols-[60px_46px_minmax(110px,200px)_1fr] gap-2 items-center py-1 border-b border-borderSoft ${
-              row.weekend ? "bg-weekendTint" : ""
-            }`}
-          >
-            <div className="text-[12.5px] text-muted">{row.date}</div>
-            <div className="text-[12.5px] text-mutedLight">{row.weekday}</div>
-            <input
-              type="text"
-              inputMode="decimal"
-              disabled={!canEdit || locked || loading}
-              value={isEditing ? editingText : formatGrouped(row.plan)}
-              onFocus={() => {
-                setEditingField(cellKey);
-                setEditingText(row.plan === "" ? "" : String(row.plan).replace(".", ","));
-              }}
-              onChange={(e) => updateCell(i, e.target.value)}
-              onBlur={() => setEditingField(null)}
-              onKeyDown={amountKeyDown(editingText)}
-              placeholder="0"
-              className="w-full box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
-            />
-            <div className="flex flex-col items-end gap-0.5">
-              {locked &&
-                (row.requestPending ? (
-                  <span className="text-[11px] text-mutedLight italic">Ожидает</span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={!canEdit}
-                    onClick={() => requestUnlock(row)}
-                    className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
-                  >
-                    Запрос
-                  </button>
-                ))}
-              {showCountdown && (
-                <span className="text-[9.5px] text-mutedLight italic">
-                  ещё {minutesLeft(row.unlockExpiresAt as string, nowTick)}м
-                </span>
-              )}
+      {open && (
+        <>
+          <p className="text-[12.5px] text-muted max-w-2xl m-0">
+            План вносится на каждую дату отдельно для каждого сотрудника. План точки и месяца в окне «План продаж» —
+            сумма планов сотрудников. Внести план на дату можно свободно один раз (любая дата, в том числе вперёд),
+            изменить уже внесённый — только по одобренному запросу.
+            {!canEdit && " У вас только просмотр — вносить план может сотрудник с доступом «Внесение плана продаж»."}
+          </p>
+          {error && (
+            <div className="flex items-center gap-3 text-sm text-[#A34B36]">
+              <span>{error}</span>
+              <button type="button" onClick={load} className="font-semibold underline">
+                Повторить
+              </button>
             </div>
-          </div>
-        );
-      })}
+          )}
 
-      <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
-        <div className="text-[13px] text-muted">
-          Итого план на месяц:{" "}
-          <span className="num text-ink font-bold">
-            {total.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₸
-          </span>
-        </div>
-        <button
-          type="button"
-          disabled={!canEdit || dirtyCount === 0 || saving}
-          onClick={handleSave}
-          className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
-            dirtyCount > 0 && !saving ? "bg-accent text-paper" : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
-          }`}
-        >
-          {saving ? "Сохраняем…" : justSaved ? "Сохранено" : "Сохранить план"}
-        </button>
-      </div>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-3 bg-paper border border-border rounded-card p-1.5">
+              <button
+                type="button"
+                aria-label="Предыдущий месяц"
+                onClick={() => shiftMonth(-1)}
+                disabled={loading}
+                className="w-[30px] h-[30px] rounded-md text-muted disabled:opacity-50"
+              >
+                ‹
+              </button>
+              <div className="text-[15px] font-bold min-w-[150px] text-center">
+                {MONTH_NAMES[monthIndex]} {year}
+              </div>
+              <button
+                type="button"
+                aria-label="Следующий месяц"
+                onClick={() => shiftMonth(1)}
+                disabled={loading}
+                className="w-[30px] h-[30px] rounded-md text-muted disabled:opacity-50"
+              >
+                ›
+              </button>
+            </div>
+            <select
+              value={store}
+              onChange={(e) => changeStore(e.target.value)}
+              disabled={loading || accessibleStores.length <= 1}
+              className="text-[13px] font-semibold bg-paper border border-border rounded-lg px-3 py-2 disabled:opacity-70"
+            >
+              {accessibleStores.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {loading && employees.length === 0 ? (
+            <div className="text-sm text-muted">Загрузка…</div>
+          ) : employees.length === 0 ? (
+            <div className="text-sm text-muted">
+              Сотрудников этой точки пока нет — они появляются в списке после первых продаж в МойСклад.
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {employees.map((e) => {
+                  const active = e.id === selectedEmployee;
+                  const total = employeeTotal(e.id);
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      onClick={() => setSelectedEmployee(e.id)}
+                      className={`flex flex-col items-start rounded-lg border px-3 py-1.5 text-left transition-colors ${
+                        active ? "border-accent bg-accent text-paper" : "border-border bg-paper text-ink"
+                      }`}
+                    >
+                      <span className="text-[13px] font-semibold leading-tight">{e.name}</span>
+                      <span className={`text-[11px] num ${active ? "text-paper/80" : "text-mutedLight"}`}>
+                        {total > 0 ? money(total) : "план не внесён"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {employee && (
+                <div className="flex flex-col gap-2 max-w-[760px]">
+                  <div className="hidden sm:grid grid-cols-7 gap-1.5 text-[10.5px] uppercase tracking-wide text-mutedLight text-center">
+                    {WEEKDAYS_SHORT.map((w) => (
+                      <div key={w}>{w}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-7 gap-1.5">
+                    {Array.from({ length: firstWeekdayOffset }).map((_, i) => (
+                      <div key={`blank-${i}`} className="hidden sm:block" />
+                    ))}
+                    {Array.from({ length: dayCount }).map((_, i) => {
+                      const day = i + 1;
+                      const date = ymd(year, monthIndex, day);
+                      const weekdayIdx = (firstWeekdayOffset + i) % 7;
+                      const weekend = weekdayIdx >= 5;
+                      const cell = cellOf(employee.id, date);
+                      const locked = isLocked(cell);
+                      const key = keyOf(employee.id, date);
+                      const isEditing = editingKey === key;
+                      const showCountdown = !locked && cell.everEntered && cell.unlockExpiresAt;
+                      return (
+                        <div
+                          key={date}
+                          className={`rounded-lg border border-borderSoft p-1.5 flex flex-col gap-1 min-w-0 ${
+                            weekend ? "bg-weekendTint" : ""
+                          }`}
+                        >
+                          <div className="flex items-baseline justify-between gap-1">
+                            <span className="text-[12px] font-semibold">{day}</span>
+                            <span className="text-[10px] text-mutedLight sm:hidden">{WEEKDAYS_SHORT[weekdayIdx]}</span>
+                          </div>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            disabled={!canEdit || locked || loading}
+                            value={isEditing ? editingText : formatGrouped(cell.plan)}
+                            onFocus={() => {
+                              setEditingKey(key);
+                              setEditingText(cell.plan === "" ? "" : String(cell.plan).replace(".", ","));
+                            }}
+                            onChange={(e) => updateCell(employee.id, date, e.target.value)}
+                            onBlur={() => setEditingKey(null)}
+                            onKeyDown={amountKeyDown(editingText)}
+                            placeholder="0"
+                            className="w-full box-border text-right text-[12px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                          />
+                          {(locked || showCountdown) && (
+                            <div className="flex items-center justify-end min-h-[18px]">
+                              {locked &&
+                                (cell.requestPending ? (
+                                  <span className="text-[10px] text-mutedLight italic">ожидает</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={!canEdit}
+                                    onClick={() => requestUnlock(employee, date)}
+                                    className="text-[10px] font-semibold text-accent underline disabled:opacity-50"
+                                  >
+                                    запрос
+                                  </button>
+                                ))}
+                              {showCountdown && (
+                                <span className="text-[10px] text-mutedLight italic">
+                                  ещё {minutesLeft(cell.unlockExpiresAt as string, nowTick)}м
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3 flex-wrap pt-2 border-t border-borderSoft">
+                <div className="text-[13px] text-muted flex flex-col gap-0.5">
+                  {employee && (
+                    <span>
+                      {employee.name}, план на месяц: <span className="num text-ink font-bold">{money(employeeTotal(employee.id))}</span>
+                    </span>
+                  )}
+                  <span>
+                    Все сотрудники, {storeName}: <span className="num text-ink font-bold">{money(monthTotal)}</span>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={!canEdit || dirtyKeys.length === 0 || saving}
+                  onClick={handleSave}
+                  className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
+                    dirtyKeys.length > 0 && !saving ? "bg-accent text-paper" : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+                  }`}
+                >
+                  {saving ? "Сохраняем…" : justSaved ? "Сохранено" : "Сохранить план"}
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -20,12 +20,18 @@ function money(n: number) {
 }
 
 // Окно «План продаж» (Обзор и Продажа): план на текущий месяц по выбранным
-// точкам, факт выручки с 1-го числа (МойСклад синхронизируется ночью за
-// вчера, сегодняшнего дня в факте ещё нет), процент выполнения и сколько
-// нужно продавать в день до конца месяца, считая сегодняшний день.
+// точкам (сумма планов сотрудников), факт выручки с 1-го числа (МойСклад
+// синхронизируется ночью за вчера, сегодняшнего дня в факте ещё нет), процент
+// выполнения и сколько нужно сегодня.
+// «Нужно сегодня» считается по плану каждой даты: недобор месяца (план минус
+// факт) распределяется на оставшиеся дни, считая сегодняшний, пропорционально
+// их плану — то есть сегодня нужно столько, сколько приходится на сегодня.
+// Если плана по датам нет, недобор делится на оставшиеся дни поровну.
 // `refreshKey` меняется, когда план внесли заново (страница «Продажа»).
 export function SalesPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refreshKey?: number }) {
   const [plan, setPlan] = useState(0);
+  const [planToday, setPlanToday] = useState(0);
+  const [planRemaining, setPlanRemaining] = useState(0); // план на сегодня и все дни после
   const [fact, setFact] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +45,8 @@ export function SalesPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; 
   useEffect(() => {
     if (stores.length === 0) {
       setPlan(0);
+      setPlanToday(0);
+      setPlanRemaining(0);
       setFact(0);
       setLoading(false);
       return;
@@ -51,7 +59,7 @@ export function SalesPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; 
         const [planRes, factRes] = await Promise.all([
           supabase
             .from("sales_plan_entries")
-            .select("store, sales_plan")
+            .select("entry_date, sales_plan")
             .in("store", stores)
             .gte("entry_date", ymd(monthStart))
             .lte("entry_date", ymd(monthEnd)),
@@ -65,7 +73,19 @@ export function SalesPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; 
         if (factRes.error) throw factRes.error;
         if (cancelled) return;
 
-        setPlan((planRes.data ?? []).reduce((acc, r) => acc + (Number(r.sales_plan) || 0), 0));
+        const todayStr = ymd(today);
+        let planSum = 0;
+        let todaySum = 0;
+        let remainingSum = 0;
+        for (const r of (planRes.data ?? []) as { entry_date: string; sales_plan: number | null }[]) {
+          const v = Number(r.sales_plan) || 0;
+          planSum += v;
+          if (r.entry_date === todayStr) todaySum += v;
+          if (r.entry_date >= todayStr) remainingSum += v;
+        }
+        setPlan(planSum);
+        setPlanToday(todaySum);
+        setPlanRemaining(remainingSum);
         type FactRow = {
           revenue: number;
           moysklad_registers: { store: string | null } | { store: string | null }[] | null;
@@ -90,7 +110,9 @@ export function SalesPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; 
 
   const daysLeft = daysInMonth - today.getDate() + 1;
   const pct = plan > 0 ? (fact / plan) * 100 : null;
-  const perDay = plan > 0 && daysLeft > 0 ? Math.max(0, plan - fact) / daysLeft : null;
+  const deficit = Math.max(0, plan - fact);
+  const needToday =
+    plan <= 0 || daysLeft <= 0 ? null : planRemaining > 0 ? (deficit * planToday) / planRemaining : deficit / daysLeft;
 
   return (
     <div className="bg-surface border border-border rounded-card p-5 flex flex-col gap-3.5">
@@ -121,8 +143,9 @@ export function SalesPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; 
               <div className="font-serif text-[22px] font-semibold num">{pct !== null ? `${pct.toFixed(2)}%` : "—"}</div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <div className="text-xs text-muted">Нужно в день до конца месяца</div>
-              <div className="font-serif text-[22px] font-semibold num">{perDay !== null ? money(perDay) : "—"}</div>
+              <div className="text-xs text-muted">Нужно сегодня</div>
+              <div className="font-serif text-[22px] font-semibold num">{needToday !== null ? money(needToday) : "—"}</div>
+              {planToday > 0 && <div className="text-[11px] text-mutedLight">план на сегодня {money(planToday)}</div>}
             </div>
           </div>
 
@@ -134,7 +157,8 @@ export function SalesPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; 
 
           {plan <= 0 && (
             <div className="text-[12.5px] text-muted">
-              План на этот месяц не внесён — вносится в разделе «Продажа», внизу страницы.
+              План на этот месяц не внесён — вносится по сотрудникам в разделе «Продажа», кнопка «Внесение плана
+              продаж по сотрудникам» внизу страницы.
             </div>
           )}
         </>
