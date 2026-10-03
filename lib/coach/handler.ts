@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployeeIds } from "@/lib/moysklad";
 import { LEAVE_TEXT, REMOVE_KEYBOARD, isOwner, menuFor, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
-import { ALL_STORES, sendDemoSales, sendSalesStart } from "@/lib/coach/salesview";
+import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, setAwaiting } from "@/lib/coach/salesview";
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
 import {
   TEST_BANNER,
@@ -38,6 +38,7 @@ export type CoachUser = {
   is_test: boolean;
   test_role: "consultant" | "manager" | null;
   test_expires_at: string | null;
+  awaiting: string | null;
 };
 
 const CITIES: { store: string; label: string }[] = [
@@ -239,6 +240,12 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
       return;
     }
     const section = SECTION_BY_TEXT[text.toLowerCase()];
+    // Бот ждёт свой период для «Продаж»: любой текст, кроме кнопок меню, — это ввод дат.
+    if (user.awaiting?.startsWith("sales:") && user.is_admin && !section) {
+      await handleCustomPeriodInput(t, user, user.awaiting, text, adminStores(user));
+      return;
+    }
+    if (user.awaiting) await setAwaiting(user.id, null);
     if (section) {
       await showSection(t, user, section);
     } else {
@@ -324,7 +331,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   if (cb.data.startsWith("adm:")) {
     // Только подтверждённый администратор; от остальных нажатия молча игнорируем.
     if (!existing || existing.status !== "approved" || !existing.is_admin || existing.is_test) return;
-    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent, adminStores(existing), isOwner(existing));
+    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent, adminStores(existing), isOwner(existing), existing.id);
     return;
   }
 

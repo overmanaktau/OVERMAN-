@@ -146,7 +146,8 @@ export async function handleAdminCallback(
   dropCurrent: () => Promise<void>,
   clearCurrent: () => Promise<void>,
   stores: string[], // города, которые видит этот администратор
-  owner: boolean // заявки и сотрудников обрабатывает только владелец
+  owner: boolean, // заявки и сотрудников обрабатывает только владелец
+  userId: number // запись администратора (для ожидания ввода своего периода)
 ): Promise<void> {
   // adm:list | adm:u:<id> | adm:ask:<action>:<id> | adm:do:<action>:<id> | adm:req:<action>:<id> | adm:s…
   const parts = data.split(":");
@@ -159,7 +160,7 @@ export async function handleAdminCallback(
   if (kind === "req") await clearCurrent();
   else await dropCurrent();
   if (kind === "s") {
-    await handleSalesCallback(parts, t, chatId, stores);
+    await handleSalesCallback(parts, t, chatId, stores, userId);
     return;
   }
   if (kind === "list") {
