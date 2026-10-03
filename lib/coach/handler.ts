@@ -5,7 +5,7 @@ import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployees } from "@/lib/moysklad";
 import { LEAVE_TEXT, REMOVE_KEYBOARD, isOwner, menuFor, roleLabel, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, setAwaiting } from "@/lib/coach/salesview";
-import { handleAdminCallback, handleDemoCallback, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
+import { handleAdminCallback, handleDemoCallback, notifyAdminsOfCancel, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
 import {
   TEST_BANNER,
   TEST_EMPLOYEE_ID,
@@ -122,6 +122,9 @@ async function askCity(t: Transport, chatId: number) {
     cityKeyboard()
   );
 }
+
+// Под сообщением «заявка отправлена» — отмена, если выбрал не того сотрудника.
+const PENDING_MARKUP: ReplyMarkup = { inline_keyboard: [[{ text: "✖️ Отменить заявку", callback_data: "cancel:req" }]] };
 
 function statusText(u: CoachUser): string {
   switch (u.status) {
@@ -283,7 +286,7 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
     await askCity(t, chatId);
     return;
   }
-  await t.send(chatId, statusText(user), REMOVE_KEYBOARD);
+  await t.send(chatId, statusText(user), user.status === "pending" ? PENDING_MARKUP : REMOVE_KEYBOARD);
 }
 
 async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Transport): Promise<void> {
@@ -362,9 +365,29 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     return;
   }
 
+  if (cb.data === "cancel:req") {
+    await dropCurrent();
+    if (!existing || existing.status !== "pending") {
+      await t.send(chatId, "Активной заявки нет. Чтобы подать заявку, нажмите /start.", REMOVE_KEYBOARD);
+      return;
+    }
+    // Тот, кто раньше выходил (rejoined), остаётся «вышедшим», остальные — запись удаляется
+    // совсем, чтобы повторная заявка не выглядела как возвращение.
+    const { error } = existing.rejoined
+      ? await supabaseAdmin
+          .from("coach_users")
+          .update({ status: "left", left_at: new Date().toISOString(), is_admin: false, admin_scope: "city", awaiting: null })
+          .eq("id", existing.id)
+      : await supabaseAdmin.from("coach_users").delete().eq("id", existing.id);
+    if (error) throw error;
+    await t.send(chatId, "Заявка отменена. Если ошиблись, выберите город заново:", cityKeyboard());
+    await notifyAdminsOfCancel(t, existing.employee_name, existing.store);
+    return;
+  }
+
   if (existing && existing.status !== "rejected" && existing.status !== "left") {
     await dropCurrent();
-    await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? menuFor(existing) : undefined);
+    await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? menuFor(existing) : existing.status === "pending" ? PENDING_MARKUP : undefined);
     return;
   }
 
@@ -501,8 +524,8 @@ async function submitRequest(
   }
   await t.send(
     chatId,
-    `${who.rejoined ? "С возвращением! " : ""}Заявка отправлена: <b>${escapeHtml(who.employee_name)}</b>. Руководитель должен подтвердить, что это вы. Как только подтвердит, вам придёт сообщение.`,
-    REMOVE_KEYBOARD
+    `${who.rejoined ? "С возвращением! " : ""}Заявка отправлена: <b>${escapeHtml(who.employee_name)}</b>. Руководитель должен подтвердить, что это вы. Как только подтвердит, вам придёт сообщение.\n\nВыбрали не того? Заявку можно отменить.`,
+    PENDING_MARKUP
   );
   await notifyAdminsOfRequest(t, cb.from.id);
 }

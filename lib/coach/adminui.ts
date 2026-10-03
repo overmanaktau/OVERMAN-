@@ -310,6 +310,27 @@ export async function handleDemoCallback(data: string, t: Transport, chatId: num
   }
 }
 
+// Заявку отменил сам сотрудник — главный владелец узнаёт об этом (кнопки в старом
+// сообщении «Новая заявка» перестанут работать).
+export async function notifyAdminsOfCancel(t: Transport, employeeName: string, store: string): Promise<void> {
+  try {
+    const { data: admins } = await supabaseAdmin
+      .from("coach_users")
+      .select("telegram_chat_id")
+      .eq("is_protected", true)
+      .eq("status", "approved");
+    for (const a of (admins ?? []) as { telegram_chat_id: number }[]) {
+      try {
+        await t.send(a.telegram_chat_id, `❎ Заявка отменена сотрудником: <b>${escapeHtml(employeeName)}</b> · ${CITY[store] ?? store}`);
+      } catch (e) {
+        console.error("coach admin cancel notify error:", getErrorMessage(e));
+      }
+    }
+  } catch (e) {
+    console.error("coach admin cancel notify error:", getErrorMessage(e));
+  }
+}
+
 // Новая заявка — сразу всем администраторам, с кнопками «Принять» / «Отказать».
 export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number): Promise<void> {
   try {
