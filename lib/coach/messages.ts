@@ -40,7 +40,7 @@ export const HELP_TEXT = [
 
 export function myPlanMessage(emp: EmployeeRef, s: MonthStatus): string {
   const head = `📌 <b>Мой план — ${monthTitle(s.today)}</b>\n${escapeHtml(emp.name)}`;
-  if (s.plan === null) return `${head}\n\n${NO_PLAN_TEXT}`;
+  if (s.plan === null) return `${head}\n${pre(line("Факт (по вчера)", money(s.fact)))}\n${NO_PLAN_TEXT}`;
   const rows = [
     line("План на месяц", money(s.plan)),
     line("Факт (по вчера)", money(s.fact)),
@@ -101,14 +101,28 @@ export function adviceMessage(emp: EmployeeRef, s: MonthStatus, a: Advice): stri
 
 function weekLines(w: WeekSummary): { last: string; next: string } {
   const l = w.lastWeek;
+  const period = `${shortDate(l.from)}–${shortDate(l.to)}`;
+  // Факт показываем всегда, план — как сравнение, если он был внесён.
+  const factRows =
+    l.shifts > 0
+      ? [
+          line("Выручка", money(l.fact)),
+          line("Смен", num(l.shifts)),
+          line("Чеков", num(l.receipts)),
+          line("Средний чек", l.receipts > 0 ? money(l.fact / l.receipts) : "—"),
+          line("Глубина чека", l.receipts > 0 ? (l.items / l.receipts).toFixed(2) : "—"),
+        ]
+      : [];
   let last: string;
-  if (l.plan === null) {
-    last = "На прошлую неделю план не был внесён.";
+  if (l.shifts === 0 && l.plan === null) {
+    last = `Прошлая неделя (${period}): смен с продажами не было.`;
+  } else if (l.plan === null) {
+    last = `Прошлая неделя (${period}) по факту:\n${pre(factRows.join("\n"))}`;
   } else if (l.shortfall <= 0) {
-    last = `✅ Прошлая неделя (${shortDate(l.from)}–${shortDate(l.to)}) выполнена.\n${pre([line("План", money(l.plan)), line("Факт", money(l.fact))].join("\n"))}`;
+    last = `✅ Прошлая неделя (${period}) выполнена.\n${pre([line("План", money(l.plan)), ...factRows].join("\n"))}`;
   } else {
-    last = `⚠️ Прошлая неделя (${shortDate(l.from)}–${shortDate(l.to)}) <b>не выполнена</b>.\n${pre(
-      [line("План", money(l.plan)), line("Факт", money(l.fact)), line("Недобор", money(l.shortfall))].join("\n")
+    last = `⚠️ Прошлая неделя (${period}) <b>не выполнена</b>.\n${pre(
+      [line("План", money(l.plan)), ...(factRows.length ? factRows : [line("Выручка", money(l.fact))]), line("Недобор", money(l.shortfall))].join("\n")
     )}`;
   }
   const t = w.thisWeek;

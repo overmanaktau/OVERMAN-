@@ -302,7 +302,16 @@ export function buildAdvice(s: MonthStatus): Advice {
 
 export type WeekSummary = {
   monday: string;
-  lastWeek: { from: string; to: string; plan: number | null; fact: number; shortfall: number };
+  lastWeek: {
+    from: string;
+    to: string;
+    plan: number | null;
+    fact: number;
+    shortfall: number;
+    receipts: number;
+    items: number;
+    shifts: number;
+  };
   thisWeek: {
     from: string;
     to: string;
@@ -380,7 +389,16 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
 
   return {
     monday,
-    lastWeek: { from: lastFrom, to: lastTo, plan: lastPlan, fact: lastFact, shortfall },
+    lastWeek: {
+      from: lastFrom,
+      to: lastTo,
+      plan: lastPlan,
+      fact: lastFact,
+      shortfall,
+      receipts: lastDays.reduce((a, d) => a + d.receipts, 0),
+      items: lastDays.reduce((a, d) => a + d.items, 0),
+      shifts: lastDays.filter(isShift).length,
+    },
     thisWeek: {
       from: monday,
       to: thisTo,
