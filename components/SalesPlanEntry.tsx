@@ -19,6 +19,39 @@ type PlanCell = {
 
 const EMPTY_CELL: PlanCell = { plan: "", everEntered: false, requestPending: false, unlockExpiresAt: null };
 
+// Два периода месяца: даты «с — по» и процент от месячного плана точки, который
+// на период приходится. Общие для точки и месяца (для всех продавцов); та же
+// логика закрытия, что у плана продавцов: внести свободно один раз, изменить —
+// только по одобренному запросу.
+type PeriodsDraft = {
+  id?: number;
+  p1From: string;
+  p1To: string;
+  p1Pct: number | "";
+  p2From: string;
+  p2To: string;
+  p2Pct: number | "";
+  everEntered: boolean;
+  requestPending: boolean;
+  unlockExpiresAt: string | null;
+};
+
+const EMPTY_PERIODS: PeriodsDraft = {
+  p1From: "",
+  p1To: "",
+  p1Pct: "",
+  p2From: "",
+  p2To: "",
+  p2Pct: "",
+  everEntered: false,
+  requestPending: false,
+  unlockExpiresAt: null,
+};
+
+function periodsSnapshot(p: PeriodsDraft) {
+  return [p.p1From, p.p1To, p.p1Pct, p.p2From, p.p2To, p.p2Pct].join("|");
+}
+
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
@@ -110,6 +143,8 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilterFailed, setActiveFilterFailed] = useState(false);
+  const [periods, setPeriods] = useState<PeriodsDraft>(EMPTY_PERIODS);
+  const [originalPeriods, setOriginalPeriods] = useState<PeriodsDraft>(EMPTY_PERIODS);
 
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -118,10 +153,11 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   }, []);
 
   const cellOf = (employeeId: string): PlanCell => cells[employeeId] ?? EMPTY_CELL;
-  function isLocked(cell: PlanCell) {
+  function isLocked(cell: { everEntered: boolean; unlockExpiresAt: string | null }) {
     if (!cell.everEntered) return false;
     return !cell.unlockExpiresAt || new Date(cell.unlockExpiresAt).getTime() <= nowTick;
   }
+  const periodsLocked = isLocked(periods);
 
   const load = useCallback(async () => {
     if (!store) return;
@@ -133,7 +169,7 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
       lookbackFrom.setDate(lookbackFrom.getDate() - EMPLOYEE_LOOKBACK_DAYS);
       const lookbackStr = `${lookbackFrom.getFullYear()}-${pad2(lookbackFrom.getMonth() + 1)}-${pad2(lookbackFrom.getDate())}`;
 
-      const [plansRes, requestsRes, staffRes] = await Promise.all([
+      const [plansRes, requestsRes, staffRes, periodsRes, periodRequestsRes] = await Promise.all([
         supabase.from("sales_plan_monthly").select("*").eq("store", store).eq("plan_month", month),
         supabase
           .from("edit_requests")
@@ -147,10 +183,38 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
           .select("employee_ms_id, employee_name")
           .eq("store", store)
           .gte("sale_date", lookbackStr),
+        supabase.from("sales_plan_periods").select("*").eq("store", store).eq("plan_month", month).maybeSingle(),
+        supabase
+          .from("edit_requests")
+          .select("row_id")
+          .eq("table_name", "sales_plan_periods")
+          .eq("status", "pending")
+          .eq("store", store)
+          .eq("entry_date", month),
       ]);
       if (plansRes.error) throw plansRes.error;
       if (requestsRes.error) throw requestsRes.error;
       if (staffRes.error) throw staffRes.error;
+      if (periodsRes.error) throw periodsRes.error;
+      if (periodRequestsRes.error) throw periodRequestsRes.error;
+
+      const pr = periodsRes.data;
+      const loadedPeriods: PeriodsDraft = pr
+        ? {
+            id: pr.id,
+            p1From: pr.p1_from ?? "",
+            p1To: pr.p1_to ?? "",
+            p1Pct: pr.p1_percent ?? "",
+            p2From: pr.p2_from ?? "",
+            p2To: pr.p2_to ?? "",
+            p2Pct: pr.p2_percent ?? "",
+            everEntered: true,
+            requestPending: (periodRequestsRes.data ?? []).some((r) => r.row_id === pr.id),
+            unlockExpiresAt: pr.unlock_expires_at ?? null,
+          }
+        : EMPTY_PERIODS;
+      setPeriods(loadedPeriods);
+      setOriginalPeriods(loadedPeriods);
 
       // В списке остаются только активные сотрудники МойСклад. Если МойСклад не
       // ответил, показываем всех, но предупреждаем об этом на странице.
@@ -196,6 +260,8 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
       setError(`Не удалось загрузить план: ${getErrorMessage(e)}`);
       setCells({});
       setOriginalCells({});
+      setPeriods(EMPTY_PERIODS);
+      setOriginalPeriods(EMPTY_PERIODS);
     } finally {
       setLoading(false);
     }
@@ -215,9 +281,12 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cells, originalCells, nowTick]);
 
+  const periodsDirty = !periodsLocked && periodsSnapshot(periods) !== periodsSnapshot(originalPeriods);
+  const hasChanges = dirtyIds.length > 0 || periodsDirty;
+
   useEffect(() => {
-    if (dirtyIds.length > 0) setJustSaved(false);
-  }, [dirtyIds.length]);
+    if (hasChanges) setJustSaved(false);
+  }, [hasChanges]);
 
   const total = employees.reduce((acc, e) => {
     const p = cellOf(e.id).plan;
@@ -225,7 +294,7 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   }, 0);
 
   function confirmLeave() {
-    return dirtyIds.length === 0 || window.confirm("У вас есть несохранённые изменения. Перейти и потерять их?");
+    return !hasChanges || window.confirm("У вас есть несохранённые изменения. Перейти и потерять их?");
   }
   function shiftMonth(delta: number) {
     if (!confirmLeave()) return;
@@ -247,6 +316,57 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   }
 
   const monthLabel = `${MONTH_NAMES[monthIndex]} ${year}`;
+
+  // Проценты периодов: до двух знаков, не больше 100.
+  function updatePeriodPct(which: "p1Pct" | "p2Pct", rawValue: string) {
+    if (!canEdit || periodsLocked) return;
+    const text = sanitizeAmountText(rawValue);
+    setEditingText(text);
+    const value = parseAmountText(text);
+    setPeriods((prev) => ({ ...prev, [which]: typeof value === "number" && value > 100 ? 100 : value }));
+  }
+  function updatePeriodDate(field: "p1From" | "p1To" | "p2From" | "p2To", value: string) {
+    if (!canEdit || periodsLocked) return;
+    setPeriods((prev) => ({ ...prev, [field]: value }));
+  }
+
+  // Периоды обязательно заполняются целиком (оба периода, даты и проценты),
+  // лежат внутри выбранного месяца, не пересекаются, а период 2 идёт после 1.
+  function periodsProblem(): string | null {
+    const p = periods;
+    const filled = [p.p1From, p.p1To, p.p1Pct, p.p2From, p.p2To, p.p2Pct].every((v) => v !== "");
+    if (!filled) return "Заполните оба периода целиком: даты «с — по» и процент.";
+    const first = monthStart(year, monthIndex);
+    const last = `${year}-${pad2(monthIndex + 1)}-${pad2(new Date(year, monthIndex + 1, 0).getDate())}`;
+    const dates = [p.p1From, p.p1To, p.p2From, p.p2To];
+    if (dates.some((d) => d < first || d > last)) return `Даты периодов должны быть внутри месяца ${monthLabel}.`;
+    if (p.p1From > p.p1To || p.p2From > p.p2To) return "В периоде дата «с» не может быть позже даты «по».";
+    if (p.p1To >= p.p2From) return "Период 2 должен начинаться после окончания периода 1.";
+    return null;
+  }
+
+  async function requestPeriodsUnlock() {
+    if (saving || !periods.id) return;
+    setError(null);
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const uid = userData.user?.id;
+      if (!uid) throw new Error("Нет активной сессии.");
+      const { error: insertError } = await supabase.from("edit_requests").insert({
+        table_name: "sales_plan_periods",
+        row_id: periods.id,
+        entry_date: monthStart(year, monthIndex),
+        store,
+        context: `Точка «${storeName}», периоды и проценты плана продаж на ${monthLabel}. Заявитель: ${requesterLabel}`,
+        requested_by: uid,
+      });
+      if (insertError) throw insertError;
+      setPeriods((prev) => ({ ...prev, requestPending: true }));
+    } catch (e) {
+      setError(`Не удалось отправить запрос: ${getErrorMessage(e)}`);
+    }
+  }
 
   async function requestUnlock(employee: Employee) {
     const cell = cellOf(employee.id);
@@ -272,12 +392,70 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
     }
   }
 
+  async function savePeriods(): Promise<string | null> {
+    const problem = periodsProblem();
+    if (problem) return problem;
+    const original = originalPeriods;
+    const payload: Record<string, unknown> = {
+      store,
+      plan_month: monthStart(year, monthIndex),
+      p1_from: periods.p1From,
+      p1_to: periods.p1To,
+      p1_percent: periods.p1Pct,
+      p2_from: periods.p2From,
+      p2_to: periods.p2To,
+      p2_percent: periods.p2Pct,
+    };
+    // Изменённые уже внесённые периоды снова закрываются до нового запроса.
+    if (original.everEntered) {
+      payload.locked = true;
+      payload.unlock_expires_at = null;
+    }
+    try {
+      if (periods.id) {
+        const { data: updated, error: updateError } = await supabase
+          .from("sales_plan_periods")
+          .update(payload)
+          .eq("id", periods.id)
+          .select("id");
+        if (updateError) throw updateError;
+        if (!updated || updated.length === 0) throw new Error("время на изменение истекло — запросите доступ снова");
+        const { data: userData } = await supabase.auth.getUser();
+        await supabase.from("edit_history").insert({
+          table_name: "sales_plan_periods",
+          row_id: periods.id,
+          store,
+          summary: `Точка «${storeName}», периоды плана продаж на ${monthLabel}: ${original.p1From || "—"}…${original.p1To || "—"} ${original.p1Pct === "" ? "—" : original.p1Pct}%, ${original.p2From || "—"}…${original.p2To || "—"} ${original.p2Pct === "" ? "—" : original.p2Pct}% → ${periods.p1From}…${periods.p1To} ${periods.p1Pct}%, ${periods.p2From}…${periods.p2To} ${periods.p2Pct}%`,
+          changed_by: userData.user?.id ?? null,
+          changed_by_name: requesterLabel,
+        });
+      } else {
+        const { error: insertError } = await supabase.from("sales_plan_periods").insert(payload);
+        if (insertError) throw insertError;
+      }
+      return null;
+    } catch (e) {
+      return `периоды (${getErrorMessage(e)})`;
+    }
+  }
+
   async function handleSave() {
     if (saving) return;
+    if (periodsDirty) {
+      const problem = periodsProblem();
+      if (problem) {
+        setError(problem);
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
     const failed: string[] = [];
     try {
+      if (periodsDirty) {
+        const periodsFailure = await savePeriods();
+        if (periodsFailure) failed.push(periodsFailure);
+      }
       for (const employeeId of dirtyIds) {
         const employee = employees.find((e) => e.id === employeeId);
         if (!employee) continue;
@@ -359,7 +537,7 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
           <p className="text-[12.5px] text-muted max-w-2xl m-0">
             План вносится каждому продавцу одним числом на весь месяц. План точки и месяца в окне «План продаж» —
             сумма планов продавцов. Внести план на месяц можно свободно один раз, изменить уже внесённый — только
-            по одобренному запросу.
+            по одобренному запросу. Так же работают периоды месяца и их проценты.
             {!canEdit && " У вас только просмотр — вносить план может сотрудник с доступом «Внесение плана продаж»."}
           </p>
           {error && (
@@ -411,6 +589,101 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="flex flex-col gap-2.5 max-w-[520px] rounded-lg border border-borderSoft p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[13px] font-bold">Периоды месяца</div>
+              <div className="flex items-center gap-2">
+                {periodsLocked &&
+                  (periods.requestPending ? (
+                    <span className="text-[11px] text-mutedLight italic">Ожидает</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!canEdit}
+                      onClick={requestPeriodsUnlock}
+                      className="text-[11px] font-semibold text-accent border border-accent rounded-md px-2 py-1 disabled:opacity-50"
+                    >
+                      Запрос
+                    </button>
+                  ))}
+                {!periodsLocked && periods.everEntered && periods.unlockExpiresAt && (
+                  <span className="text-[9.5px] text-mutedLight italic">
+                    ещё {minutesLeft(periods.unlockExpiresAt, nowTick)}м
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="text-[12px] text-muted">
+              Выберите два периода месяца и какой процент месячного плана приходится на каждый. По текущему периоду
+              окно «План продаж» считает план, факт и сколько нужно в день.
+            </div>
+            {(
+              [
+                { n: 1, from: "p1From", to: "p1To", pct: "p1Pct" },
+                { n: 2, from: "p2From", to: "p2To", pct: "p2Pct" },
+              ] as const
+            ).map(({ n, from, to, pct }) => {
+              const monthFirst = monthStart(year, monthIndex);
+              const monthLast = `${year}-${pad2(monthIndex + 1)}-${pad2(new Date(year, monthIndex + 1, 0).getDate())}`;
+              const pctKey = `pct${n}`;
+              const dateClass =
+                "box-border rounded-[5px] border border-cellBorder px-1.5 py-1 text-[12px] disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent";
+              return (
+                <div key={n} className="flex items-center gap-2 flex-wrap">
+                  <div className="text-[12.5px] font-semibold w-[64px]">Период {n}</div>
+                  <input
+                    type="date"
+                    value={periods[from]}
+                    min={monthFirst}
+                    max={monthLast}
+                    disabled={!canEdit || periodsLocked || loading}
+                    onChange={(ev) => updatePeriodDate(from, ev.target.value)}
+                    className={dateClass}
+                  />
+                  <span className="text-mutedLight">—</span>
+                  <input
+                    type="date"
+                    value={periods[to]}
+                    min={monthFirst}
+                    max={monthLast}
+                    disabled={!canEdit || periodsLocked || loading}
+                    onChange={(ev) => updatePeriodDate(to, ev.target.value)}
+                    className={dateClass}
+                  />
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label={`Процент периода ${n}`}
+                      disabled={!canEdit || periodsLocked || loading}
+                      value={editingId === pctKey ? editingText : formatGrouped(periods[pct])}
+                      onFocus={() => {
+                        setEditingId(pctKey);
+                        setEditingText(periods[pct] === "" ? "" : String(periods[pct]).replace(".", ","));
+                      }}
+                      onChange={(ev) => updatePeriodPct(pct, ev.target.value)}
+                      onBlur={() => setEditingId(null)}
+                      onKeyDown={amountKeyDown(editingText)}
+                      placeholder="0"
+                      className="w-[64px] box-border text-right text-[12.5px] rounded-[5px] border border-cellBorder px-1.5 py-1 disabled:bg-[#F1EEE6] disabled:text-muted focus:outline-none focus:border-accent"
+                    />
+                    <span className="text-[12.5px] text-muted">%</span>
+                  </div>
+                </div>
+              );
+            })}
+            {(periods.p1Pct !== "" || periods.p2Pct !== "") && (
+              <div
+                className={`text-[11.5px] ${
+                  Number(periods.p1Pct || 0) + Number(periods.p2Pct || 0) === 100 ? "text-mutedLight" : "text-[#A34B36]"
+                }`}
+              >
+                Сумма процентов: {(Number(periods.p1Pct || 0) + Number(periods.p2Pct || 0)).toLocaleString("ru-RU")}%
+                {Number(periods.p1Pct || 0) + Number(periods.p2Pct || 0) !== 100 && " — обычно в сумме 100%"}
+              </div>
+            )}
           </div>
 
           {loading && employees.length === 0 ? (
@@ -483,20 +756,18 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
             </div>
           )}
 
-          {employees.length > 0 && (
-            <div className="flex items-center justify-end">
-              <button
-                type="button"
-                disabled={!canEdit || dirtyIds.length === 0 || saving}
-                onClick={handleSave}
-                className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
-                  dirtyIds.length > 0 && !saving ? "bg-accent text-paper" : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
-                }`}
-              >
-                {saving ? "Сохраняем…" : justSaved ? "Сохранено" : "Сохранить план"}
-              </button>
-            </div>
-          )}
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              disabled={!canEdit || !hasChanges || saving}
+              onClick={handleSave}
+              className={`text-[13px] font-bold rounded-lg px-4 py-2.5 transition-colors ${
+                hasChanges && !saving ? "bg-accent text-paper" : "bg-[#C9C9C9] text-[#8A8A8A] cursor-not-allowed"
+              }`}
+            >
+              {saving ? "Сохраняем…" : justSaved ? "Сохранено" : "Сохранить план"}
+            </button>
+          </div>
         </>
       )}
     </div>

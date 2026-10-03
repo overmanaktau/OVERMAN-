@@ -26,7 +26,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ error: "В заявке не указана дата строки." }, { status: 400 });
     }
     // План продаж просят изменить только когда он уже внесён (строка есть).
-    if (req.table_name === "sales_plan_monthly") {
+    if (req.table_name === "sales_plan_monthly" || req.table_name === "sales_plan_periods") {
       return NextResponse.json({ error: "В заявке на план продаж не указана строка." }, { status: 400 });
     }
     const inserted =
