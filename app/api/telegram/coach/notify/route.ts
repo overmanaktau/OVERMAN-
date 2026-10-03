@@ -33,7 +33,7 @@ async function handle(request: Request) {
   const onlyUser = url.searchParams.get("user");
 
   try {
-    let query = supabaseAdmin.from("coach_users").select("*").eq("status", "approved");
+    let query = supabaseAdmin.from("coach_users").select("*").eq("status", "approved").eq("is_test", false);
     if (onlyUser) query = query.eq("id", Number(onlyUser));
     const { data, error } = await query;
     if (error) throw error;
@@ -58,7 +58,7 @@ async function handle(request: Request) {
         return;
       }
       try {
-        await telegramTransport.send(user.telegram_chat_id, text, menuFor(user.is_admin));
+        await telegramTransport.send(user.telegram_chat_id, text, menuFor(user));
         await supabaseAdmin.from("coach_messages_sent").insert({ user_id: user.id, kind, ref_date: refDate });
         results.push({ user: label, kind, action: "отправлено" });
       } catch (e) {

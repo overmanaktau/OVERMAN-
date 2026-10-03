@@ -162,6 +162,50 @@ export async function handleAdminCallback(
   }
 }
 
+// ---- Условный режим «руководитель» для тестового аккаунта ----
+// Те же экраны, но на выдуманных сотрудниках, и ни одно действие ничего не меняет.
+
+const DEMO_STAFF: { id: number; name: string; city: string; status: Row["status"] }[] = [
+  { id: 1, name: "Айгерим", city: "Актау", status: "pending" },
+  { id: 2, name: "Мадина", city: "Актау", status: "approved" },
+  { id: 3, name: "Динара", city: "Актобе", status: "approved" },
+  { id: 4, name: "Салтанат", city: "Актобе", status: "disabled" },
+];
+const DEMO_NOTE = "🧪 <i>Тестовый режим: сотрудники выдуманные, действия ничего не меняют.</i>";
+
+export async function sendDemoStaffList(t: Transport, chatId: number | string, kind: "pending" | "all") {
+  const rows = kind === "pending" ? DEMO_STAFF.filter((r) => r.status === "pending") : DEMO_STAFF;
+  const title = kind === "pending" ? `🕒 <b>Заявки на подтверждение · ${rows.length}</b>` : `👥 <b>Сотрудники · ${rows.length}</b>`;
+  await t.send(chatId, `${DEMO_NOTE}\n\n${title}\nНажмите на имя, чтобы открыть карточку.`, {
+    inline_keyboard: rows.map((r) => [{ text: `${STATUS_ICON[r.status]} ${r.name} · ${r.city}`, callback_data: `dm:u:${r.id}` }]),
+  });
+}
+
+export async function handleDemoCallback(data: string, t: Transport, chatId: number | string, dropCurrent: () => Promise<void>) {
+  const parts = data.split(":"); // dm:list | dm:u:<id> | dm:act:<action>
+  await dropCurrent();
+  const back: ReplyMarkup = { inline_keyboard: [[{ text: "← К списку", callback_data: "dm:list" }]] };
+  if (parts[1] === "list") {
+    await sendDemoStaffList(t, chatId, "all");
+  } else if (parts[1] === "u") {
+    const r = DEMO_STAFF.find((x) => x.id === Number(parts[2]));
+    if (!r) return;
+    const acts: CoachAction[] =
+      r.status === "pending" ? ["approve", "reject"] : r.status === "approved" ? ["disable", "remove"] : ["enable", "remove"];
+    await t.send(chatId, `${DEMO_NOTE}\n\n<b>${r.name}</b> · ${r.city}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}`, {
+      inline_keyboard: [acts.map((a) => ({ text: ACTION_BUTTON[a], callback_data: `dm:act:${a}` })), [{ text: "← К списку", callback_data: "dm:list" }]],
+    });
+  } else if (parts[1] === "act") {
+    const a = parts[2] as CoachAction;
+    if (!COACH_ACTIONS.includes(a)) return;
+    await t.send(
+      chatId,
+      `${DEMO_NOTE}\n\nВ настоящей системе здесь сработало бы действие «${ACTION_BUTTON[a]}», а сотруднику ушло бы сообщение. В тестовом режиме ничего не изменилось.`,
+      back
+    );
+  }
+}
+
 // Новая заявка — сразу всем администраторам, с кнопками «Принять» / «Отказать».
 export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number): Promise<void> {
   try {

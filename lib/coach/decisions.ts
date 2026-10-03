@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { getErrorMessage } from "@/lib/errors";
 import { LEAVE_TEXT, REMOVE_KEYBOARD, menuFor, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
+import { TEST_WARNING, testExpiresAt } from "@/lib/coach/testmode";
 
 export type CoachAction = "approve" | "reject" | "disable" | "enable" | "remove";
 
@@ -18,10 +19,16 @@ const NEXT_STATUS: Record<CoachAction, { from: string[]; to: string }> = {
   remove: { from: ["pending", "approved", "disabled", "rejected"], to: "left" },
 };
 
-type NoticeUser = { employee_name: string; rejoined: boolean; is_admin: boolean };
+type NoticeUser = { employee_name: string; rejoined: boolean; is_admin: boolean; is_test: boolean; test_role: string | null };
 
 function notice(action: CoachAction, u: NoticeUser): { text: string; markup: ReplyMarkup } {
   const name = escapeHtml(u.employee_name);
+  if (u.is_test && (action === "approve" || action === "enable")) {
+    return {
+      text: `✅ Тестовый аккаунт подтверждён. Выберите раздел кнопкой внизу.\n\n${TEST_WARNING}`,
+      markup: menuFor(u),
+    };
+  }
   switch (action) {
     case "approve":
       // Первый вход — «Добро пожаловать», вернувшемуся после выхода — «С возвращением».
@@ -29,10 +36,10 @@ function notice(action: CoachAction, u: NoticeUser): { text: string; markup: Rep
         text: u.rejoined
           ? `🎉 С возвращением в систему, ${name}! Руководитель подтвердил ваш доступ. Выберите раздел кнопкой внизу.`
           : `🎉 Добро пожаловать, ${name}! Руководитель подтвердил ваш доступ. Выберите раздел кнопкой внизу.`,
-        markup: menuFor(u.is_admin),
+        markup: menuFor(u),
       };
     case "enable":
-      return { text: "✅ Доступ к боту снова включён. Выберите раздел кнопкой внизу.", markup: menuFor(u.is_admin) };
+      return { text: "✅ Доступ к боту снова включён. Выберите раздел кнопкой внизу.", markup: menuFor(u) };
     case "reject":
       return {
         text: "Заявку отклонили. Если это ошибка, нажмите /start и отправьте её заново или обратитесь к руководителю.",
@@ -63,7 +70,14 @@ export async function decideCoachUser(userId: number, action: CoachAction, decid
   const now = new Date().toISOString();
   const { error: updateError } = await supabaseAdmin
     .from("coach_users")
-    .update({ status: rule.to, decided_at: now, decided_by: decidedBy, ...(action === "remove" ? { left_at: now } : {}) })
+    .update({
+      status: rule.to,
+      decided_at: now,
+      decided_by: decidedBy,
+      ...(action === "remove" ? { left_at: now } : {}),
+      // Тестовому аккаунту при подтверждении (и включении) даётся 30 минут.
+      ...(user.is_test && (action === "approve" || action === "enable") ? { test_expires_at: testExpiresAt() } : {}),
+    })
     .eq("id", user.id);
   if (updateError) {
     const taken = /coach_users_employee_active|duplicate/i.test(updateError.message);

@@ -4,7 +4,16 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployeeIds } from "@/lib/moysklad";
 import { LEAVE_TEXT, REMOVE_KEYBOARD, menuFor, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
-import { handleAdminCallback, notifyAdminsOfRequest, sendStaffList } from "@/lib/coach/adminui";
+import { handleAdminCallback, handleDemoCallback, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
+import {
+  TEST_BANNER,
+  TEST_EMPLOYEE_ID,
+  TEST_LABEL,
+  demoMonthStatus,
+  demoWeekSummary,
+  expireTestUser,
+  isTestExpired,
+} from "@/lib/coach/testmode";
 import { HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
 import { type EmployeeRef, addDays, buildAdvice, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
 
@@ -24,6 +33,9 @@ export type CoachUser = {
   status: "pending" | "approved" | "rejected" | "disabled" | "left";
   rejoined: boolean;
   is_admin: boolean;
+  is_test: boolean;
+  test_role: "consultant" | "manager" | null;
+  test_expires_at: string | null;
 };
 
 const CITIES: { store: string; label: string }[] = [
@@ -98,7 +110,11 @@ function statusText(u: CoachUser): string {
 async function showSection(t: Transport, u: CoachUser, section: string) {
   const emp = refOf(u);
   const today = todayInAlmaty();
-  const menu = menuFor(u.is_admin);
+  const menu = menuFor(u);
+  if (u.is_test) {
+    await showTestSection(t, u, section, menu);
+    return;
+  }
   if (section === "plan") {
     await t.send(u.telegram_chat_id, myPlanMessage(emp, await monthStatus(emp, today)), menu);
   } else if (section === "advice") {
@@ -116,6 +132,33 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
     else await t.send(u.telegram_chat_id, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
   } else {
     await t.send(u.telegram_chat_id, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
+  }
+}
+
+// Тестовый аккаунт: те же разделы, но на условных данных. Консультант видит свои
+// разделы, руководитель — «Заявки» и «Сотрудники» на выдуманных сотрудниках.
+async function showTestSection(t: Transport, u: CoachUser, section: string, menu: ReplyMarkup) {
+  const chat = u.telegram_chat_id;
+  const manager = u.test_role === "manager";
+  const today = todayInAlmaty();
+  const emp: EmployeeRef = { id: TEST_EMPLOYEE_ID, name: "Тестовый консультант", store: u.store };
+  if (section === "help") {
+    await t.send(chat, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
+  } else if (section === "exit") {
+    await t.send(chat, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
+  } else if (manager && (section === "requests" || section === "staff")) {
+    await sendDemoStaffList(t, chat, section === "requests" ? "pending" : "all");
+  } else if (!manager && section === "plan") {
+    await t.send(chat, TEST_BANNER + myPlanMessage(emp, demoMonthStatus(today)), menu);
+  } else if (!manager && section === "advice") {
+    const s = demoMonthStatus(today);
+    await t.send(chat, TEST_BANNER + adviceMessage(emp, s, buildAdvice(s)), menu);
+  } else if (!manager && section === "week") {
+    await t.send(chat, TEST_BANNER + weekMessage(emp, demoWeekSummary(today)), menu);
+  } else if (!manager && section === "last") {
+    await t.send(chat, TEST_BANNER + lastWeekMessage(emp, demoWeekSummary(today)), menu);
+  } else {
+    await t.send(chat, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
   }
 }
 
@@ -163,6 +206,12 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
   const text = (msg.text ?? "").trim();
   const user = await findUser(msg.from.id);
 
+  // Срок тестового аккаунта вышел — выводим сразу, не дожидаясь расписания.
+  if (user && isTestExpired(user)) {
+    await expireTestUser(user, t);
+    return;
+  }
+
   if (user && user.status === "approved") {
     // Чат мог поменяться — держим актуальным.
     if (user.telegram_chat_id !== chatId) {
@@ -170,14 +219,14 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
       user.telegram_chat_id = chatId;
     }
     if (text === "/start") {
-      await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}! Выберите раздел внизу.`, menuFor(user.is_admin));
+      await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}! Выберите раздел внизу.`, menuFor(user));
       return;
     }
     const section = SECTION_BY_TEXT[text.toLowerCase()];
     if (section) {
       await showSection(t, user, section);
     } else {
-      await t.send(chatId, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menuFor(user.is_admin));
+      await t.send(chatId, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menuFor(user));
     }
     return;
   }
@@ -208,6 +257,12 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
 
   const existing = await findUser(cb.from.id);
 
+  if (existing && isTestExpired(existing)) {
+    await dropCurrent();
+    await expireTestUser(existing, t);
+    return;
+  }
+
   if (cb.data.startsWith("help:")) {
     if (!existing || existing.status !== "approved") return;
     await dropCurrent();
@@ -228,21 +283,28 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
       if (error) throw error;
       await t.send(chatId, LEAVE_TEXT, REMOVE_KEYBOARD);
     } else {
-      await t.send(chatId, "Остаётесь в системе. Выберите раздел кнопкой внизу.", menuFor(existing.is_admin));
+      await t.send(chatId, "Остаётесь в системе. Выберите раздел кнопкой внизу.", menuFor(existing));
     }
+    return;
+  }
+
+  if (cb.data.startsWith("dm:")) {
+    // Условный режим «руководитель» — только для тестового аккаунта в этой роли.
+    if (!existing || existing.status !== "approved" || !existing.is_test || existing.test_role !== "manager") return;
+    await handleDemoCallback(cb.data, t, chatId, dropCurrent);
     return;
   }
 
   if (cb.data.startsWith("adm:")) {
     // Только подтверждённый администратор; от остальных нажатия молча игнорируем.
-    if (!existing || existing.status !== "approved" || !existing.is_admin) return;
+    if (!existing || existing.status !== "approved" || !existing.is_admin || existing.is_test) return;
     await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent);
     return;
   }
 
   if (existing && existing.status !== "rejected" && existing.status !== "left") {
     await dropCurrent();
-    await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? menuFor(existing.is_admin) : undefined);
+    await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? menuFor(existing) : undefined);
     return;
   }
 
@@ -263,16 +325,15 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
       return;
     }
     await dropCurrent();
-    if (employees.length === 0) {
-      await t.send(chatId, "В этом городе пока нет свободных сотрудников для выбора. Обратитесь к руководителю.", {
-        inline_keyboard: [[{ text: "← Назад", callback_data: "back" }]],
-      });
-      return;
-    }
     const city = CITIES.find((c) => c.store === store)?.label ?? "";
-    await t.send(chatId, `Город: <b>${city}</b>. Выберите себя в списке:`, {
+    const heading =
+      employees.length === 0
+        ? `Город: <b>${city}</b>. Свободных сотрудников пока нет — обратитесь к руководителю или посмотрите тестовый аккаунт:`
+        : `Город: <b>${city}</b>. Выберите себя в списке:`;
+    await t.send(chatId, heading, {
       inline_keyboard: [
         ...employees.map((e) => [{ text: e.name, callback_data: `emp:${store}:${e.id}` }]),
+        [{ text: TEST_LABEL, callback_data: `emp:${store}:${TEST_EMPLOYEE_ID}` }],
         [{ text: "← Назад", callback_data: "back" }],
       ],
     });
@@ -281,6 +342,19 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
 
   if (cb.data.startsWith("emp:")) {
     const [, store, employeeId] = cb.data.split(":");
+    if (employeeId === TEST_EMPLOYEE_ID) {
+      // Тестовый сотрудник никогда не занят: спрашиваем, что именно показать.
+      if (!CITIES.some((c) => c.store === store)) return;
+      await dropCurrent();
+      await t.send(chatId, `${TEST_LABEL}. Что вы хотите посмотреть?`, {
+        inline_keyboard: [
+          [{ text: "Консультанта", callback_data: `trole:${store}:consultant` }],
+          [{ text: "Руководителя", callback_data: `trole:${store}:manager` }],
+          [{ text: "← Назад", callback_data: `city:${store}` }],
+        ],
+      });
+      return;
+    }
     let employees: { id: string; name: string }[];
     try {
       employees = await selectableEmployees(store);
@@ -301,34 +375,65 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
       .eq("employee_ms_id", chosen.id)
       .eq("status", "left");
     if (leftError) throw leftError;
-    const rejoined = (leftBefore ?? 0) > 0;
-    const row = {
-      rejoined,
-      left_at: null,
-      telegram_user_id: cb.from.id,
-      telegram_chat_id: chatId,
-      telegram_username: cb.from.username ?? null,
-      telegram_name: [cb.from.first_name, cb.from.last_name].filter(Boolean).join(" ") || null,
+    await submitRequest(t, cb, chatId, existing, {
       store,
       employee_ms_id: chosen.id,
       employee_name: chosen.name,
-      status: "pending",
-      requested_at: new Date().toISOString(),
-      decided_at: null,
-      decided_by: null,
-    };
-    const { error } = existing
-      ? await supabaseAdmin.from("coach_users").update(row).eq("id", existing.id)
-      : await supabaseAdmin.from("coach_users").insert(row);
-    if (error) {
-      await t.send(chatId, "Не удалось отправить заявку — возможно, этого сотрудника уже выбрал другой человек. Обратитесь к руководителю.");
-      return;
-    }
-    await t.send(
-      chatId,
-      `${rejoined ? "С возвращением! " : ""}Заявка отправлена: <b>${escapeHtml(chosen.name)}</b>. Руководитель должен подтвердить, что это вы. Как только подтвердит, вам придёт сообщение.`,
-      REMOVE_KEYBOARD
-    );
-    await notifyAdminsOfRequest(t, cb.from.id);
+      rejoined: (leftBefore ?? 0) > 0,
+      is_test: false,
+      test_role: null,
+    });
+    return;
   }
+
+  if (cb.data.startsWith("trole:")) {
+    const [, store, role] = cb.data.split(":");
+    if (!CITIES.some((c) => c.store === store) || (role !== "consultant" && role !== "manager")) return;
+    await dropCurrent();
+    await submitRequest(t, cb, chatId, existing, {
+      store,
+      employee_ms_id: TEST_EMPLOYEE_ID,
+      employee_name: `Тестовый сотрудник (${role === "manager" ? "руководитель" : "консультант"})`,
+      rejoined: false,
+      is_test: true,
+      test_role: role,
+    });
+  }
+}
+
+// Заявка на подключение: создаёт или обновляет запись, говорит об этом человеку
+// и сразу уведомляет администраторов бота.
+async function submitRequest(
+  t: Transport,
+  cb: NonNullable<TgUpdate["callback_query"]>,
+  chatId: number,
+  existing: CoachUser | null,
+  who: Pick<CoachUser, "store" | "employee_ms_id" | "employee_name" | "rejoined" | "is_test" | "test_role">
+): Promise<void> {
+  const row = {
+    ...who,
+    left_at: null,
+    test_expires_at: null,
+    telegram_user_id: cb.from.id,
+    telegram_chat_id: chatId,
+    telegram_username: cb.from.username ?? null,
+    telegram_name: [cb.from.first_name, cb.from.last_name].filter(Boolean).join(" ") || null,
+    status: "pending",
+    requested_at: new Date().toISOString(),
+    decided_at: null,
+    decided_by: null,
+  };
+  const { error } = existing
+    ? await supabaseAdmin.from("coach_users").update(row).eq("id", existing.id)
+    : await supabaseAdmin.from("coach_users").insert(row);
+  if (error) {
+    await t.send(chatId, "Не удалось отправить заявку — возможно, этого сотрудника уже выбрал другой человек. Обратитесь к руководителю.");
+    return;
+  }
+  await t.send(
+    chatId,
+    `${who.rejoined ? "С возвращением! " : ""}Заявка отправлена: <b>${escapeHtml(who.employee_name)}</b>. Руководитель должен подтвердить, что это вы. Как только подтвердит, вам придёт сообщение.`,
+    REMOVE_KEYBOARD
+  );
+  await notifyAdminsOfRequest(t, cb.from.id);
 }

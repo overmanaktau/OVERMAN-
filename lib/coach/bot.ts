@@ -77,8 +77,18 @@ export const ADMIN_MENU_MARKUP: ReplyMarkup = {
   is_persistent: true,
 };
 
-export function menuFor(isAdmin: boolean | null | undefined): ReplyMarkup {
-  return isAdmin ? ADMIN_MENU_MARKUP : MENU_MARKUP;
+// Тестовый аккаунт в роли руководителя: только разделы управления (с условными данными).
+export const MANAGER_DEMO_MENU_MARKUP: ReplyMarkup = {
+  keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Помощь" }, { text: "Выход" }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+export type MenuUser = { is_admin?: boolean | null; is_test?: boolean | null; test_role?: string | null };
+
+export function menuFor(u: MenuUser): ReplyMarkup {
+  if (u.is_test) return u.test_role === "manager" ? MANAGER_DEMO_MENU_MARKUP : MENU_MARKUP;
+  return u.is_admin ? ADMIN_MENU_MARKUP : MENU_MARKUP;
 }
 
 export const REMOVE_KEYBOARD: ReplyMarkup = { remove_keyboard: true };
