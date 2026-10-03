@@ -68,8 +68,8 @@ async function findUser(telegramUserId: number): Promise<CoachUser | null> {
 
 // Кого можно выбрать при регистрации. Город сотрудника берётся из продаж (в МойСклад у
 // сотрудника города нет) — за всё время, а не только за последние дни. Кто сейчас
-// активен, берётся из списка сотрудников МойСклад: деактивированных в списке нет.
-// Активные, у кого продаж ещё нигде не было (город не определить), видны в обоих городах.
+// активен, берётся из списка сотрудников МойСклад (колонка «Вход», isActive):
+// деактивированных в списке нет. У активных без продаж город — по группе в МойСклад.
 // Занятые другим Telegram-аккаунтом не показываются.
 async function selectableEmployees(store: string): Promise<{ id: string; name: string }[]> {
   // История продаж по всем городам (постранично: PostgREST отдаёт не больше 1000 строк за запрос).
@@ -101,8 +101,12 @@ async function selectableEmployees(store: string): Promise<{ id: string; name: s
     if (HIDDEN_NAME.test(r.employee_name) || takenIds.has(r.employee_ms_id) || !activeIds.has(r.employee_ms_id)) continue;
     if (!byId.has(r.employee_ms_id)) byId.set(r.employee_ms_id, r.employee_name); // строки от новых к старым — берём свежее имя
   }
+  // Активные, у кого продаж ещё нигде не было: город — по группе (отделу) в МойСклад
+  // («Актау…», «Актобе…»); если группа ни то ни другое — показываем в обоих городах.
   for (const e of active) {
     if (soldAnywhere.has(e.id) || takenIds.has(e.id) || HIDDEN_NAME.test(e.name) || !e.name) continue;
+    const groupStore = /^актау/i.test(e.group) ? "point_1" : /^актобе/i.test(e.group) ? "point_3" : null;
+    if (groupStore && groupStore !== store) continue;
     byId.set(e.id, e.name);
   }
   return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ru"));

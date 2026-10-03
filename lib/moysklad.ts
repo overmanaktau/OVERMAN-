@@ -640,17 +640,42 @@ export function deriveArticle(name: string): string {
 // Id активных сотрудников МойСклад (для списка продавцов при внесении плана).
 // Архивные и удалённые сотрудники в список не попадают: обычный запрос
 // возвращает только действующих, а флаг archived проверяем на всякий случай.
-export async function fetchActiveEmployees(): Promise<{ id: string; name: string }[]> {
+export type ActiveEmployee = { id: string; name: string; group: string };
+
+let activeEmployeesCache: { at: number; list: ActiveEmployee[] } | null = null;
+const ACTIVE_EMPLOYEES_TTL_MS = 60_000;
+
+// «Активный» — как в списке сотрудников МойСклад (колонка «Вход»): не в архиве и
+// разрешён вход в систему (isActive в /entity/employee/{id}/security). Деактивированные
+// остаются в обычном списке сотрудников, но у них вход отключён. Заодно берём группу
+// (отдел) сотрудника — «Актау», «Актобе». Результат кэшируется на минуту: проверка
+// каждого сотрудника — отдельный запрос.
+export async function fetchActiveEmployees(): Promise<ActiveEmployee[]> {
+  if (activeEmployeesCache && Date.now() - activeEmployeesCache.at < ACTIVE_EMPLOYEES_TTL_MS) return activeEmployeesCache.list;
+
   const limit = 1000;
-  const list: { id: string; name: string }[] = [];
+  const base: { id: string; name: string }[] = [];
   let offset = 0;
   for (;;) {
     const page = await moyskladFetch("/entity/employee", { limit: String(limit), offset: String(offset) });
     const rows: { id: string; name?: string; archived?: boolean }[] = page.rows ?? [];
-    for (const r of rows) if (r.archived !== true) list.push({ id: r.id, name: r.name ?? "" });
+    for (const r of rows) if (r.archived !== true) base.push({ id: r.id, name: r.name ?? "" });
     if (rows.length < limit) break;
     offset += limit;
   }
+
+  // По три запроса одновременно: МойСклад отвечает 429, если запросов слишком много сразу.
+  const list: ActiveEmployee[] = [];
+  const queue = [...base];
+  const worker = async () => {
+    for (let e = queue.shift(); e; e = queue.shift()) {
+      const sec = await moyskladFetch(`/entity/employee/${e.id}/security`);
+      if (sec.isActive === true) list.push({ id: e.id, name: e.name, group: sec.group?.name ?? "" });
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+
+  activeEmployeesCache = { at: Date.now(), list };
   return list;
 }
 
