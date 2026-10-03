@@ -2,7 +2,7 @@
 // и своего имени → заявка владельцу), меню разделов для подтверждённых.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
-import { fetchActiveEmployeeIds } from "@/lib/moysklad";
+import { fetchActiveEmployees } from "@/lib/moysklad";
 import { LEAVE_TEXT, REMOVE_KEYBOARD, isOwner, menuFor, roleLabel, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, setAwaiting } from "@/lib/coach/salesview";
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
@@ -16,7 +16,7 @@ import {
   isTestExpired,
 } from "@/lib/coach/testmode";
 import { ADMIN_HELP_TEXT, CITY_ADMIN_HELP_TEXT, OWNER_VIEW_HELP_TEXT, HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
-import { type EmployeeRef, addDays, buildAdvice, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
+import { type EmployeeRef, buildAdvice, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
 
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
 export type TgUpdate = {
@@ -46,7 +46,6 @@ const CITIES: { store: string; label: string }[] = [
   { store: "point_1", label: "Актау" },
   { store: "point_3", label: "Актобе" },
 ];
-const LOOKBACK_DAYS = 45;
 // Не показывается в списке при регистрации (Saya Park — не человек). Владельцы и
 // администратор (Дамир, Қайнар, Нуржан) в списке есть, роль им назначена заранее
 // (таблица coach_role_presets).
@@ -67,26 +66,47 @@ async function findUser(telegramUserId: number): Promise<CoachUser | null> {
   return (data as CoachUser | null) ?? null;
 }
 
-// Кого можно выбрать при регистрации: продавцы точки за последние дни, только
-// активные в МойСклад, ещё не занятые другим Telegram-аккаунтом.
+// Кого можно выбрать при регистрации: все активные сотрудники МойСклад этого города
+// (по истории продаж за всё время), ещё не занятые другим Telegram-аккаунтом.
+// Неактивных в МойСклад в списке нет.
 async function selectableEmployees(store: string): Promise<{ id: string; name: string }[]> {
-  const from = addDays(todayInAlmaty(), -LOOKBACK_DAYS);
-  const [staff, taken] = await Promise.all([
-    supabaseAdmin.from("moysklad_employee_sales_daily").select("employee_ms_id, employee_name").eq("store", store).gte("sale_date", from),
-    supabaseAdmin.from("coach_users").select("employee_ms_id").in("status", ["pending", "approved"]),
-  ]);
-  if (staff.error) throw staff.error;
+  // История продаж по всем городам за всё время (постранично: PostgREST отдаёт не
+  // больше 1000 строк за запрос) — по ней сотрудник привязывается к городу.
+  const history: { employee_ms_id: string; employee_name: string; store: string }[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from("moysklad_employee_sales_daily")
+      .select("employee_ms_id, employee_name, store")
+      .order("sale_date", { ascending: false })
+      .order("employee_ms_id")
+      .order("store")
+      .range(offset, offset + 999);
+    if (error) throw error;
+    history.push(...((data ?? []) as { employee_ms_id: string; employee_name: string; store: string }[]));
+    if (!data || data.length < 1000) break;
+  }
+  const taken = await supabaseAdmin.from("coach_users").select("employee_ms_id").in("status", ["pending", "approved"]).eq("is_test", false);
   if (taken.error) throw taken.error;
   // Только активные в МойСклад. Если МойСклад не ответил — ошибка, а не список
   // «на всякий случай»: неактивных сотрудников показывать нельзя.
-  const activeIds = new Set(await fetchActiveEmployeeIds());
+  const active = await fetchActiveEmployees();
+  const activeIds = new Set(active.map((e) => e.id));
   const takenIds = new Set((taken.data ?? []).map((r) => r.employee_ms_id as string));
+
   const byId = new Map<string, string>();
-  for (const r of (staff.data ?? []) as { employee_ms_id: string; employee_name: string }[]) {
+  const soldAnywhere = new Set<string>();
+  for (const r of history) {
+    soldAnywhere.add(r.employee_ms_id);
+    if (r.store !== store) continue;
     if (HIDDEN_NAME.test(r.employee_name)) continue;
     if (takenIds.has(r.employee_ms_id)) continue;
     if (!activeIds.has(r.employee_ms_id)) continue;
-    byId.set(r.employee_ms_id, r.employee_name);
+    if (!byId.has(r.employee_ms_id)) byId.set(r.employee_ms_id, r.employee_name); // строки от новых к старым — берём свежее имя
+  }
+  // Активные, у кого продаж ещё нигде не было, город по истории не определить — показываем в обоих городах.
+  for (const e of active) {
+    if (soldAnywhere.has(e.id) || takenIds.has(e.id) || HIDDEN_NAME.test(e.name) || !e.name) continue;
+    byId.set(e.id, e.name);
   }
   return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ru"));
 }
