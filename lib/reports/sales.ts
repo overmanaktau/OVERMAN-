@@ -24,10 +24,10 @@ export const SCOPES: Record<string, ReportScope> = {
 const NOT_CONFIGURED = "<i>не настроено на сайте</i>";
 
 const nf = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
-function num(n: number): string {
+export function num(n: number): string {
   return nf.format(Math.round(n)).replace(/[  ]/g, " ");
 }
-function money(n: number): string {
+export function money(n: number): string {
   return `${num(n)} ₸`;
 }
 function pct(revenue: number, cost: number | null): string {
@@ -54,7 +54,7 @@ function section(title: string, body: string): string {
 }
 // Первой строкой блока идёт пустая (невидимый символ U+2800: обычный перевод
 // строки Telegram срезает), чтобы кнопка «копировать» поверх блока не мешала тексту.
-function pre(text: string): string {
+export function pre(text: string): string {
   return `<pre>⠀\n${escapeHtml(text)}</pre>`;
 }
 

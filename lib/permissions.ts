@@ -35,6 +35,7 @@ export const SECTIONS = [
 
   { key: "settings.employees", label: "Сотрудники и доступы", group: "settings", hasEdit: true },
   { key: "settings.passwords", label: "Пароли", group: "settings", hasEdit: true },
+  { key: "settings.coach", label: "Помощник консультантов (Telegram-бот)", group: "settings", hasEdit: true },
   { key: "history", label: "История", group: "settings", hasEdit: false },
 
   { key: "requests", label: "Запросы", group: "general", hasEdit: true },

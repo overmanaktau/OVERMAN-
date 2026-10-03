@@ -28,6 +28,7 @@ const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] 
 const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "Сотрудники и доступы", href: "/settings/employees", section: "settings.employees" },
   { label: "Пароли", href: "/settings/passwords", section: "settings.passwords" },
+  { label: "Помощник консультантов", href: "/settings/coach", section: "settings.coach" },
   { label: "История", href: "/history", section: "history" },
 ];
 
