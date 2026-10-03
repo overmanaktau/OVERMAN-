@@ -305,17 +305,18 @@ export default function DataEntryPage() {
 
   // Governs the channel columns (план has its own rule below; факт трафика
   // isn't entered by hand at all — the counters fill it automatically, see
-  // app/api/traffic/sync). A day row with no channels saved yet is only
-  // gated by the first-entry rule (yesterday+) — neither the automatic факт
-  // nor план counts as "entered", so they never close a row. Once channels
-  // were saved, changing them is only free today/future — fixing an
-  // already-saved yesterday needs a request, same as older dates. Either
-  // way, once locked, only an active (non-expired) approved window opens it
-  // back up — row.locked itself doesn't matter, only the window.
+  // app/api/traffic/sync). First entry of the channels is free for yesterday,
+  // today and any future date; after it, the row can't be changed on ANY
+  // date without an approved request, and days older than yesterday are
+  // closed for both entry and change (also request-only). Neither the
+  // automatic факт nor план counts as "entered", so they never close a row.
+  // Once locked, only an active (non-expired) approved window opens it back
+  // up — row.locked itself doesn't matter, only the window. Enforced in the
+  // DB too (060_traffic_channels_lock.sql).
   const todayStr = todayYmd();
   const firstEntryCutoff = firstEntryFreeCutoff();
   function dayRowEffectivelyLocked(row: DayRow) {
-    const freelyEditable = row.channelsEntered ? row.entryDate >= todayStr : row.entryDate >= firstEntryCutoff;
+    const freelyEditable = !row.channelsEntered && row.entryDate >= firstEntryCutoff;
     if (freelyEditable) return false;
     return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
@@ -635,7 +636,9 @@ export default function DataEntryPage() {
         // regardless of date — план only ever gets one free edit per
         // approval, same spirit as факт's old-date re-lock.
         const planWasChanged = original.planEverEntered && row.trafficPlan !== original.trafficPlan;
-        if (row.entryDate < todayStr || planWasChanged) {
+        // A row whose channels were already entered re-locks after this edit
+        // on any date (an approved request buys exactly one change).
+        if (row.entryDate < todayStr || planWasChanged || original.channelsEntered) {
           payload.locked = true;
           payload.unlock_expires_at = null;
         }
@@ -775,8 +778,9 @@ export default function DataEntryPage() {
           Трафик факт заполняется автоматически из счётчиков посетителей каждую ночь за вчера —
           вручную он не вносится и не меняется, и из-за него (как и из-за плана) строка не закрывается.
           Каналы: первое внесение за вчера, сегодня и любую будущую дату — свободно, без запроса;
-          после него исправить уже внесённый вчерашний день — только по запросу. Дата старше
-          вчерашней — нужен одобренный запрос на всю строку сразу. Трафик план: можно
+          после внесения изменить строку нельзя ни в какой день — только по одобренному запросу.
+          Позавчера и раньше строка закрыта и на внесение, и на изменение — тоже только по
+          запросу на всю строку сразу. Трафик план: можно
           внести один раз свободно, а изменить уже внесённый план — только по одобренному запросу,
           независимо от даты. Таблица трафика и дополнительные расходы сохраняются отдельно —
           своей кнопкой «Сохранить» под каждой таблицей.
