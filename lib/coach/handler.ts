@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployeeIds } from "@/lib/moysklad";
 import { MENU_MARKUP, REMOVE_KEYBOARD, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
-import { HELP_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
+import { HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
 import { type EmployeeRef, addDays, buildAdvice, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
 
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
@@ -102,9 +102,18 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
   } else if (section === "last") {
     await t.send(u.telegram_chat_id, lastWeekMessage(emp, await weekSummary(emp, today)), MENU_MARKUP);
   } else {
-    await t.send(u.telegram_chat_id, HELP_TEXT, MENU_MARKUP);
+    await t.send(u.telegram_chat_id, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
   }
 }
+
+// «Помощь» открывает два выбора: обучение (как пользоваться кнопками) и поддержка.
+const HELP_MENU_KEYBOARD: ReplyMarkup = {
+  inline_keyboard: [
+    [{ text: "📚 Обучение", callback_data: "help:learn" }],
+    [{ text: "💬 Поддержка", callback_data: "help:support" }],
+  ],
+};
+const HELP_BACK_KEYBOARD: ReplyMarkup = { inline_keyboard: [[{ text: "← Назад", callback_data: "help:menu" }]] };
 
 const SECTION_BY_TEXT: Record<string, string> = {
   "мой план": "plan",
@@ -174,6 +183,16 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   };
 
   const existing = await findUser(cb.from.id);
+
+  if (cb.data.startsWith("help:")) {
+    if (!existing || existing.status !== "approved") return;
+    await dropCurrent();
+    if (cb.data === "help:learn") await t.send(chatId, HELP_TEXT, HELP_BACK_KEYBOARD);
+    else if (cb.data === "help:support") await t.send(chatId, SUPPORT_TEXT, HELP_BACK_KEYBOARD);
+    else await t.send(chatId, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
+    return;
+  }
+
   if (existing && existing.status !== "rejected") {
     await dropCurrent();
     await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? MENU_MARKUP : undefined);

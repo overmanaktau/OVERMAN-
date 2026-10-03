@@ -110,7 +110,7 @@ async function loadPeriods(store: string, month: string): Promise<PeriodsRow | n
 
 // ---- Статус месяца ----
 
-export type Benchmarks = { avgCheck: number; depth: number; receiptsPerShift: number } | null;
+export type PerShift = { revenue: number; receipts: number; avgCheck: number; depth: number };
 
 export type MonthStatus = {
   today: string;
@@ -123,8 +123,10 @@ export type MonthStatus = {
   needPerShift: number | null;
   // Привычный темп за последние 28 дней (на смену)
   shifts28: number;
-  perShift: { revenue: number; receipts: number; avgCheck: number; depth: number } | null;
-  store: Benchmarks;
+  perShift: PerShift | null;
+  // Последние 7 дней — чтобы увидеть, какой показатель просел относительно
+  // собственной нормы сотрудника.
+  recent: PerShift | null;
   period: {
     from: string;
     to: string;
@@ -135,26 +137,14 @@ export type MonthStatus = {
   } | null;
 };
 
-async function storeBenchmarks(store: string, from: string, to: string): Promise<Benchmarks> {
-  const { data, error } = await supabaseAdmin
-    .from("moysklad_employee_sales_daily")
-    .select("employee_ms_id, sale_date, revenue, receipts_count, items_count")
-    .eq("store", store)
-    .gte("sale_date", from)
-    .lte("sale_date", to);
-  if (error) throw error;
-  let revenue = 0;
-  let receipts = 0;
-  let items = 0;
-  const shifts = new Set<string>();
-  for (const r of (data ?? []) as { employee_ms_id: string; sale_date: string; revenue: number; receipts_count: number; items_count: number }[]) {
-    revenue += Number(r.revenue) || 0;
-    receipts += Number(r.receipts_count) || 0;
-    items += Number(r.items_count) || 0;
-    if ((Number(r.receipts_count) || 0) > 0) shifts.add(`${r.employee_ms_id}|${r.sale_date}`);
-  }
-  if (receipts <= 0 || shifts.size === 0) return null;
-  return { avgCheck: revenue / receipts, depth: items / receipts, receiptsPerShift: receipts / shifts.size };
+// Средний показатель сотрудника за смену по набору дней (null, если смен с чеками нет).
+function shiftAverages(days: DayRow[]): PerShift | null {
+  const shifts = days.filter(isShift).length;
+  const revenue = days.reduce((a, d) => a + d.revenue, 0);
+  const receipts = days.reduce((a, d) => a + d.receipts, 0);
+  const items = days.reduce((a, d) => a + d.items, 0);
+  if (shifts === 0 || receipts <= 0) return null;
+  return { revenue: revenue / shifts, receipts: receipts / shifts, avgCheck: revenue / receipts, depth: items / receipts };
 }
 
 export async function monthStatus(emp: EmployeeRef, today: string): Promise<MonthStatus> {
@@ -162,12 +152,11 @@ export async function monthStatus(emp: EmployeeRef, today: string): Promise<Mont
   const yesterday = addDays(today, -1);
   const lookbackFrom = addDays(today, -28);
 
-  const [plans, days28, monthDays, periods, benchmarks] = await Promise.all([
+  const [plans, days28, monthDays, periods] = await Promise.all([
     loadMonthPlans(emp, [monthStart]),
     loadEmployeeDays(emp.id, lookbackFrom, yesterday),
     loadEmployeeDays(emp.id, monthStart, yesterday),
     loadPeriods(emp.store, monthStart),
-    storeBenchmarks(emp.store, lookbackFrom, yesterday),
   ]);
 
   const plan = plans.get(monthStart) ?? null;
@@ -177,18 +166,8 @@ export async function monthStatus(emp: EmployeeRef, today: string): Promise<Mont
 
   const shiftDays = days28.filter(isShift);
   const shifts28 = shiftDays.length;
-  const revenue28 = days28.reduce((a, d) => a + d.revenue, 0);
-  const receipts28 = days28.reduce((a, d) => a + d.receipts, 0);
-  const items28 = days28.reduce((a, d) => a + d.items, 0);
-  const perShift =
-    shifts28 > 0 && receipts28 > 0
-      ? {
-          revenue: revenue28 / shifts28,
-          receipts: receipts28 / shifts28,
-          avgCheck: revenue28 / receipts28,
-          depth: items28 / receipts28,
-        }
-      : null;
+  const perShift = shiftAverages(days28);
+  const recent = shiftAverages(days28.filter((d) => d.date >= addDays(today, -7)));
 
   const shiftsPerWeek = shifts28 / 4;
   const remainingShifts = Math.max(1, Math.round((shiftsPerWeek * remainingDays) / 7));
@@ -230,7 +209,7 @@ export async function monthStatus(emp: EmployeeRef, today: string): Promise<Mont
     needPerShift,
     shifts28,
     perShift,
-    store: benchmarks,
+    recent,
     period,
   };
 }
@@ -244,54 +223,59 @@ export type Advice = {
   factor: number | null; // во сколько раз нужно поднять выручку за смену
   needPerShift: number | null;
   lagging: "receipts" | "avgCheck" | "depth" | null;
-  rows: { label: string; now: string; storeAvg: string | null; need: string }[];
+  laggingRatio: number | null; // последние 7 дней ÷ среднее за 28 дней по этому показателю; < 1 — просел
+  // now — собственный средний показатель сотрудника за смену (28 дней), recent — за последние 7 дней.
+  rows: { label: string; now: string; recent: string | null; need: string }[];
 };
 
 // Выручка за смену = чеков × средний чек (а средний чек = глубина × цена
 // товара). Чтобы закрыть план, выручку за смену нужно поднять в R раз; можно
 // только чеками, только средним чеком (через глубину) или понемногу тем и тем.
-// «Что повысить» — тот показатель, который сильнее всего отстаёт от среднего по
-// точке за последние 28 дней.
+// «Что повысить» — тот показатель, который сильнее всего просел относительно
+// собственной нормы сотрудника: последние 7 дней против его же среднего за
+// 28 дней (со средним по точке не сравниваем).
 export function buildAdvice(s: MonthStatus): Advice {
-  const base: Advice = { closed: false, noPlan: false, noHistory: false, factor: null, needPerShift: s.needPerShift, lagging: null, rows: [] };
+  const base: Advice = { closed: false, noPlan: false, noHistory: false, factor: null, needPerShift: s.needPerShift, lagging: null, laggingRatio: null, rows: [] };
   if (s.plan === null) return { ...base, noPlan: true };
   if (s.deficit <= 0) return { ...base, closed: true };
   if (!s.perShift || s.perShift.revenue <= 0) return { ...base, noHistory: true };
 
   const R = (s.needPerShift ?? 0) / s.perShift.revenue;
   const p = s.perShift;
-  const b = s.store;
-  const ratios: { key: "receipts" | "avgCheck" | "depth"; ratio: number }[] = b
+  const r = s.recent;
+  const ratios: { key: "receipts" | "avgCheck" | "depth"; ratio: number }[] = r
     ? [
-        { key: "receipts", ratio: p.receipts / b.receiptsPerShift },
-        { key: "avgCheck", ratio: p.avgCheck / b.avgCheck },
-        { key: "depth", ratio: p.depth / b.depth },
+        { key: "receipts", ratio: r.receipts / p.receipts },
+        { key: "avgCheck", ratio: r.avgCheck / p.avgCheck },
+        { key: "depth", ratio: r.depth / p.depth },
       ]
     : [];
-  const lagging = ratios.length ? ratios.sort((a, c) => a.ratio - c.ratio)[0].key : "avgCheck";
+  const weakest = ratios.length ? ratios.sort((a, c) => a.ratio - c.ratio)[0] : null;
+  const lagging = weakest ? weakest.key : "avgCheck";
   const both = Math.sqrt(R);
 
   return {
     ...base,
     factor: R,
     lagging,
+    laggingRatio: weakest ? weakest.ratio : null,
     rows: [
       {
         label: "Чеков за смену",
         now: p.receipts.toFixed(1),
-        storeAvg: b ? b.receiptsPerShift.toFixed(1) : null,
+        recent: r ? r.receipts.toFixed(1) : null,
         need: `${(p.receipts * both).toFixed(1)} (или ${(p.receipts * R).toFixed(1)}, если только чеками)`,
       },
       {
         label: "Средний чек",
         now: `${Math.round(p.avgCheck).toLocaleString("ru-RU")} ₸`,
-        storeAvg: b ? `${Math.round(b.avgCheck).toLocaleString("ru-RU")} ₸` : null,
+        recent: r ? `${Math.round(r.avgCheck).toLocaleString("ru-RU")} ₸` : null,
         need: `${Math.round(p.avgCheck * both).toLocaleString("ru-RU")} ₸`,
       },
       {
         label: "Глубина чека",
         now: p.depth.toFixed(2),
-        storeAvg: b ? b.depth.toFixed(2) : null,
+        recent: r ? r.depth.toFixed(2) : null,
         need: `${(p.depth * both).toFixed(2)}`,
       },
     ],
@@ -321,6 +305,9 @@ export type WeekSummary = {
     factSoFar: number;
     remaining: number | null;
     perShift: number | null;
+    // Чеки и средний чек за смену, при которых цель недели закрывается (рост
+    // делится поровну между чеками и средним чеком), и текущая норма сотрудника.
+    need: { receipts: number; avgCheck: number; nowReceipts: number; nowAvgCheck: number } | null;
   };
 };
 
@@ -392,6 +379,13 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
     .filter((d) => d.date < today && (base === null || planned(d)))
     .reduce((a, d) => a + d.revenue, 0);
   const shiftsPerWeek = Math.max(1, Math.round(days28.filter(isShift).length / 4));
+  const own = shiftAverages(days28);
+  const perShiftTarget = target === null ? null : target / shiftsPerWeek;
+  let need: WeekSummary["thisWeek"]["need"] = null;
+  if (own && own.revenue > 0 && perShiftTarget !== null) {
+    const growth = Math.sqrt(perShiftTarget / own.revenue);
+    need = { receipts: own.receipts * growth, avgCheck: own.avgCheck * growth, nowReceipts: own.receipts, nowAvgCheck: own.avgCheck };
+  }
 
   return {
     monday,
@@ -413,7 +407,8 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
       target,
       factSoFar,
       remaining: target === null ? null : Math.max(0, target - factSoFar),
-      perShift: target === null ? null : target / shiftsPerWeek,
+      perShift: perShiftTarget,
+      need,
     },
   };
 }

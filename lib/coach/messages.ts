@@ -22,14 +22,23 @@ function monthTitle(date: string): string {
 export const NO_PLAN_TEXT =
   "План на этот месяц руководитель пока не внёс — как только он появится, здесь будут ваши цифры.";
 
+export const HELP_MENU_TEXT = "Чем помочь? Выберите раздел:";
+
+export const SUPPORT_TEXT = [
+  "<b>Поддержка</b>",
+  "",
+  "Если что-то работает не так, цифры вызывают вопросы или нужно сменить профиль — напишите: @ab1lov3",
+].join("\n");
+
 export const HELP_TEXT = [
-  "<b>Помощник стилиста-консультанта</b>",
+  "<b>Обучение: как пользоваться ботом</b>",
   "",
   "Кнопки внизу:",
   "• <b>Мой план</b> — план на месяц, факт, сколько осталось закрыть.",
-  "• <b>Что повысить</b> — какой показатель поднять, чтобы закрыть план.",
-  "• <b>План на неделю</b> — цель на текущую неделю (с учётом недобора прошлой).",
-  "• <b>Итоги прошлой недели</b> — ваши цифры за неделю (выручка, смены, чеки, средний чек, глубина) и выполнение плана.",
+  "• <b>Что повысить</b> — какой ваш показатель просел относительно вашего же среднего и сколько чеков и какой средний чек нужны, чтобы закрыть план.",
+  "• <b>План на неделю</b> — цель на текущую неделю (с учётом недобора прошлой), сколько чеков за смену и какой средний чек нужны, чтобы её закрыть.",
+  "• <b>Итоги прошлой недели</b> — план недели, ваши цифры за неделю (выручка, смены, чеки, средний чек, глубина) и выполнение плана.",
+  "• <b>Помощь</b> — это меню: обучение (то, что вы читаете) и поддержка.",
   "",
   "Сами сообщения приходят так:",
   "• утром после смены — итоги вашей смены и сколько нужно дальше (если вчера у вас были продажи);",
@@ -83,7 +92,9 @@ export function adviceMessage(emp: EmployeeRef, s: MonthStatus, a: Advice): stri
   if (a.noHistory || a.factor === null || !s.perShift) {
     return `${head}\n\nПока мало данных по вашим сменам за последние 4 недели — рекомендации появятся после нескольких смен.`;
   }
-  const rows = a.rows.map((r) => `${r.label}\n  сейчас ${r.now}${r.storeAvg ? `, по точке ${r.storeAvg}` : ""}\n  нужно ${r.need}`);
+  const rows = a.rows.map(
+    (r) => `${r.label}\n  в среднем за смену ${r.now}${r.recent ? `\n  за последние 7 дней ${r.recent}` : ""}\n  нужно ${r.need}`
+  );
   const lines: string[] = [
     head,
     "",
@@ -92,7 +103,11 @@ export function adviceMessage(emp: EmployeeRef, s: MonthStatus, a: Advice): stri
     pre(rows.join("\n")),
   ];
   if (a.lagging) {
-    lines.push(`Сильнее всего отстаёт: <b>${LAGGING_LABEL[a.lagging]}</b>.`);
+    lines.push(
+      a.laggingRatio !== null && a.laggingRatio < 1
+        ? `Сильнее всего просел относительно вашего же среднего: <b>${LAGGING_LABEL[a.lagging]}</b>.`
+        : `Медленнее всего растёт относительно вашего же среднего: <b>${LAGGING_LABEL[a.lagging]}</b>.`
+    );
     lines.push(LAGGING_TIP[a.lagging]);
   }
   lines.push("Цифры «нужно» — если поднимать чеки и средний чек вместе, понемногу.");
@@ -113,16 +128,18 @@ function weekLines(w: WeekSummary): { last: string; next: string } {
           line("Глубина чека", l.receipts > 0 ? (l.items / l.receipts).toFixed(2) : "—"),
         ]
       : [];
+  const planRow = line("План недели", l.plan === null ? "не внесён" : money(l.plan));
+  const doneRow = l.plan !== null && l.plan > 0 ? [line("Выполнение", pct((l.fact / l.plan) * 100))] : [];
   let last: string;
   if (l.shifts === 0 && l.plan === null) {
-    last = `Прошлая неделя (${period}): смен с продажами не было.`;
+    last = `Прошлая неделя (${period}): смен с продажами не было, план не внесён.`;
   } else if (l.plan === null) {
-    last = `Прошлая неделя (${period}) по факту:\n${pre(factRows.join("\n"))}`;
+    last = `Прошлая неделя (${period}) по факту:\n${pre([planRow, ...factRows].join("\n"))}`;
   } else if (l.shortfall <= 0) {
-    last = `✅ Прошлая неделя (${period}) выполнена.\n${pre([line("План", money(l.plan)), ...factRows].join("\n"))}`;
+    last = `✅ Прошлая неделя (${period}) выполнена.\n${pre([planRow, ...(factRows.length ? factRows : [line("Выручка", money(l.fact))]), ...doneRow].join("\n"))}`;
   } else {
     last = `⚠️ Прошлая неделя (${period}) <b>не выполнена</b>.\n${pre(
-      [line("План", money(l.plan)), ...(factRows.length ? factRows : [line("Выручка", money(l.fact))]), line("Недобор", money(l.shortfall))].join("\n")
+      [planRow, ...(factRows.length ? factRows : [line("Выручка", money(l.fact))]), ...doneRow, line("Недобор", money(l.shortfall))].join("\n")
     )}`;
   }
   const t = w.thisWeek;
@@ -135,6 +152,16 @@ function weekLines(w: WeekSummary): { last: string; next: string } {
     rows.push(line("Цель недели", money(t.target)));
     if (t.perShift !== null) rows.push(line("≈ за смену", money(t.perShift)));
     next = `🎯 <b>Цель на неделю ${shortDate(t.from)}–${shortDate(t.to)}</b>\n${pre(rows.join("\n"))}`;
+    if (t.need) {
+      next += `\n<b>Чтобы закрыть цель, за смену нужно:</b>\n${pre(
+        [
+          line("Чеков", `≈ ${t.need.receipts.toFixed(1)}`),
+          line("  сейчас", t.need.nowReceipts.toFixed(1)),
+          line("Средний чек", `≈ ${money(Math.round(t.need.avgCheck))}`),
+          line("  сейчас", money(Math.round(t.need.nowAvgCheck))),
+        ].join("\n")
+      )}`;
+    }
     if (t.extra > 0) {
       next += "\nНедобор прошлой недели распределён поровну на оставшиеся дни месяца, на эту неделю приходится указанная часть.";
     }
