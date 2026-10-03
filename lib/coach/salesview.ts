@@ -3,7 +3,7 @@
 // только свои города (admin_scope: 'city' — свой, 'all' — все).
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
-import { money, num, pre } from "@/lib/reports/sales";
+import { SCOPES, buildCashReport, money, num, pre } from "@/lib/reports/sales";
 import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { addDays, daysBetween, monthStartOf, shortDate, todayInAlmaty } from "@/lib/coach/metrics";
 
@@ -16,29 +16,47 @@ const MAX_CUSTOM_DAYS = 366;
 
 export const ALL_STORES = Object.keys(CITY);
 
-// Вход в раздел: если город один — сразу выбор периода, иначе сначала выбор города.
-export async function sendSalesStart(t: Transport, chatId: number | string, stores: string[]) {
-  if (stores.length === 1) {
-    await sendPeriodMenu(t, chatId, stores[0], false);
-    return;
-  }
-  await t.send(chatId, "📊 <b>Продажи</b>\nВыберите город:", {
+// Что показывать: продажи по сотрудникам (e) или общая касса города (k).
+type Mode = "e" | "k";
+const MODE_LABEL: Record<Mode, string> = { e: "по сотрудникам", k: "по городу (общая касса)" };
+
+// Вход в раздел: сначала выбор — по сотрудникам или по городу (общая касса).
+export async function sendSalesStart(t: Transport, chatId: number | string, _stores?: string[]) {
+  await t.send(chatId, "📊 <b>Продажи</b>\nЧто показать?", {
     inline_keyboard: [
-      ...stores.map((s) => [{ text: CITY[s] ?? s, callback_data: `adm:s:c:${s}` }]),
-      [{ text: "Все города", callback_data: "adm:s:c:all" }],
+      [{ text: "👥 По сотрудникам", callback_data: "adm:s:m:e" }],
+      [{ text: "🏙 По городу (общая касса)", callback_data: "adm:s:m:k" }],
     ],
   });
 }
 
-async function sendPeriodMenu(t: Transport, chatId: number | string, store: string, canGoBack: boolean) {
-  const rows: { text: string; callback_data: string }[][] = (["y", "w", "m"] as Period[]).map((p) => [
-    { text: PERIOD_LABEL[p], callback_data: `adm:s:p:${store}:${p}` },
-  ]);
-  rows.push([{ text: "✏️ Свой период", callback_data: `adm:s:x:${store}` }]);
-  if (canGoBack) rows.push([{ text: "← Другой город", callback_data: "adm:s" }]);
-  await t.send(chatId, `📊 <b>Продажи · ${store === "all" ? "Все города" : (CITY[store] ?? store)}</b>\nЗа какой период?`, {
-    inline_keyboard: rows,
+// Дальше выбор города (если их несколько), иначе сразу период.
+async function sendCityMenu(t: Transport, chatId: number | string, mode: Mode, stores: string[]) {
+  if (stores.length === 1) {
+    await sendPeriodMenu(t, chatId, mode, stores[0], false);
+    return;
+  }
+  await t.send(chatId, `📊 <b>Продажи ${MODE_LABEL[mode]}</b>\nВыберите город:`, {
+    inline_keyboard: [
+      ...stores.map((s) => [{ text: CITY[s] ?? s, callback_data: `adm:s:c:${mode}:${s}` }]),
+      [{ text: "Все города", callback_data: `adm:s:c:${mode}:all` }],
+      [{ text: "← Назад", callback_data: "adm:s" }],
+    ],
   });
+}
+
+async function sendPeriodMenu(t: Transport, chatId: number | string, mode: Mode, store: string, canGoBack: boolean) {
+  const rows: { text: string; callback_data: string }[][] = (["y", "w", "m"] as Period[]).map((p) => [
+    { text: PERIOD_LABEL[p], callback_data: `adm:s:p:${mode}:${store}:${p}` },
+  ]);
+  rows.push([{ text: "✏️ Свой период", callback_data: `adm:s:x:${mode}:${store}` }]);
+  // Назад: к выбору города (если городов несколько) или к выбору «по сотрудникам / по городу».
+  rows.push([{ text: "← Назад", callback_data: canGoBack ? `adm:s:m:${mode}` : "adm:s" }]);
+  await t.send(
+    chatId,
+    `📊 <b>Продажи ${MODE_LABEL[mode]} · ${store === "all" ? "Все города" : (CITY[store] ?? store)}</b>\nЗа какой период?`,
+    { inline_keyboard: rows }
+  );
 }
 
 function rangeFor(period: Period, custom?: Range): Range {
@@ -101,14 +119,16 @@ export async function handleCustomPeriodInput(
   text: string,
   stores: string[]
 ): Promise<void> {
-  const store = awaiting.slice("sales:".length);
-  if (store === "all" ? stores.length < 2 : !stores.includes(store)) {
+  // sales:<режим>:<город>
+  const [, modeRaw, store] = awaiting.split(":");
+  const mode: Mode = modeRaw === "k" ? "k" : "e";
+  if (!store || (store === "all" ? stores.length < 2 : !stores.includes(store))) {
     await setAwaiting(user.id, null);
     return;
   }
   const chat = user.telegram_chat_id;
   const range = parsePeriodInput(text, todayInAlmaty());
-  const retry: ReplyMarkup = { inline_keyboard: [[{ text: "Отмена", callback_data: `adm:s:c:${store}` }]] };
+  const retry: ReplyMarkup = { inline_keyboard: [[{ text: "Отмена", callback_data: `adm:s:c:${mode}:${store}` }]] };
   if (!range) {
     await t.send(chat, "Не разобрал даты. Напишите так: <b>01.10-15.10</b> (с какого по какое) или одну дату <b>05.10</b>. Год можно не указывать.", retry);
     return;
@@ -122,18 +142,31 @@ export async function handleCustomPeriodInput(
     return;
   }
   await setAwaiting(user.id, null);
-  await sendReport(t, chat, store, "c", range);
+  await sendReport(t, chat, mode, store, "c", range);
 }
 
-async function sendReport(t: Transport, chatId: number | string, store: string, period: Period, custom?: Range) {
-  const back: ReplyMarkup = { inline_keyboard: [[{ text: "← Другой период", callback_data: `adm:s:c:${store}` }]] };
-  let text: string;
+// Общая касса города за период (для «Все города» — касса каждого города и общий итог).
+async function buildCashMessages(store: string, period: Period, custom?: Range): Promise<string[]> {
+  const { from, to } = rangeFor(period, custom);
+  if (from > to) return ["📊 <b>Касса</b>\n\nЗа этот период данных ещё нет."];
+  const scopes = store === "all" ? [SCOPES.point_1, SCOPES.point_3, SCOPES.all] : [SCOPES[store]];
+  const messages: string[] = [];
+  for (const scope of scopes) messages.push(...(await buildCashReport(scope, from, to)));
+  return messages;
+}
+
+async function sendReport(t: Transport, chatId: number | string, mode: Mode, store: string, period: Period, custom?: Range) {
+  const back: ReplyMarkup = { inline_keyboard: [[{ text: "← Другой период", callback_data: `adm:s:c:${mode}:${store}` }]] };
+  let messages: string[];
   try {
-    text = await buildReport(store, period, custom);
+    messages = mode === "k" ? await buildCashMessages(store, period, custom) : [await buildReport(store, period, custom)];
   } catch (e) {
-    text = `Не удалось собрать продажи: ${escapeHtml(e instanceof Error ? e.message : String(e))}`;
+    messages = [`Не удалось собрать продажи: ${escapeHtml(e instanceof Error ? e.message : String(e))}`];
   }
-  await t.send(chatId, text, back);
+  // Кнопка возврата — только под последним сообщением отчёта.
+  for (let i = 0; i < messages.length; i++) {
+    await t.send(chatId, messages[i], i === messages.length - 1 ? back : undefined);
+  }
 }
 
 type Agg = { id: string; name: string; revenue: number; receipts: number };
@@ -237,34 +270,39 @@ async function buildReport(store: string, period: Period, custom?: Range): Promi
 
 // Нажатия adm:s… ; stores — города, доступные этому администратору.
 export async function handleSalesCallback(parts: string[], t: Transport, chatId: number | string, stores: string[], userId: number) {
-  // adm:s | adm:s:c:<store> | adm:s:p:<store>:<period> | adm:s:x:<store> (свой период)
+  // adm:s | adm:s:m:<режим> | adm:s:c:<режим>:<город> | adm:s:p:<режим>:<город>:<период> | adm:s:x:<режим>:<город>
+  // режим: e — по сотрудникам, k — по городу (общая касса)
   const kind = parts[2];
+  await setAwaiting(userId, null); // любое нажатие снимает ожидание ввода дат
   if (!kind) {
-    await setAwaiting(userId, null);
-    await sendSalesStart(t, chatId, stores);
+    await sendSalesStart(t, chatId);
     return;
   }
-  const store = parts[3];
+  const mode: Mode = parts[3] === "k" ? "k" : "e";
+  if (kind === "m") {
+    await sendCityMenu(t, chatId, mode, stores);
+    return;
+  }
+  const store = parts[4];
   // Чужой город — игнорируем; «Все города» — только тому, у кого их больше одного.
-  if (store === "all" ? stores.length < 2 : !stores.includes(store)) return;
+  if (!store || (store === "all" ? stores.length < 2 : !stores.includes(store))) return;
   if (kind === "c") {
-    await setAwaiting(userId, null);
-    await sendPeriodMenu(t, chatId, store, stores.length > 1);
+    await sendPeriodMenu(t, chatId, mode, store, stores.length > 1);
     return;
   }
   if (kind === "x") {
     // Просим написать даты: следующее текстовое сообщение разберёт handleCustomPeriodInput.
-    await setAwaiting(userId, `sales:${store}`);
+    await setAwaiting(userId, `sales:${mode}:${store}`);
     await t.send(
       chatId,
-      `✏️ <b>Свой период · ${store === "all" ? "Все города" : (CITY[store] ?? store)}</b>\nНапишите даты сообщением:\n• <b>01.10-15.10</b> — с какого по какое\n• <b>05.10</b> — один день\nГод можно не указывать. Данные есть по вчерашний день.`,
-      { inline_keyboard: [[{ text: "Отмена", callback_data: `adm:s:c:${store}` }]] }
+      `✏️ <b>Свой период · ${MODE_LABEL[mode]} · ${store === "all" ? "Все города" : (CITY[store] ?? store)}</b>\nНапишите даты сообщением:\n• <b>01.10-15.10</b> — с какого по какое\n• <b>05.10</b> — один день\nГод можно не указывать. Данные есть по вчерашний день.`,
+      { inline_keyboard: [[{ text: "Отмена", callback_data: `adm:s:c:${mode}:${store}` }]] }
     );
     return;
   }
-  const period = parts[4] as Period;
+  const period = parts[5] as Period;
   if (kind !== "p" || !(period in PERIOD_LABEL) || period === "c") return;
-  await sendReport(t, chatId, store, period);
+  await sendReport(t, chatId, mode, store, period);
 }
 
 // Условный отчёт для тестового руководителя: выдуманные стилисты и цифры.

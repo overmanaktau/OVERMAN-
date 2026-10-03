@@ -129,7 +129,7 @@ async function sendCard(t: Transport, chatId: number | string, id: number, store
     inline_keyboard: [
       ...(buttons.length ? [buttons] : []),
       ...(canManage && r.status === "approved" && !r.is_test && !r.is_protected ? [[{ text: "👤 Роль", callback_data: `adm:r:${r.id}` }]] : []),
-      ...(r.is_test ? [] : [[{ text: `📊 Продажи · ${CITY[r.store] ?? r.store}`, callback_data: `adm:s:c:${r.store}` }]]),
+      ...(r.is_test ? [] : [[{ text: `📊 Продажи · ${CITY[r.store] ?? r.store}`, callback_data: `adm:s:c:e:${r.store}` }]]),
       [{ text: "← К списку", callback_data: "adm:list" }],
     ],
   };

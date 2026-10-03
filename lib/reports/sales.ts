@@ -430,6 +430,35 @@ export async function buildPeriodReport(scope: ReportScope, kind: "week" | "mont
   ]);
 }
 
+// Касса города (или всех городов) за произвольный период: итоги, способы оплаты,
+// возвраты и трафик — без разбивки по сотрудникам и LTV. Используется в боте
+// («Продажи» → «По городу»).
+export async function buildCashReport(scope: ReportScope, from: string, to: string): Promise<string[]> {
+  const [rows, trafficRes] = await Promise.all([
+    loadSales(scope, from, to),
+    supabaseAdmin
+      .from("traffic_entries")
+      .select("traffic_plan, traffic_fact")
+      .gte("entry_date", from)
+      .lte("entry_date", to)
+      .in("store", scope.cityCodes),
+  ]);
+  if (trafficRes.error) throw trafficRes.error;
+  const visitors = (trafficRes.data ?? []).reduce((a, r) => a + (Number(r.traffic_fact) || 0), 0);
+  const trafficPlan = (trafficRes.data ?? []).reduce((a, r) => a + (Number(r.traffic_plan) || 0), 0);
+  const receipts = rows.reduce((a, r) => a + r.receipts_count, 0);
+
+  const period = from === to ? shortDate(from) : `${shortDate(from)} – ${shortDate(to)}`;
+  const title = `📊 <b>Касса · ${escapeHtml(scope.title)}</b>\n<i>${period}</i>`;
+  return packSections([
+    title,
+    section("ИТОГИ", kpiBlock(rows, visitors, true)),
+    section("ПО СПОСОБУ ОПЛАТЫ", await paymentBlock(rows, from, to)),
+    section("ВОЗВРАТЫ", await buildReturnsBlock(scope, from, to, rows)),
+    section("ТРАФИК", trafficBlock(receipts, visitors, trafficPlan)),
+  ]);
+}
+
 export async function buildSalesReport(scope: ReportScope, date: string): Promise<string[]> {
   const monthStart = `${date.slice(0, 8)}01`;
   const warehouses = warehousesForCities(scope.cityCodes);
