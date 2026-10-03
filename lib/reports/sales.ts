@@ -8,8 +8,8 @@ import {
 } from "@/lib/moysklad";
 
 // compact: укороченный формат — без маржи, Instagram, публикаций, рекламы и
-// топа товаров, зато с количеством товара в итогах дня. Пока только у Актау;
-// остальные отчёты остаются полными, пока пользователь не скажет их править.
+// топа товаров, зато с количеством товара в итогах дня. У Актау и Актобе
+// (одинаковый формат); общий отчёт «all» остаётся полным и сейчас никуда не уходит.
 export type ReportScope = { key: string; title: string; cityCodes: string[]; compact?: boolean };
 
 // cityCodes are the city-level codes (point_1/point_3) moysklad_sales_daily,
@@ -17,7 +17,7 @@ export type ReportScope = { key: string; title: string; cityCodes: string[]; com
 // product tables use come from warehousesForCities.
 export const SCOPES: Record<string, ReportScope> = {
   point_1: { key: "point_1", title: "Overman Актау", cityCodes: ["point_1"], compact: true },
-  point_3: { key: "point_3", title: "Overman Актобе", cityCodes: ["point_3"] },
+  point_3: { key: "point_3", title: "Overman Актобе", cityCodes: ["point_3"], compact: true },
   all: { key: "all", title: "Overman · все города", cityCodes: ["point_1", "point_3"] },
 };
 
