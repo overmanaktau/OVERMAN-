@@ -52,6 +52,75 @@ function notice(action: CoachAction, u: NoticeUser): { text: string; markup: Rep
   }
 }
 
+// ---- Роли ----
+// consultant — обычный стилист-консультант; city_admin — продажи своего города;
+// owner — всё: заявки, сотрудники, продажи по всем городам (владельцев может быть несколько).
+export type CoachRole = "consultant" | "city_admin" | "owner";
+export const COACH_ROLES: CoachRole[] = ["consultant", "city_admin", "owner"];
+
+export const ROLE_TITLE: Record<CoachRole, string> = {
+  consultant: "Стилист-консультант",
+  city_admin: "Администратор",
+  owner: "Владелец",
+};
+
+export function roleOf(u: { is_admin: boolean; admin_scope: string }): CoachRole {
+  if (!u.is_admin) return "consultant";
+  return u.admin_scope === "all" ? "owner" : "city_admin";
+}
+
+const CITY_NAME: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
+
+export type RoleResult = { ok: true; employeeName: string; role: CoachRole; notified: boolean } | { ok: false; code: number; error: string };
+
+// Меняет роль подтверждённого сотрудника. actorUserId — запись того, кто меняет
+// (из бота), чтобы нельзя было изменить собственную роль; из портала — null.
+export async function changeCoachRole(userId: number, role: CoachRole, actorUserId: number | null, t: Transport): Promise<RoleResult> {
+  if (!COACH_ROLES.includes(role)) return { ok: false, code: 400, error: "Неизвестная роль." };
+  const { data: user, error } = await supabaseAdmin.from("coach_users").select("*").eq("id", userId).maybeSingle();
+  if (error) return { ok: false, code: 400, error: error.message };
+  if (!user) return { ok: false, code: 404, error: "Сотрудник не найден." };
+  if (user.is_test) return { ok: false, code: 400, error: "У тестового аккаунта роль не меняется." };
+  if (user.status !== "approved") return { ok: false, code: 409, error: "Роль можно менять только у подтверждённого сотрудника." };
+  if (actorUserId !== null && actorUserId === user.id) return { ok: false, code: 403, error: "Свою роль изменить нельзя." };
+  const current = roleOf(user);
+  if (current === role) return { ok: false, code: 409, error: "У сотрудника уже эта роль." };
+
+  // Хотя бы один владелец должен остаться.
+  if (current === "owner") {
+    const { count, error: countError } = await supabaseAdmin
+      .from("coach_users")
+      .select("id", { count: "exact", head: true })
+      .eq("is_admin", true)
+      .eq("admin_scope", "all")
+      .eq("status", "approved")
+      .eq("is_test", false)
+      .neq("id", user.id);
+    if (countError) return { ok: false, code: 400, error: countError.message };
+    if ((count ?? 0) === 0) return { ok: false, code: 409, error: "Нельзя оставить бота без владельца: сначала назначьте другого." };
+  }
+
+  const patch = { is_admin: role !== "consultant", admin_scope: role === "owner" ? "all" : "city", awaiting: null };
+  const { error: updateError } = await supabaseAdmin.from("coach_users").update(patch).eq("id", user.id);
+  if (updateError) return { ok: false, code: 400, error: updateError.message };
+
+  let notified = true;
+  try {
+    const updated = { ...user, ...patch };
+    const text =
+      role === "owner"
+        ? "Ваша роль изменена: <b>владелец</b>. Вам доступны заявки, сотрудники и продажи по всем городам."
+        : role === "city_admin"
+          ? `Ваша роль изменена: <b>администратор</b>. Вам доступны продажи вашего города (${CITY_NAME[user.store] ?? ""}).`
+          : "Ваша роль изменена: <b>стилист-консультант</b>. Выберите раздел кнопкой внизу.";
+    await t.send(user.telegram_chat_id, text, menuFor(updated));
+  } catch (e) {
+    notified = false;
+    console.error("coach role notice error:", getErrorMessage(e));
+  }
+  return { ok: true, employeeName: user.employee_name as string, role, notified };
+}
+
 export type DecisionResult =
   | { ok: true; status: string; notified: boolean; employeeName: string }
   | { ok: false; code: number; error: string };
@@ -64,7 +133,7 @@ export async function decideCoachUser(userId: number, action: CoachAction, decid
   const rule = NEXT_STATUS[action];
   if (!rule.from.includes(user.status)) return { ok: false, code: 409, error: "Статус уже изменился — обновите список." };
   if (user.is_admin && (action === "disable" || action === "remove" || action === "reject")) {
-    return { ok: false, code: 403, error: "Администратора бота нельзя отключить или убрать." };
+    return { ok: false, code: 403, error: "Владельца и администраторов бота нельзя отключить или убрать." };
   }
 
   const now = new Date().toISOString();

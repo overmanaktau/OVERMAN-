@@ -105,6 +105,12 @@ export function isOwner(u: { is_admin?: boolean | null; admin_scope?: string | n
   return !!u.is_admin && u.admin_scope === "all";
 }
 
+// Роль для текстов бота: владелец или администратор (города), у остальных — пусто.
+export function roleLabel(u: { is_admin?: boolean | null; admin_scope?: string | null }): string {
+  if (!u.is_admin) return "";
+  return isOwner(u) ? "владелец" : "администратор";
+}
+
 export function menuFor(u: MenuUser): ReplyMarkup {
   if (u.is_test) return u.test_role === "manager" ? MANAGER_DEMO_MENU_MARKUP : MENU_MARKUP;
   if (!u.is_admin) return MENU_MARKUP;

@@ -5,8 +5,17 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { getErrorMessage } from "@/lib/errors";
-import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
-import { COACH_ACTIONS, decideCoachUser, type CoachAction } from "@/lib/coach/decisions";
+import { type ReplyMarkup, type Transport, roleLabel } from "@/lib/coach/bot";
+import {
+  COACH_ACTIONS,
+  COACH_ROLES,
+  ROLE_TITLE,
+  changeCoachRole,
+  decideCoachUser,
+  roleOf,
+  type CoachAction,
+  type CoachRole,
+} from "@/lib/coach/decisions";
 import { monthStatus, todayInAlmaty } from "@/lib/coach/metrics";
 import { handleSalesCallback } from "@/lib/coach/salesview";
 import { money } from "@/lib/reports/sales";
@@ -14,6 +23,7 @@ import { money } from "@/lib/reports/sales";
 type Row = {
   id: number;
   employee_ms_id: string;
+  admin_scope: string;
   is_test: boolean;
   employee_name: string;
   store: string;
@@ -49,7 +59,7 @@ const ORDER: Record<Row["status"], number> = { pending: 0, approved: 1, disabled
 async function loadRows(): Promise<Row[]> {
   const { data, error } = await supabaseAdmin
     .from("coach_users")
-    .select("id, employee_ms_id, is_test, employee_name, store, status, telegram_name, telegram_username, is_admin");
+    .select("id, employee_ms_id, admin_scope, is_test, employee_name, store, status, telegram_name, telegram_username, is_admin");
   if (error) throw error;
   return ((data ?? []) as Row[]).sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.employee_name.localeCompare(b.employee_name, "ru"));
 }
@@ -70,7 +80,10 @@ export async function sendStaffList(t: Transport, chatId: number | string, kind:
   const legend = kind === "all" ? "\n🕒 ждёт · ✅ подтверждён · ⏸ отключён · ✖️ отклонён" : "";
   await t.send(chatId, `${title}${legend}\nНажмите на имя, чтобы открыть карточку.`, {
     inline_keyboard: rows.map((r) => [
-      { text: `${STATUS_ICON[r.status]} ${r.employee_name} · ${CITY[r.store] ?? r.store}`, callback_data: `adm:u:${r.id}` },
+      {
+        text: `${STATUS_ICON[r.status]} ${r.employee_name} · ${CITY[r.store] ?? r.store}${r.is_admin ? (r.admin_scope === "all" ? " · 👑" : " · 🛡") : ""}`,
+        callback_data: `adm:u:${r.id}`,
+      },
     ]),
   });
 }
@@ -113,6 +126,7 @@ async function sendCard(t: Transport, chatId: number | string, id: number, store
   const markup: ReplyMarkup = {
     inline_keyboard: [
       ...(buttons.length ? [buttons] : []),
+      ...(r.status === "approved" && !r.is_test ? [[{ text: "👤 Роль", callback_data: `adm:r:${r.id}` }]] : []),
       ...(r.is_test ? [] : [[{ text: `📊 Продажи · ${CITY[r.store] ?? r.store}`, callback_data: `adm:s:c:${r.store}` }]]),
       [{ text: "← К списку", callback_data: "adm:list" }],
     ],
@@ -132,7 +146,7 @@ async function sendCard(t: Transport, chatId: number | string, id: number, store
   }
   await t.send(
     chatId,
-    `<b>${escapeHtml(r.employee_name)}</b> · ${CITY[r.store] ?? r.store}${r.is_admin ? " · администратор" : ""}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}\nTelegram: ${escapeHtml(tgLabel(r))}${month}`,
+    `<b>${escapeHtml(r.employee_name)}</b> · ${CITY[r.store] ?? r.store}${r.is_admin ? ` · ${roleLabel(r)}` : ""}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}\nTelegram: ${escapeHtml(tgLabel(r))}${month}`,
     markup
   );
 }
@@ -171,6 +185,46 @@ export async function handleAdminCallback(
     await sendCard(t, chatId, Number(parts[2]), stores);
     return;
   }
+  // Роли: adm:r:<id> (выбор) | adm:rq:<роль>:<id> (подтвердить владельца) | adm:rs:<роль>:<id> (применить)
+  if (kind === "r" || kind === "rq" || kind === "rs") {
+    const roleId = Number(kind === "r" ? parts[2] : parts[3]);
+    const target = (await loadRows()).find((x) => x.id === roleId);
+    if (!target || !stores.includes(target.store)) return;
+    const current = roleOf(target);
+    if (kind === "r") {
+      await t.send(chatId, `<b>${escapeHtml(target.employee_name)}</b>\nТекущая роль: <b>${ROLE_TITLE[current]}</b>\nВыберите новую роль:`, {
+        inline_keyboard: [
+          ...COACH_ROLES.map((role) => [
+            {
+              text: `${role === current ? "✓ " : ""}${ROLE_TITLE[role]}`,
+              callback_data: role === current ? `adm:u:${roleId}` : role === "owner" ? `adm:rq:owner:${roleId}` : `adm:rs:${role}:${roleId}`,
+            },
+          ]),
+          [{ text: "← К карточке", callback_data: `adm:u:${roleId}` }],
+        ],
+      });
+      return;
+    }
+    const role = parts[2] as CoachRole;
+    if (kind === "rq") {
+      await t.send(chatId, `Сделать <b>${escapeHtml(target.employee_name)}</b> владельцем? Владельцу доступны заявки, сотрудники и продажи по всем городам.`, {
+        inline_keyboard: [[{ text: "Да", callback_data: `adm:rs:owner:${roleId}` }, { text: "Нет", callback_data: `adm:r:${roleId}` }]],
+      });
+      return;
+    }
+    let text: string;
+    try {
+      const result = await changeCoachRole(roleId, role, userId, t);
+      text = result.ok
+        ? `Готово: <b>${escapeHtml(result.employeeName)}</b> — теперь ${ROLE_TITLE[result.role].toLowerCase()}.${result.notified ? "" : "\nСообщение сотруднику доставить не удалось."}`
+        : `Не получилось: ${escapeHtml(result.error)}`;
+    } catch (e) {
+      text = `Не получилось: ${escapeHtml(getErrorMessage(e))}`;
+    }
+    await t.send(chatId, text); // без кнопок — остаётся в истории чата
+    return;
+  }
+
   const action = parts[2] as CoachAction;
   const id = Number(parts[3]);
   if (!COACH_ACTIONS.includes(action) || !Number.isFinite(id)) return;

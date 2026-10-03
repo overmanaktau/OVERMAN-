@@ -15,11 +15,14 @@ type CoachUser = {
   requested_at: string;
   left_at: string | null;
   is_admin: boolean;
+  is_test: boolean;
+  admin_scope: "city" | "all";
   decided_at: string | null;
   decided_by: string | null;
 };
 
 type Action = "approve" | "reject" | "disable" | "enable" | "remove";
+type Role = "consultant" | "city_admin" | "owner";
 
 const STATUS_LABEL: Record<CoachUser["status"], string> = {
   pending: "Ожидает подтверждения",
@@ -66,6 +69,36 @@ export default function CoachPage() {
   useEffect(() => {
     if (canView) load();
   }, [canView, load]);
+
+  async function changeRole(user: CoachUser, role: Role) {
+    if (busyId !== null) return;
+    const title = { consultant: "стилистом-консультантом", city_admin: "администратором", owner: "владельцем" }[role];
+    if (!window.confirm(`Сделать «${user.employee_name}» ${title}? Ему придёт сообщение с новым меню.`)) {
+      await load(); // вернуть выпадающий список к прежнему значению
+      return;
+    }
+    setBusyId(user.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await fetch(`/api/coach/users/${user.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` },
+        body: JSON.stringify({ action: "role", role }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string; notified?: boolean };
+      if (!res.ok) throw new Error(json.error ?? `Ошибка ${res.status}`);
+      if (json.notified === false) setNotice("Роль изменена, но сообщение в Telegram доставить не удалось.");
+    } catch (e) {
+      setError(getErrorMessage(e));
+    } finally {
+      setBusyId(null);
+      await load();
+    }
+  }
 
   async function act(user: CoachUser, action: Action) {
     if (busyId !== null) return;
@@ -137,7 +170,21 @@ export default function CoachPage() {
                       : u.decided_at && ` · ${STATUS_LABEL[u.status].toLowerCase()} ${formatDateTime(u.decided_at)}${u.decided_by ? `, ${u.decided_by}` : ""}`}
                   </div>
                 </div>
-                {canEdit && u.is_admin && <div className="text-[12px] text-mutedLight">Администратор бота</div>}
+                {canEdit && u.status === "approved" && !u.is_test && (
+                  <label className="flex items-center gap-1.5 text-[12px] text-muted">
+                    Роль
+                    <select
+                      value={u.is_admin ? (u.admin_scope === "all" ? "owner" : "city_admin") : "consultant"}
+                      disabled={busyId !== null}
+                      onChange={(e) => changeRole(u, e.target.value as Role)}
+                      className="text-[12.5px] font-semibold border border-border rounded-md px-2 py-1.5 bg-surface"
+                    >
+                      <option value="consultant">Стилист-консультант</option>
+                      <option value="city_admin">Администратор</option>
+                      <option value="owner">Владелец</option>
+                    </select>
+                  </label>
+                )}
                 {canEdit && !u.is_admin && (
                   <div className="flex items-center gap-2">
                     {u.status === "pending" && (

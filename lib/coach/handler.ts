@@ -3,7 +3,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployeeIds } from "@/lib/moysklad";
-import { LEAVE_TEXT, REMOVE_KEYBOARD, isOwner, menuFor, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
+import { LEAVE_TEXT, REMOVE_KEYBOARD, isOwner, menuFor, roleLabel, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, setAwaiting } from "@/lib/coach/salesview";
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
 import {
@@ -142,7 +142,7 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
     if (u.is_admin) await sendSalesStart(t, u.telegram_chat_id, adminStores(u));
     else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
   } else if (section === "exit") {
-    if (u.is_admin) await t.send(u.telegram_chat_id, "Администратор бота не может выйти из аккаунта — иначе вы потеряете управление сотрудниками.", menu);
+    if (u.is_admin) await t.send(u.telegram_chat_id, `${isOwner(u) ? "Владелец" : "Администратор"} не может выйти из аккаунта — иначе вы потеряете доступ к управлению.`, menu);
     else await t.send(u.telegram_chat_id, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
   } else {
     await t.send(u.telegram_chat_id, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
@@ -236,7 +236,7 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
       user.telegram_chat_id = chatId;
     }
     if (text === "/start") {
-      await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}! Выберите раздел внизу.`, menuFor(user));
+      await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}!${user.is_admin && !user.is_test ? ` Ваша роль: ${roleLabel(user)}.` : ""} Выберите раздел внизу.`, menuFor(user));
       return;
     }
     const section = SECTION_BY_TEXT[text.toLowerCase()];
