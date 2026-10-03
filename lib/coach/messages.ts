@@ -10,7 +10,7 @@ const MONTHS = [
 ];
 
 function line(label: string, value: string): string {
-  return `${label.padEnd(18)}${value.padStart(14)}`;
+  return `${label.padEnd(20)}${value.padStart(12)}`;
 }
 function pct(n: number): string {
   return `${n.toFixed(2)}%`;
@@ -74,7 +74,7 @@ export const HELP_TEXT = [
   "Кнопки внизу:",
   "• <b>Мой план</b> — план на месяц, факт, сколько осталось закрыть.",
   "• <b>Что повысить</b> — какой ваш показатель просел относительно вашего же среднего и сколько чеков и какой средний чек нужны, чтобы закрыть план.",
-  "• <b>План на неделю</b> — цель на текущую неделю (с учётом недобора прошлой), сколько чеков за смену и какой средний чек нужны, чтобы её закрыть.",
+  "• <b>План на неделю</b> — цель на текущую неделю (с учётом недобора прошлой), сколько чеков в среднем за смену и какой средний чек нужны, чтобы её закрыть.",
   "• <b>Итоги прошлой недели</b> — план недели, ваши цифры за неделю (выручка, смены, чеки, средний чек, глубина) и выполнение плана.",
   "• <b>Помощь</b> — это меню: обучение (то, что вы читаете) и поддержка.",
   "• <b>Выход</b> — отвязать этот Telegram от вашего профиля. Чтобы вернуться, нужно заново пройти регистрацию и дождаться подтверждения руководителя.",
@@ -95,7 +95,7 @@ export function myPlanMessage(emp: EmployeeRef, s: MonthStatus): string {
     line("Выполнение", s.pct !== null ? pct(s.pct) : "—"),
     line("Осталось закрыть", money(s.deficit)),
     line("Смен впереди (≈)", num(s.remainingShifts)),
-    line("Нужно за смену", s.needPerShift !== null ? money(s.needPerShift) : "—"),
+    line("Нужно в ср. за смену", s.needPerShift !== null ? money(s.needPerShift) : "—"),
   ];
   let text = `${head}\n${pre(rows.join("\n"))}`;
   if (s.deficit <= 0) text += "\n✅ План месяца уже закрыт — отличная работа!";
@@ -105,7 +105,7 @@ export function myPlanMessage(emp: EmployeeRef, s: MonthStatus): string {
       [
         line("План периода", money(p.plan)),
         line("Факт периода", money(p.fact)),
-        line("Нужно за смену", p.needPerShift !== null ? money(p.needPerShift) : "—"),
+        line("Нужно в ср. за смену", p.needPerShift !== null ? money(p.needPerShift) : "—"),
       ].join("\n")
     )}`;
   }
@@ -113,7 +113,7 @@ export function myPlanMessage(emp: EmployeeRef, s: MonthStatus): string {
 }
 
 const LAGGING_LABEL: Record<NonNullable<Advice["lagging"]>, string> = {
-  receipts: "количество чеков за смену",
+  receipts: "количество чеков в среднем за смену",
   avgCheck: "средний чек",
   depth: "глубина чека (товаров в одном чеке)",
 };
@@ -189,10 +189,10 @@ function weekLines(w: WeekSummary): { last: string; next: string } {
     const rows = [line("План недели", money(t.base))];
     if (t.extra > 0) rows.push(line("+ часть недобора", money(t.extra)));
     rows.push(line("Цель недели", money(t.target)));
-    if (t.perShift !== null) rows.push(line("≈ за смену", money(t.perShift)));
+    if (t.perShift !== null) rows.push(line("≈ в среднем за смену", money(t.perShift)));
     next = `🎯 <b>Цель на неделю ${shortDate(t.from)}–${shortDate(t.to)}</b>\n${pre(rows.join("\n"))}`;
     if (t.need) {
-      next += `\n<b>Чтобы закрыть цель, за смену нужно:</b>\n${pre(
+      next += `\n<b>Чтобы закрыть цель, в среднем за смену нужно:</b>\n${pre(
         [
           line("Чеков", `≈ ${t.need.receipts.toFixed(1)}`),
           line("  сейчас", t.need.nowReceipts.toFixed(1)),
@@ -238,7 +238,7 @@ export function dailyMessage(emp: EmployeeRef, date: string, day: DayRow, s: Mon
   if (s.plan === null) return `${text}\n${NO_PLAN_TEXT}`;
   text += `\n<b>Месяц:</b> ${money(s.fact)} из ${money(s.plan)}${s.pct !== null ? ` (${pct(s.pct)})` : ""}`;
   if (s.deficit <= 0) return `${text}\n✅ План месяца закрыт!`;
-  text += `\nОсталось закрыть ${money(s.deficit)} — это ≈ ${money(s.needPerShift ?? 0)} за смену.`;
+  text += `\nОсталось закрыть ${money(s.deficit)} — это в среднем ≈ ${money(s.needPerShift ?? 0)} за смену.`;
   if (a.lagging) text += `\n💡 Что повысить в первую очередь: <b>${LAGGING_LABEL[a.lagging]}</b>. Подробнее — кнопка «Что повысить».`;
   return text;
 }
