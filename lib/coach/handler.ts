@@ -3,7 +3,8 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployeeIds } from "@/lib/moysklad";
-import { MENU_MARKUP, REMOVE_KEYBOARD, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
+import { LEAVE_TEXT, REMOVE_KEYBOARD, menuFor, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
+import { handleAdminCallback, notifyAdminsOfRequest, sendStaffList } from "@/lib/coach/adminui";
 import { HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
 import { type EmployeeRef, addDays, buildAdvice, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
 
@@ -22,6 +23,7 @@ export type CoachUser = {
   employee_name: string;
   status: "pending" | "approved" | "rejected" | "disabled" | "left";
   rejoined: boolean;
+  is_admin: boolean;
 };
 
 const CITIES: { store: string; label: string }[] = [
@@ -29,7 +31,8 @@ const CITIES: { store: string; label: string }[] = [
   { store: "point_3", label: "Актобе" },
 ];
 const LOOKBACK_DAYS = 45;
-const HIDDEN_NAME = /саяпарк|saya/i;
+// Не показываются в списке при регистрации (Saya Park, директор, Қайнар).
+const HIDDEN_NAME = /саяпарк|saya|дамир\s+директор|[кқ]айнар/i;
 
 export function refOf(u: CoachUser): EmployeeRef {
   return { id: u.employee_ms_id, name: u.employee_name, store: u.store };
@@ -95,17 +98,22 @@ function statusText(u: CoachUser): string {
 async function showSection(t: Transport, u: CoachUser, section: string) {
   const emp = refOf(u);
   const today = todayInAlmaty();
+  const menu = menuFor(u.is_admin);
   if (section === "plan") {
-    await t.send(u.telegram_chat_id, myPlanMessage(emp, await monthStatus(emp, today)), MENU_MARKUP);
+    await t.send(u.telegram_chat_id, myPlanMessage(emp, await monthStatus(emp, today)), menu);
   } else if (section === "advice") {
     const s = await monthStatus(emp, today);
-    await t.send(u.telegram_chat_id, adviceMessage(emp, s, buildAdvice(s)), MENU_MARKUP);
+    await t.send(u.telegram_chat_id, adviceMessage(emp, s, buildAdvice(s)), menu);
   } else if (section === "week") {
-    await t.send(u.telegram_chat_id, weekMessage(emp, await weekSummary(emp, today)), MENU_MARKUP);
+    await t.send(u.telegram_chat_id, weekMessage(emp, await weekSummary(emp, today)), menu);
   } else if (section === "last") {
-    await t.send(u.telegram_chat_id, lastWeekMessage(emp, await weekSummary(emp, today)), MENU_MARKUP);
+    await t.send(u.telegram_chat_id, lastWeekMessage(emp, await weekSummary(emp, today)), menu);
+  } else if (section === "requests" || section === "staff") {
+    if (u.is_admin) await sendStaffList(t, u.telegram_chat_id, section === "requests" ? "pending" : "all");
+    else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
   } else if (section === "exit") {
-    await t.send(u.telegram_chat_id, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
+    if (u.is_admin) await t.send(u.telegram_chat_id, "Администратор бота не может выйти из аккаунта — иначе вы потеряете управление сотрудниками.", menu);
+    else await t.send(u.telegram_chat_id, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
   } else {
     await t.send(u.telegram_chat_id, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
   }
@@ -139,6 +147,8 @@ const SECTION_BY_TEXT: Record<string, string> = {
   помощь: "help",
   выход: "exit",
   "/exit": "exit",
+  заявки: "requests",
+  сотрудники: "staff",
   "/help": "help",
 };
 
@@ -160,14 +170,14 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
       user.telegram_chat_id = chatId;
     }
     if (text === "/start") {
-      await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}! Выберите раздел внизу.`, MENU_MARKUP);
+      await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}! Выберите раздел внизу.`, menuFor(user.is_admin));
       return;
     }
     const section = SECTION_BY_TEXT[text.toLowerCase()];
     if (section) {
       await showSection(t, user, section);
     } else {
-      await t.send(chatId, "Выберите раздел кнопкой внизу или нажмите «Помощь».", MENU_MARKUP);
+      await t.send(chatId, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menuFor(user.is_admin));
     }
     return;
   }
@@ -216,16 +226,23 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
         .update({ status: "left", left_at: new Date().toISOString() })
         .eq("id", existing.id);
       if (error) throw error;
-      await t.send(chatId, "Вы вышли из аккаунта. Чтобы войти снова, нажмите /start и пройдите регистрацию заново.", REMOVE_KEYBOARD);
+      await t.send(chatId, LEAVE_TEXT, REMOVE_KEYBOARD);
     } else {
-      await t.send(chatId, "Остаётесь в системе. Выберите раздел кнопкой внизу.", MENU_MARKUP);
+      await t.send(chatId, "Остаётесь в системе. Выберите раздел кнопкой внизу.", menuFor(existing.is_admin));
     }
+    return;
+  }
+
+  if (cb.data.startsWith("adm:")) {
+    // Только подтверждённый администратор; от остальных нажатия молча игнорируем.
+    if (!existing || existing.status !== "approved" || !existing.is_admin) return;
+    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent);
     return;
   }
 
   if (existing && existing.status !== "rejected" && existing.status !== "left") {
     await dropCurrent();
-    await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? MENU_MARKUP : undefined);
+    await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? menuFor(existing.is_admin) : undefined);
     return;
   }
 
@@ -312,5 +329,6 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
       `${rejoined ? "С возвращением! " : ""}Заявка отправлена: <b>${escapeHtml(chosen.name)}</b>. Руководитель должен подтвердить, что это вы. Как только подтвердит, вам придёт сообщение.`,
       REMOVE_KEYBOARD
     );
+    await notifyAdminsOfRequest(t, cb.from.id);
   }
 }

@@ -14,18 +14,19 @@ type CoachUser = {
   status: "pending" | "approved" | "rejected" | "disabled" | "left";
   requested_at: string;
   left_at: string | null;
+  is_admin: boolean;
   decided_at: string | null;
   decided_by: string | null;
 };
 
-type Action = "approve" | "reject" | "disable" | "enable";
+type Action = "approve" | "reject" | "disable" | "enable" | "remove";
 
 const STATUS_LABEL: Record<CoachUser["status"], string> = {
   pending: "Ожидает подтверждения",
   approved: "Подтверждён",
   rejected: "Отклонён",
   disabled: "Отключён",
-  left: "Вышел сам",
+  left: "Вышел из системы",
 };
 
 function formatDateTime(iso: string) {
@@ -69,6 +70,11 @@ export default function CoachPage() {
   async function act(user: CoachUser, action: Action) {
     if (busyId !== null) return;
     if (action === "disable" && !window.confirm(`Отключить «${user.employee_name}»? Бот перестанет с ним работать и присылать сообщения.`)) return;
+    if (
+      action === "remove" &&
+      !window.confirm(`Убрать «${user.employee_name}» из системы? Ему придёт прощальное сообщение, а чтобы вернуться, придётся заново пройти регистрацию.`)
+    )
+      return;
     setBusyId(user.id);
     setError(null);
     setNotice(null);
@@ -131,7 +137,8 @@ export default function CoachPage() {
                       : u.decided_at && ` · ${STATUS_LABEL[u.status].toLowerCase()} ${formatDateTime(u.decided_at)}${u.decided_by ? `, ${u.decided_by}` : ""}`}
                   </div>
                 </div>
-                {canEdit && (
+                {canEdit && u.is_admin && <div className="text-[12px] text-mutedLight">Администратор бота</div>}
+                {canEdit && !u.is_admin && (
                   <div className="flex items-center gap-2">
                     {u.status === "pending" && (
                       <>
@@ -171,6 +178,16 @@ export default function CoachPage() {
                         className="text-[12.5px] font-semibold text-accent border border-accent rounded-md px-3 py-1.5 disabled:opacity-50"
                       >
                         Включить
+                      </button>
+                    )}
+                    {u.status !== "pending" && u.status !== "left" && (
+                      <button
+                        type="button"
+                        disabled={busyId !== null}
+                        onClick={() => act(u, "remove")}
+                        className="text-[12.5px] font-semibold text-muted border border-border rounded-md px-3 py-1.5 disabled:opacity-50"
+                      >
+                        Убрать
                       </button>
                     )}
                   </div>

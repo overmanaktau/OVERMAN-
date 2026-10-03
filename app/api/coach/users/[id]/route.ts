@@ -1,72 +1,20 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSectionAccess } from "@/lib/requireAdmin";
-import { getErrorMessage } from "@/lib/errors";
-import { escapeHtml } from "@/lib/telegram";
-import { MENU_MARKUP, REMOVE_KEYBOARD, telegramTransport } from "@/lib/coach/bot";
+import { telegramTransport } from "@/lib/coach/bot";
+import { COACH_ACTIONS, decideCoachUser, type CoachAction } from "@/lib/coach/decisions";
 
-type Action = "approve" | "reject" | "disable" | "enable";
-
-const NEXT_STATUS: Record<Action, { from: string[]; to: string }> = {
-  approve: { from: ["pending"], to: "approved" },
-  reject: { from: ["pending"], to: "rejected" },
-  disable: { from: ["approved"], to: "disabled" },
-  enable: { from: ["disabled", "rejected"], to: "approved" },
-};
-
-const NOTICE: Record<Action, { text: string; markup?: Record<string, unknown> }> = {
-  approve: { text: "✅ Руководитель подтвердил ваш доступ. Выберите раздел кнопкой внизу.", markup: MENU_MARKUP },
-  enable: { text: "✅ Доступ к боту снова включён. Выберите раздел кнопкой внизу.", markup: MENU_MARKUP },
-  reject: { text: "Заявку отклонили. Если это ошибка, нажмите /start и отправьте её заново или обратитесь к руководителю.", markup: REMOVE_KEYBOARD },
-  disable: { text: "Доступ к боту отключён. Обратитесь к руководителю.", markup: REMOVE_KEYBOARD },
-};
-
-// Решение владельца по продавцу из «Настройки → Помощник консультантов»:
-// подтвердить заявку, отклонить, отключить подтверждённого, включить обратно.
-// Человеку в Telegram сразу уходит сообщение об этом.
+// Решение владельца по стилисту-консультанту из «Настройки → Помощник консультантов»:
+// подтвердить заявку, отклонить, отключить подтверждённого, включить обратно,
+// убрать из системы. Человеку в Telegram сразу уходит сообщение об этом.
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const caller = await requireSectionAccess(request, "settings.coach", "edit");
   if (!caller) return NextResponse.json({ error: "Нет доступа." }, { status: 403 });
 
-  const body = (await request.json().catch(() => ({}))) as { action?: Action };
+  const body = (await request.json().catch(() => ({}))) as { action?: CoachAction };
   const action = body.action;
-  if (!action || !(action in NEXT_STATUS)) return NextResponse.json({ error: "Неизвестное действие." }, { status: 400 });
+  if (!action || !COACH_ACTIONS.includes(action)) return NextResponse.json({ error: "Неизвестное действие." }, { status: 400 });
 
-  const { data: user, error: fetchError } = await supabaseAdmin.from("coach_users").select("*").eq("id", params.id).maybeSingle();
-  if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 400 });
-  if (!user) return NextResponse.json({ error: "Заявка не найдена." }, { status: 404 });
-
-  const rule = NEXT_STATUS[action];
-  if (!rule.from.includes(user.status)) {
-    return NextResponse.json({ error: "Статус уже изменился — обновите страницу." }, { status: 409 });
-  }
-
-  const { error: updateError } = await supabaseAdmin
-    .from("coach_users")
-    .update({ status: rule.to, decided_at: new Date().toISOString(), decided_by: caller.user.email ?? caller.user.id })
-    .eq("id", user.id);
-  if (updateError) {
-    const taken = /coach_users_employee_active|duplicate/i.test(updateError.message);
-    return NextResponse.json(
-      { error: taken ? "Этот сотрудник уже привязан к другому Telegram-аккаунту." : updateError.message },
-      { status: taken ? 409 : 400 }
-    );
-  }
-
-  let notified = true;
-  try {
-    // При подтверждении заявки: первый вход — «Добро пожаловать», вернувшемуся после выхода — «С возвращением».
-    const name = escapeHtml(user.employee_name);
-    const text =
-      action === "approve"
-        ? user.rejoined
-          ? `🎉 С возвращением в систему, ${name}! Руководитель подтвердил ваш доступ. Выберите раздел кнопкой внизу.`
-          : `🎉 Добро пожаловать, ${name}! Руководитель подтвердил ваш доступ. Выберите раздел кнопкой внизу.`
-        : NOTICE[action].text;
-    await telegramTransport.send(user.telegram_chat_id, text, NOTICE[action].markup);
-  } catch (e) {
-    notified = false;
-    console.error("coach notice error:", getErrorMessage(e));
-  }
-  return NextResponse.json({ ok: true, status: rule.to, notified });
+  const result = await decideCoachUser(Number(params.id), action, caller.user.email ?? caller.user.id, telegramTransport);
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.code });
+  return NextResponse.json({ ok: true, status: result.status, notified: result.notified });
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
-import { MENU_MARKUP, telegramTransport } from "@/lib/coach/bot";
+import { menuFor, telegramTransport } from "@/lib/coach/bot";
 import { refOf, type CoachUser } from "@/lib/coach/handler";
 import { dailyMessage, weekMessage } from "@/lib/coach/messages";
 import { addDays, buildAdvice, dayStats, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
@@ -58,7 +58,7 @@ async function handle(request: Request) {
         return;
       }
       try {
-        await telegramTransport.send(user.telegram_chat_id, text, MENU_MARKUP);
+        await telegramTransport.send(user.telegram_chat_id, text, menuFor(user.is_admin));
         await supabaseAdmin.from("coach_messages_sent").insert({ user_id: user.id, kind, ref_date: refDate });
         results.push({ user: label, kind, action: "отправлено" });
       } catch (e) {

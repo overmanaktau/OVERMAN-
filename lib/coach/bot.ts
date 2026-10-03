@@ -65,4 +65,24 @@ export const MENU_MARKUP: ReplyMarkup = {
   is_persistent: true,
 };
 
+// У администратора бота в меню добавлены разделы управления сотрудниками.
+export const ADMIN_MENU_MARKUP: ReplyMarkup = {
+  keyboard: [
+    [{ text: "Мой план" }, { text: "Что повысить" }],
+    [{ text: "План на неделю" }, { text: "Итоги прошлой недели" }],
+    [{ text: "Заявки" }, { text: "Сотрудники" }],
+    [{ text: "Помощь" }, { text: "Выход" }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+export function menuFor(isAdmin: boolean | null | undefined): ReplyMarkup {
+  return isAdmin ? ADMIN_MENU_MARKUP : MENU_MARKUP;
+}
+
 export const REMOVE_KEYBOARD: ReplyMarkup = { remove_keyboard: true };
+
+// Прощальный текст: сотрудник вышел сам или его убрал руководитель.
+export const LEAVE_TEXT =
+  "Вы успешно вышли из сервиса «Помощник консультанта». Спасибо за работу и желаем вам удачи! Если захотите вернуться, нажмите /start.";
