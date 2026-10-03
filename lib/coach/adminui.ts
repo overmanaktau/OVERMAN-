@@ -145,11 +145,14 @@ export async function handleAdminCallback(
   adminName: string,
   dropCurrent: () => Promise<void>,
   clearCurrent: () => Promise<void>,
-  stores: string[] // города, которые видит этот администратор
+  stores: string[], // города, которые видит этот администратор
+  owner: boolean // заявки и сотрудников обрабатывает только владелец
 ): Promise<void> {
   // adm:list | adm:u:<id> | adm:ask:<action>:<id> | adm:do:<action>:<id> | adm:req:<action>:<id> | adm:s…
   const parts = data.split(":");
   const kind = parts[1];
+  // Администратор города — только «Продажи» (adm:s…); всё остальное закрыто.
+  if (kind !== "s" && !owner) return;
   // Экраны выбора (списки, карточки, подтверждение) после нажатия исчезают.
   // Сообщение «Новая заявка» (req) остаётся в истории чата — у него только убираются
   // кнопки, как и итоговое «Готово: …».
@@ -263,8 +266,8 @@ export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number
       ]],
     };
     for (const a of (admins ?? []) as { telegram_chat_id: number; store: string; admin_scope: string }[]) {
-      // Администратору города — только заявки его города; владельцу (all) — все.
-      if (a.admin_scope !== "all" && a.store !== r.store) continue;
+      // Заявки принимает только владелец (admin_scope = all), остальным они не приходят.
+      if (a.admin_scope !== "all") continue;
       try {
         await t.send(a.telegram_chat_id, text, markup);
       } catch (e) {

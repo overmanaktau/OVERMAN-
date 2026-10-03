@@ -19,7 +19,7 @@ const NEXT_STATUS: Record<CoachAction, { from: string[]; to: string }> = {
   remove: { from: ["pending", "approved", "disabled", "rejected"], to: "left" },
 };
 
-type NoticeUser = { employee_name: string; rejoined: boolean; is_admin: boolean; is_test: boolean; test_role: string | null };
+type NoticeUser = { employee_name: string; rejoined: boolean; is_admin: boolean; admin_scope: string; is_test: boolean; test_role: string | null };
 
 function notice(action: CoachAction, u: NoticeUser): { text: string; markup: ReplyMarkup } {
   const name = escapeHtml(u.employee_name);

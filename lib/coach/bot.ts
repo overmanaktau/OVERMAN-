@@ -86,11 +86,29 @@ export const MANAGER_DEMO_MENU_MARKUP: ReplyMarkup = {
   is_persistent: true,
 };
 
-export type MenuUser = { is_admin?: boolean | null; is_test?: boolean | null; test_role?: string | null };
+// Администратор города: только продажи своего города. Заявки и сотрудники — только у владельца.
+export const CITY_ADMIN_MENU_MARKUP: ReplyMarkup = {
+  keyboard: [[{ text: "Продажи" }, { text: "Помощь" }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+export type MenuUser = {
+  is_admin?: boolean | null;
+  admin_scope?: string | null;
+  is_test?: boolean | null;
+  test_role?: string | null;
+};
+
+// Владелец — администратор с доступом ко всем городам.
+export function isOwner(u: { is_admin?: boolean | null; admin_scope?: string | null }): boolean {
+  return !!u.is_admin && u.admin_scope === "all";
+}
 
 export function menuFor(u: MenuUser): ReplyMarkup {
   if (u.is_test) return u.test_role === "manager" ? MANAGER_DEMO_MENU_MARKUP : MENU_MARKUP;
-  return u.is_admin ? ADMIN_MENU_MARKUP : MENU_MARKUP;
+  if (!u.is_admin) return MENU_MARKUP;
+  return isOwner(u) ? ADMIN_MENU_MARKUP : CITY_ADMIN_MENU_MARKUP;
 }
 
 export const REMOVE_KEYBOARD: ReplyMarkup = { remove_keyboard: true };
