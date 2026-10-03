@@ -33,7 +33,7 @@ async function handle(request: Request) {
   const onlyUser = url.searchParams.get("user");
 
   try {
-    let query = supabaseAdmin.from("coach_users").select("*").eq("status", "approved").eq("is_test", false);
+    let query = supabaseAdmin.from("coach_users").select("*").eq("status", "approved").eq("is_test", false).eq("is_admin", false);
     if (onlyUser) query = query.eq("id", Number(onlyUser));
     const { data, error } = await query;
     if (error) throw error;

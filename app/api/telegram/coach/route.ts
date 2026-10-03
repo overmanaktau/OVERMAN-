@@ -19,6 +19,7 @@ export async function POST(request: Request) {
     }
     const sent: { chat: number | string; html: string; markup?: ReplyMarkup }[] = [];
     const deleted: { chat: number | string; messageId: number }[] = [];
+    const cleared: { chat: number | string; messageId: number }[] = [];
     const mock: Transport = {
       async send(chat, html, markup) {
         sent.push({ chat, html, markup });
@@ -27,12 +28,15 @@ export async function POST(request: Request) {
       async deleteMessage(chat, messageId) {
         deleted.push({ chat, messageId });
       },
+      async clearButtons(chat, messageId) {
+        cleared.push({ chat, messageId });
+      },
     };
     try {
       await handleUpdate((await request.json()) as TgUpdate, mock);
-      return NextResponse.json({ ok: true, sent, deleted });
+      return NextResponse.json({ ok: true, sent, deleted, cleared });
     } catch (e) {
-      return NextResponse.json({ error: getErrorMessage(e), sent, deleted }, { status: 500 });
+      return NextResponse.json({ error: getErrorMessage(e), sent, deleted, cleared }, { status: 500 });
     }
   }
 

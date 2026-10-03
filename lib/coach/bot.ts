@@ -33,6 +33,8 @@ export type Transport = {
   answerCallback(callbackId: string, text?: string): Promise<void>;
   // Удалить сообщение (выбор сделан — кнопки больше не нужны). Ошибки не критичны.
   deleteMessage(chatId: number | string, messageId: number): Promise<void>;
+  // Убрать кнопки под сообщением, оставив само сообщение в истории чата.
+  clearButtons(chatId: number | string, messageId: number): Promise<void>;
 };
 
 export const telegramTransport: Transport = {
@@ -52,6 +54,9 @@ export const telegramTransport: Transport = {
   async deleteMessage(chatId, messageId) {
     await coachApi("deleteMessage", { chat_id: chatId, message_id: messageId });
   },
+  async clearButtons(chatId, messageId) {
+    await coachApi("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
+  },
 };
 
 // Постоянная клавиатура с разделами для подтверждённых продавцов.
@@ -65,14 +70,11 @@ export const MENU_MARKUP: ReplyMarkup = {
   is_persistent: true,
 };
 
-// У администратора бота в меню добавлены разделы управления сотрудниками.
+// У администратора бота только разделы управления сотрудниками: личных продаж
+// и плана у него нет, поэтому «Мой план» и остальных консультантских разделов нет.
+// «Выхода» тоже нет — администратор не может отвязать себя.
 export const ADMIN_MENU_MARKUP: ReplyMarkup = {
-  keyboard: [
-    [{ text: "Мой план" }, { text: "Что повысить" }],
-    [{ text: "План на неделю" }, { text: "Итоги прошлой недели" }],
-    [{ text: "Заявки" }, { text: "Сотрудники" }],
-    [{ text: "Помощь" }, { text: "Выход" }],
-  ],
+  keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Помощь" }]],
   resize_keyboard: true,
   is_persistent: true,
 };

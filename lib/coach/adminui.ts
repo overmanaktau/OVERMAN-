@@ -7,9 +7,13 @@ import { escapeHtml } from "@/lib/telegram";
 import { getErrorMessage } from "@/lib/errors";
 import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { COACH_ACTIONS, decideCoachUser, type CoachAction } from "@/lib/coach/decisions";
+import { monthStatus, todayInAlmaty } from "@/lib/coach/metrics";
+import { money } from "@/lib/reports/sales";
 
 type Row = {
   id: number;
+  employee_ms_id: string;
+  is_test: boolean;
   employee_name: string;
   store: string;
   status: "pending" | "approved" | "rejected" | "disabled" | "left";
@@ -44,7 +48,7 @@ const ORDER: Record<Row["status"], number> = { pending: 0, approved: 1, disabled
 async function loadRows(): Promise<Row[]> {
   const { data, error } = await supabaseAdmin
     .from("coach_users")
-    .select("id, employee_name, store, status, telegram_name, telegram_username, is_admin");
+    .select("id, employee_ms_id, is_test, employee_name, store, status, telegram_name, telegram_username, is_admin");
   if (error) throw error;
   return ((data ?? []) as Row[]).sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.employee_name.localeCompare(b.employee_name, "ru"));
 }
@@ -108,9 +112,22 @@ async function sendCard(t: Transport, chatId: number | string, id: number) {
   const markup: ReplyMarkup = {
     inline_keyboard: [...(buttons.length ? [buttons] : []), [{ text: "← К списку", callback_data: "adm:list" }]],
   };
+  // Для настоящего подтверждённого сотрудника — как идёт месяц (план/факт).
+  let month = "";
+  if (!r.is_test && !r.is_admin && (r.status === "approved" || r.status === "disabled")) {
+    try {
+      const s = await monthStatus({ id: r.employee_ms_id, name: r.employee_name, store: r.store }, todayInAlmaty());
+      month =
+        s.plan === null
+          ? `\nМесяц: факт ${money(s.fact)}, план не внесён`
+          : `\nМесяц: факт ${money(s.fact)} из плана ${money(s.plan)}${s.pct !== null ? ` (${s.pct.toFixed(1)}%)` : ""}`;
+    } catch (e) {
+      console.error("coach card stats error:", getErrorMessage(e));
+    }
+  }
   await t.send(
     chatId,
-    `<b>${escapeHtml(r.employee_name)}</b> · ${CITY[r.store] ?? r.store}${r.is_admin ? " · администратор" : ""}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}\nTelegram: ${escapeHtml(tgLabel(r))}`,
+    `<b>${escapeHtml(r.employee_name)}</b> · ${CITY[r.store] ?? r.store}${r.is_admin ? " · администратор" : ""}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}\nTelegram: ${escapeHtml(tgLabel(r))}${month}`,
     markup
   );
 }
@@ -121,11 +138,17 @@ export async function handleAdminCallback(
   t: Transport,
   chatId: number | string,
   adminName: string,
-  dropCurrent: () => Promise<void>
+  dropCurrent: () => Promise<void>,
+  clearCurrent: () => Promise<void>
 ): Promise<void> {
-  const parts = data.split(":"); // adm:list | adm:u:<id> | adm:ask:<action>:<id> | adm:do:<action>:<id>
-  await dropCurrent();
+  // adm:list | adm:u:<id> | adm:ask:<action>:<id> | adm:do:<action>:<id> | adm:req:<action>:<id>
+  const parts = data.split(":");
   const kind = parts[1];
+  // Экраны выбора (списки, карточки, подтверждение) после нажатия исчезают.
+  // Сообщение «Новая заявка» (req) остаётся в истории чата — у него только убираются
+  // кнопки, как и итоговое «Готово: …».
+  if (kind === "req") await clearCurrent();
+  else await dropCurrent();
   if (kind === "list") {
     await sendStaffList(t, chatId, "all");
     return;
@@ -148,7 +171,7 @@ export async function handleAdminCallback(
     return;
   }
 
-  if (kind === "do") {
+  if (kind === "do" || kind === "req") {
     let text: string;
     try {
       const result = await decideCoachUser(id, action, `бот: ${adminName}`, t);
@@ -158,7 +181,8 @@ export async function handleAdminCallback(
     } catch (e) {
       text = `Не получилось: ${escapeHtml(getErrorMessage(e))}`;
     }
-    await t.send(chatId, text, { inline_keyboard: [[{ text: "← К списку сотрудников", callback_data: "adm:list" }]] });
+    // Без кнопок: итог решения остаётся в истории чата и не исчезает.
+    await t.send(chatId, text);
   }
 }
 
@@ -222,8 +246,8 @@ export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number
     const text = `🆕 <b>Новая заявка${r.rejoined ? " (возвращается)" : ""}</b>\n${escapeHtml(r.employee_name)} · ${CITY[r.store] ?? r.store}\nTelegram: ${escapeHtml(tgLabel(r))}\nПроверьте, что это именно этот сотрудник.`;
     const markup: ReplyMarkup = {
       inline_keyboard: [[
-        { text: "✅ Принять", callback_data: `adm:do:approve:${r.id}` },
-        { text: "❌ Отказать", callback_data: `adm:do:reject:${r.id}` },
+        { text: "✅ Принять", callback_data: `adm:req:approve:${r.id}` },
+        { text: "❌ Отказать", callback_data: `adm:req:reject:${r.id}` },
       ]],
     };
     for (const a of (admins ?? []) as { telegram_chat_id: number }[]) {

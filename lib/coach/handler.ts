@@ -14,7 +14,7 @@ import {
   expireTestUser,
   isTestExpired,
 } from "@/lib/coach/testmode";
-import { HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
+import { ADMIN_HELP_TEXT, HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
 import { type EmployeeRef, addDays, buildAdvice, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
 
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
@@ -115,7 +115,10 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
     await showTestSection(t, u, section, menu);
     return;
   }
-  if (section === "plan") {
+  // У администратора нет ни плана, ни личных продаж — только управление сотрудниками.
+  if (u.is_admin && ["plan", "advice", "week", "last"].includes(section)) {
+    await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
+  } else if (section === "plan") {
     await t.send(u.telegram_chat_id, myPlanMessage(emp, await monthStatus(emp, today)), menu);
   } else if (section === "advice") {
     const s = await monthStatus(emp, today);
@@ -255,6 +258,16 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     }
   };
 
+  // То же, но сообщение остаётся в истории — убираются только кнопки.
+  const clearCurrent = async () => {
+    if (messageId === undefined) return;
+    try {
+      await t.clearButtons(chatId, messageId);
+    } catch {
+      // оставляем как есть
+    }
+  };
+
   const existing = await findUser(cb.from.id);
 
   if (existing && isTestExpired(existing)) {
@@ -266,7 +279,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   if (cb.data.startsWith("help:")) {
     if (!existing || existing.status !== "approved") return;
     await dropCurrent();
-    if (cb.data === "help:learn") await t.send(chatId, HELP_TEXT, HELP_BACK_KEYBOARD);
+    if (cb.data === "help:learn") await t.send(chatId, existing.is_admin ? ADMIN_HELP_TEXT : HELP_TEXT, HELP_BACK_KEYBOARD);
     else if (cb.data === "help:support") await t.send(chatId, SUPPORT_TEXT, HELP_BACK_KEYBOARD);
     else await t.send(chatId, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
     return;
@@ -298,7 +311,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   if (cb.data.startsWith("adm:")) {
     // Только подтверждённый администратор; от остальных нажатия молча игнорируем.
     if (!existing || existing.status !== "approved" || !existing.is_admin || existing.is_test) return;
-    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent);
+    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent);
     return;
   }
 
