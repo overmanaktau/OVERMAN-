@@ -73,7 +73,16 @@ export const MENU_MARKUP: ReplyMarkup = {
 // У администратора бота только разделы управления сотрудниками: личных продаж
 // и плана у него нет, поэтому «Мой план» и остальных консультантских разделов нет.
 // «Выхода» тоже нет — администратор не может отвязать себя.
+// Остальные владельцы: сотрудников и продажи всех городов смотрят, но заявки,
+// отключение и роли — только у главного владельца, поэтому «Заявок» у них нет.
 export const ADMIN_MENU_MARKUP: ReplyMarkup = {
+  keyboard: [[{ text: "Сотрудники" }, { text: "Продажи" }], [{ text: "Помощь" }, { text: "Выход" }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+// Главный владелец: всё управление; выйти не может — меню без «Выхода».
+export const MAIN_OWNER_MENU_MARKUP: ReplyMarkup = {
   keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Продажи" }, { text: "Помощь" }]],
   resize_keyboard: true,
   is_persistent: true,
@@ -88,7 +97,7 @@ export const MANAGER_DEMO_MENU_MARKUP: ReplyMarkup = {
 
 // Администратор города: только продажи своего города. Заявки и сотрудники — только у владельца.
 export const CITY_ADMIN_MENU_MARKUP: ReplyMarkup = {
-  keyboard: [[{ text: "Продажи" }, { text: "Помощь" }]],
+  keyboard: [[{ text: "Продажи" }, { text: "Помощь" }], [{ text: "Выход" }]],
   resize_keyboard: true,
   is_persistent: true,
 };
@@ -96,6 +105,7 @@ export const CITY_ADMIN_MENU_MARKUP: ReplyMarkup = {
 export type MenuUser = {
   is_admin?: boolean | null;
   admin_scope?: string | null;
+  is_protected?: boolean | null;
   is_test?: boolean | null;
   test_role?: string | null;
 };
@@ -114,7 +124,8 @@ export function roleLabel(u: { is_admin?: boolean | null; admin_scope?: string |
 export function menuFor(u: MenuUser): ReplyMarkup {
   if (u.is_test) return u.test_role === "manager" ? MANAGER_DEMO_MENU_MARKUP : MENU_MARKUP;
   if (!u.is_admin) return MENU_MARKUP;
-  return isOwner(u) ? ADMIN_MENU_MARKUP : CITY_ADMIN_MENU_MARKUP;
+  if (!isOwner(u)) return CITY_ADMIN_MENU_MARKUP;
+  return u.is_protected ? MAIN_OWNER_MENU_MARKUP : ADMIN_MENU_MARKUP;
 }
 
 export const REMOVE_KEYBOARD: ReplyMarkup = { remove_keyboard: true };

@@ -15,7 +15,7 @@ import {
   expireTestUser,
   isTestExpired,
 } from "@/lib/coach/testmode";
-import { ADMIN_HELP_TEXT, CITY_ADMIN_HELP_TEXT, HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
+import { ADMIN_HELP_TEXT, CITY_ADMIN_HELP_TEXT, OWNER_VIEW_HELP_TEXT, HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
 import { type EmployeeRef, addDays, buildAdvice, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
 
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
@@ -47,8 +47,10 @@ const CITIES: { store: string; label: string }[] = [
   { store: "point_3", label: "Актобе" },
 ];
 const LOOKBACK_DAYS = 45;
-// Не показываются в списке при регистрации (Saya Park, директор, Қайнар).
-const HIDDEN_NAME = /саяпарк|saya|дамир\s+директор|[кқ]айнар/i;
+// Не показывается в списке при регистрации (Saya Park — не человек). Владельцы и
+// администратор (Дамир, Қайнар, Нуржан) в списке есть, роль им назначена заранее
+// (таблица coach_role_presets).
+const HIDDEN_NAME = /саяпарк|saya/i;
 
 // Города, которые видит администратор: все (владелец) или только свой.
 function adminStores(u: CoachUser): string[] {
@@ -137,8 +139,10 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
   } else if (section === "last") {
     await t.send(u.telegram_chat_id, lastWeekMessage(emp, await weekSummary(emp, today)), menu);
   } else if (section === "requests" || section === "staff") {
-    if (isOwner(u)) await sendStaffList(t, u.telegram_chat_id, section === "requests" ? "pending" : "all", adminStores(u));
-    else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
+    // «Сотрудники» смотрят владельцы; «Заявки» — только главный владелец.
+    if (section === "requests" ? u.is_protected : isOwner(u)) {
+      await sendStaffList(t, u.telegram_chat_id, section === "requests" ? "pending" : "all", adminStores(u));
+    } else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
   } else if (section === "sales") {
     if (u.is_admin) await sendSalesStart(t, u.telegram_chat_id, adminStores(u));
     else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
@@ -300,7 +304,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   if (cb.data.startsWith("help:")) {
     if (!existing || existing.status !== "approved") return;
     await dropCurrent();
-    if (cb.data === "help:learn") await t.send(chatId, !existing.is_admin ? HELP_TEXT : isOwner(existing) ? ADMIN_HELP_TEXT : CITY_ADMIN_HELP_TEXT, HELP_BACK_KEYBOARD);
+    if (cb.data === "help:learn") await t.send(chatId, !existing.is_admin ? HELP_TEXT : existing.is_protected ? ADMIN_HELP_TEXT : isOwner(existing) ? OWNER_VIEW_HELP_TEXT : CITY_ADMIN_HELP_TEXT, HELP_BACK_KEYBOARD);
     else if (cb.data === "help:support") await t.send(chatId, SUPPORT_TEXT, HELP_BACK_KEYBOARD);
     else await t.send(chatId, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
     return;
@@ -310,6 +314,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     if (!existing || existing.status !== "approved") return;
     await dropCurrent();
     if (cb.data === "exit:yes") {
+      if (existing.is_protected) return; // главный владелец выйти не может
       const { error } = await supabaseAdmin
         .from("coach_users")
         // Вышедший теряет и роль: вернётся — снова обычным сотрудником.
@@ -333,7 +338,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   if (cb.data.startsWith("adm:")) {
     // Только подтверждённый администратор; от остальных нажатия молча игнорируем.
     if (!existing || existing.status !== "approved" || !existing.is_admin || existing.is_test) return;
-    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent, adminStores(existing), isOwner(existing), existing.id);
+    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent, adminStores(existing), isOwner(existing), existing.id, existing.is_protected);
     return;
   }
 
@@ -445,8 +450,17 @@ async function submitRequest(
   existing: CoachUser | null,
   who: Pick<CoachUser, "store" | "employee_ms_id" | "employee_name" | "rejoined" | "is_test" | "test_role">
 ): Promise<void> {
+  // Роль, назначенная заранее этому сотруднику (владелец / администратор); у остальных — обычная.
+  const { data: preset, error: presetError } = who.is_test
+    ? { data: null, error: null }
+    : await supabaseAdmin.from("coach_role_presets").select("role").eq("employee_ms_id", who.employee_ms_id).maybeSingle();
+  if (presetError) throw presetError;
+  const presetRole = (preset as { role: "owner" | "city_admin" } | null)?.role ?? null;
   const row = {
     ...who,
+    is_admin: presetRole !== null,
+    admin_scope: presetRole === "owner" ? "all" : "city",
+    awaiting: null,
     left_at: null,
     test_expires_at: null,
     telegram_user_id: cb.from.id,

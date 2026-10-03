@@ -112,14 +112,15 @@ const ACTION_BUTTON: Record<CoachAction, string> = {
   remove: "🗑 Убрать",
 };
 
-async function sendCard(t: Transport, chatId: number | string, id: number, stores: string[]) {
+async function sendCard(t: Transport, chatId: number | string, id: number, stores: string[], canManage: boolean) {
   const rows = await loadRows();
   const r = rows.find((x) => x.id === id && stores.includes(x.store));
   if (!r) {
     await t.send(chatId, "Сотрудник не найден.", { inline_keyboard: [[{ text: "← К списку", callback_data: "adm:list" }]] });
     return;
   }
-  const buttons = actionsFor(r).map((a) => ({
+  // Принимать, отключать и менять роли может только главный владелец; остальным карточка только для просмотра.
+  const buttons = (canManage ? actionsFor(r) : []).map((a) => ({
     text: ACTION_BUTTON[a],
     // Необратимое подтверждаем отдельным шагом, остальное — сразу.
     callback_data: ACTION_ASK[a] ? `adm:ask:${a}:${r.id}` : `adm:do:${a}:${r.id}`,
@@ -127,7 +128,7 @@ async function sendCard(t: Transport, chatId: number | string, id: number, store
   const markup: ReplyMarkup = {
     inline_keyboard: [
       ...(buttons.length ? [buttons] : []),
-      ...(r.status === "approved" && !r.is_test && !r.is_protected ? [[{ text: "👤 Роль", callback_data: `adm:r:${r.id}` }]] : []),
+      ...(canManage && r.status === "approved" && !r.is_test && !r.is_protected ? [[{ text: "👤 Роль", callback_data: `adm:r:${r.id}` }]] : []),
       ...(r.is_test ? [] : [[{ text: `📊 Продажи · ${CITY[r.store] ?? r.store}`, callback_data: `adm:s:c:${r.store}` }]]),
       [{ text: "← К списку", callback_data: "adm:list" }],
     ],
@@ -161,14 +162,22 @@ export async function handleAdminCallback(
   dropCurrent: () => Promise<void>,
   clearCurrent: () => Promise<void>,
   stores: string[], // города, которые видит этот администратор
-  owner: boolean, // заявки и сотрудников обрабатывает только владелец
-  userId: number // запись администратора (для ожидания ввода своего периода)
+  owner: boolean, // владелец (все города): видит список сотрудников и карточки
+  userId: number, // запись администратора (для ожидания ввода своего периода)
+  canManage: boolean // главный владелец: принимает, отключает, меняет роли
 ): Promise<void> {
   // adm:list | adm:u:<id> | adm:ask:<action>:<id> | adm:do:<action>:<id> | adm:req:<action>:<id> | adm:s…
   const parts = data.split(":");
   const kind = parts[1];
-  // Администратор города — только «Продажи» (adm:s…); всё остальное закрыто.
-  if (kind !== "s" && !owner) return;
+  // Администратор города — только «Продажи» (adm:s…); список и карточки — владельцам;
+  // любые решения (принять, отключить, роли) — только главному владельцу.
+  if (kind === "s") {
+    // доступно всем администраторам
+  } else if (kind === "list" || kind === "u") {
+    if (!owner) return;
+  } else if (!canManage) {
+    return;
+  }
   // Экраны выбора (списки, карточки, подтверждение) после нажатия исчезают.
   // Сообщение «Новая заявка» (req) остаётся в истории чата — у него только убираются
   // кнопки, как и итоговое «Готово: …».
@@ -183,7 +192,7 @@ export async function handleAdminCallback(
     return;
   }
   if (kind === "u") {
-    await sendCard(t, chatId, Number(parts[2]), stores);
+    await sendCard(t, chatId, Number(parts[2]), stores, canManage);
     return;
   }
   // Роли: adm:r:<id> (выбор) | adm:rq:<роль>:<id> (подтвердить владельца) | adm:rs:<роль>:<id> (применить)
@@ -307,14 +316,18 @@ export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number
     const [{ data: req }, { data: admins }] = await Promise.all([
       supabaseAdmin
         .from("coach_users")
-        .select("id, employee_name, store, telegram_name, telegram_username, rejoined")
+        .select("id, employee_name, store, telegram_name, telegram_username, rejoined, is_admin, admin_scope")
         .eq("telegram_user_id", telegramUserId)
         .maybeSingle(),
-      supabaseAdmin.from("coach_users").select("telegram_chat_id, store, admin_scope").eq("is_admin", true).eq("status", "approved"),
+      supabaseAdmin
+        .from("coach_users")
+        .select("telegram_chat_id, store, admin_scope")
+        .eq("is_protected", true)
+        .eq("status", "approved"),
     ]);
     if (!req) return;
     const r = req as Row & { rejoined: boolean };
-    const text = `🆕 <b>Новая заявка${r.rejoined ? " (возвращается)" : ""}</b>\n${escapeHtml(r.employee_name)} · ${CITY[r.store] ?? r.store}\nTelegram: ${escapeHtml(tgLabel(r))}\nПроверьте, что это именно этот сотрудник.`;
+    const text = `🆕 <b>Новая заявка${r.rejoined ? " (возвращается)" : ""}</b>\n${escapeHtml(r.employee_name)} · ${CITY[r.store] ?? r.store}${r.is_admin ? ` · роль: ${roleLabel(r)}` : ""}\nTelegram: ${escapeHtml(tgLabel(r))}\nПроверьте, что это именно этот сотрудник.`;
     const markup: ReplyMarkup = {
       inline_keyboard: [[
         { text: "✅ Принять", callback_data: `adm:req:approve:${r.id}` },
@@ -322,7 +335,7 @@ export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number
       ]],
     };
     for (const a of (admins ?? []) as { telegram_chat_id: number; store: string; admin_scope: string }[]) {
-      // Заявки принимает только владелец (admin_scope = all), остальным они не приходят.
+      // Заявки принимает только главный владелец — только ему они и приходят.
       if (a.admin_scope !== "all") continue;
       try {
         await t.send(a.telegram_chat_id, text, markup);
