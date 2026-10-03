@@ -314,7 +314,9 @@ function detailLines(a: Total): string[] {
     `  чеков ${num(a.receipts)} · товаров ${num(a.items)} шт`,
     `  ср.чек ${avgCheck(a)} · гл.чек ${depth(a)}`,
   ];
-  if (a.shifts > 0) lines.push(`  смен ${num(a.shifts)} · за смену ${money(a.revenue / a.shifts)}`);
+  if (a.shifts > 0) {
+    lines.push(`  смен ${num(a.shifts)}`, `  в среднем за смену ${money(a.revenue / a.shifts)}`);
+  }
   if (a.retAmount > 0 || a.retReceipts > 0 || a.retItems > 0) {
     const parts = [money(a.retAmount)];
     if (a.retReceipts > 0) parts.push(`${num(a.retReceipts)} чек`);
