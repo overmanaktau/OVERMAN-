@@ -170,6 +170,28 @@ async function buildCashMessages(store: string, period: Period, custom?: Range):
   return messages;
 }
 
+// Telegram принимает не больше 4096 знаков в сообщении. Длинный отчёт режем по строкам,
+// закрывая и заново открывая блок <pre>, если разрез пришёлся внутрь него.
+function splitLong(text: string, limit = 3800): string[] {
+  if (text.length <= limit) return [text];
+  const chunks: string[] = [];
+  let current = "";
+  let inPre = false;
+  for (const line of text.split("\n")) {
+    const opens = line.includes("<pre>");
+    const closes = line.includes("</pre>");
+    if (current.length + line.length + 8 > limit && current) {
+      chunks.push(inPre ? `${current}</pre>` : current);
+      current = inPre ? "<pre>⠀\n" : "";
+    }
+    current += (current && !current.endsWith("\n") ? "\n" : "") + line;
+    if (opens) inPre = true;
+    if (closes) inPre = false;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 async function sendReport(t: Transport, chatId: number | string, mode: Mode, store: string, period: Period, custom?: Range) {
   const back: ReplyMarkup = { inline_keyboard: [[{ text: "← Другой период", callback_data: `adm:s:c:${mode}:${store}` }]] };
   let messages: string[];
@@ -178,19 +200,41 @@ async function sendReport(t: Transport, chatId: number | string, mode: Mode, sto
   } catch (e) {
     messages = [`Не удалось собрать продажи: ${escapeHtml(e instanceof Error ? e.message : String(e))}`];
   }
+  messages = messages.flatMap((m) => splitLong(m));
   // Кнопка возврата — только под последним сообщением отчёта.
   for (let i = 0; i < messages.length; i++) {
     await t.send(chatId, messages[i], i === messages.length - 1 ? back : undefined);
   }
 }
 
-type Agg = { id: string; name: string; revenue: number; receipts: number };
-
-type Total = { revenue: number; receipts: number };
+// Всё, что показываем по сотруднику (и по городу в итоге): выручка, чеки, товары,
+// возвраты, смены — отсюда средний чек, глубина чека и выручка за смену.
+type Total = {
+  revenue: number;
+  receipts: number;
+  items: number;
+  retAmount: number;
+  retReceipts: number;
+  retItems: number;
+  shifts: number;
+};
+type Agg = Total & { id: string; name: string };
+const EMPTY: Total = { revenue: 0, receipts: 0, items: 0, retAmount: 0, retReceipts: 0, retItems: 0, shifts: 0 };
 const avgCheck = (a: Total) => (a.receipts > 0 ? money(a.revenue / a.receipts) : "—");
+const depth = (a: Total) => (a.receipts > 0 ? (a.items / a.receipts).toFixed(2) : "—");
 
 // Стилисты одного города за период: список по убыванию выручки и планы месяца.
-type SalesRow = { employee_ms_id: string; employee_name: string; revenue: number; receipts_count: number };
+type SalesRow = {
+  employee_ms_id: string;
+  employee_name: string;
+  sale_date: string;
+  revenue: number;
+  receipts_count: number;
+  items_count: number;
+  returned_amount: number | null;
+  returned_receipts: number | null;
+  returned_items: number | null;
+};
 
 // Строки продаж за период постранично: PostgREST отдаёт не больше 1000 за запрос.
 async function loadSales(store: string, from: string, to: string): Promise<SalesRow[]> {
@@ -198,7 +242,7 @@ async function loadSales(store: string, from: string, to: string): Promise<Sales
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await supabaseAdmin
       .from("moysklad_employee_sales_daily")
-      .select("employee_ms_id, employee_name, revenue, receipts_count")
+      .select("employee_ms_id, employee_name, sale_date, revenue, receipts_count, items_count, returned_amount, returned_receipts, returned_items")
       .eq("store", store)
       .gte("sale_date", from)
       .lte("sale_date", to)
@@ -226,30 +270,69 @@ async function cityData(store: string, period: Period, custom?: Range): Promise<
     if (p.sales_plan !== null) planOf.set(p.employee_ms_id, Number(p.sales_plan));
   }
   const byId = new Map<string, Agg>();
+  const shiftDays = new Map<string, Set<string>>(); // смена — день, когда у сотрудника есть выручка или чеки
   for (const r of salesRows) {
     if (HIDDEN_NAME.test(r.employee_name)) continue;
-    const a = byId.get(r.employee_ms_id) ?? { id: r.employee_ms_id, name: r.employee_name, revenue: 0, receipts: 0 };
-    a.revenue += Number(r.revenue) || 0;
-    a.receipts += Number(r.receipts_count) || 0;
+    const a = byId.get(r.employee_ms_id) ?? { ...EMPTY, id: r.employee_ms_id, name: r.employee_name };
+    const revenue = Number(r.revenue) || 0;
+    const receipts = Number(r.receipts_count) || 0;
+    a.revenue += revenue;
+    a.receipts += receipts;
+    a.items += Number(r.items_count) || 0;
+    a.retAmount += Number(r.returned_amount) || 0;
+    a.retReceipts += Number(r.returned_receipts) || 0;
+    a.retItems += Number(r.returned_items) || 0;
     byId.set(r.employee_ms_id, a);
+    if (receipts > 0 || revenue > 0) {
+      const days = shiftDays.get(r.employee_ms_id) ?? new Set<string>();
+      days.add(r.sale_date);
+      shiftDays.set(r.employee_ms_id, days);
+    }
   }
+  for (const [id, days] of shiftDays) byId.get(id)!.shifts = days.size;
   return { list: [...byId.values()].sort((a, b) => b.revenue - a.revenue), planOf };
 }
 
 function sumOf(list: Total[]): Total {
-  return list.reduce((s, a) => ({ revenue: s.revenue + a.revenue, receipts: s.receipts + a.receipts }), { revenue: 0, receipts: 0 });
+  return list.reduce(
+    (s, a) => ({
+      revenue: s.revenue + a.revenue,
+      receipts: s.receipts + a.receipts,
+      items: s.items + a.items,
+      retAmount: s.retAmount + a.retAmount,
+      retReceipts: s.retReceipts + a.retReceipts,
+      retItems: s.retItems + a.retItems,
+      shifts: s.shifts + a.shifts,
+    }),
+    { ...EMPTY }
+  );
+}
+
+// Строки с цифрами под именем: чеки, товары, средний чек, глубина чека, смены, возвраты.
+function detailLines(a: Total): string[] {
+  const lines = [
+    `  чеков ${num(a.receipts)} · товаров ${num(a.items)} шт`,
+    `  ср.чек ${avgCheck(a)} · гл.чек ${depth(a)}`,
+  ];
+  if (a.shifts > 0) lines.push(`  смен ${num(a.shifts)} · за смену ${money(a.revenue / a.shifts)}`);
+  if (a.retAmount > 0 || a.retReceipts > 0 || a.retItems > 0) {
+    const parts = [money(a.retAmount)];
+    if (a.retReceipts > 0) parts.push(`${num(a.retReceipts)} чек`);
+    if (a.retItems > 0) parts.push(`${num(a.retItems)} тов.`);
+    lines.push(`  возвраты ${parts.join(" · ")}`);
+  }
+  return lines;
 }
 
 function totalLines(label: string, total: Total): string[] {
-  return [`${label.padEnd(13)}${money(total.revenue).padStart(13)}`, `  чеков ${num(total.receipts)} · ср.чек ${avgCheck(total)}`];
+  return [`${label.padEnd(13)}${money(total.revenue).padStart(13)}`, ...detailLines(total)];
 }
 
 // Таблица стилистов города (с планом за месяц) и итог по городу.
 function cityLines(list: Agg[], planOf: Map<string, number>, period: Period): string[] {
   const lines: string[] = [];
   for (const a of list) {
-    lines.push(`${a.name.slice(0, 13).padEnd(13)}${money(a.revenue).padStart(13)}`);
-    lines.push(`  чеков ${num(a.receipts)} · ср.чек ${avgCheck(a)}`);
+    lines.push(`${a.name.slice(0, 13).padEnd(13)}${money(a.revenue).padStart(13)}`, ...detailLines(a));
     const plan = planOf.get(a.id);
     if (period === "m" && plan !== undefined && plan > 0) {
       lines.push(`  план ${money(plan)} · ${((a.revenue / plan) * 100).toFixed(1)}%`);
