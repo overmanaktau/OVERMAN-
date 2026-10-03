@@ -636,3 +636,20 @@ export function deriveArticle(name: string): string {
   s = s.replace(/[/,\s]+$/, "").trim();
   return s || name.trim();
 }
+
+// Id активных сотрудников МойСклад (для списка продавцов при внесении плана).
+// Архивные и удалённые сотрудники в список не попадают: обычный запрос
+// возвращает только действующих, а флаг archived проверяем на всякий случай.
+export async function fetchActiveEmployeeIds(): Promise<string[]> {
+  const limit = 1000;
+  const ids: string[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await moyskladFetch("/entity/employee", { limit: String(limit), offset: String(offset) });
+    const rows: { id: string; archived?: boolean }[] = page.rows ?? [];
+    for (const r of rows) if (r.archived !== true) ids.push(r.id);
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return ids;
+}

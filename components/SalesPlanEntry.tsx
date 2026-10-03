@@ -25,8 +25,9 @@ const MONTH_NAMES = [
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
 ];
 
-// Сотрудники берутся из МойСклад по продажам точки за последние дни. Бывшие
-// кассиры закрытой кассы Saya Park в список не попадают (если у них нет плана).
+// Сотрудники берутся из МойСклад по продажам точки за последние дни, и только
+// активные (архивные в список не попадают, см. /api/moysklad/employees). Бывшие
+// кассиры закрытой кассы Saya Park в список тоже не попадают.
 const EMPLOYEE_LOOKBACK_DAYS = 45;
 const HIDDEN_EMPLOYEE_NAME = /саяпарк|saya/i;
 
@@ -113,6 +114,7 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeFilterFailed, setActiveFilterFailed] = useState(false);
 
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -159,6 +161,22 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
       if (requestsRes.error) throw requestsRes.error;
       if (staffRes.error) throw staffRes.error;
 
+      // В списке остаются только активные сотрудники МойСклад. Если МойСклад не
+      // ответил, показываем всех, но предупреждаем об этом на странице.
+      let activeIds: Set<string> | null = null;
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const res = await fetch("/api/moysklad/employees", {
+          headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+        });
+        if (res.ok) activeIds = new Set(((await res.json()) as { activeIds: string[] }).activeIds);
+      } catch {
+        // оставляем activeIds = null
+      }
+      setActiveFilterFailed(activeIds === null);
+
       const pendingRowIds = new Set((requestsRes.data ?? []).map((r) => r.row_id));
       const next: Record<string, Cell> = {};
       const byId = new Map<string, Employee>();
@@ -177,7 +195,9 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
           unlockExpiresAt: e.unlock_expires_at ?? null,
         };
       }
-      const list = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+      const list = [...byId.values()]
+        .filter((e) => !activeIds || activeIds.has(e.id))
+        .sort((a, b) => a.name.localeCompare(b.name, "ru"));
       setEmployees(list);
       setSelectedEmployee((prev) => (prev && list.some((x) => x.id === prev) ? prev : list[0]?.id ?? ""));
       setCells(next);
@@ -407,6 +427,13 @@ export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
               ))}
             </select>
           </div>
+
+          {activeFilterFailed && (
+            <div className="text-[12.5px] text-[#A34B36]">
+              Не удалось получить активных сотрудников из МойСклад — показаны все, кто продавал недавно, в том
+              числе возможно уже неактивные.
+            </div>
+          )}
 
           {loading && employees.length === 0 ? (
             <div className="text-sm text-muted">Загрузка…</div>
