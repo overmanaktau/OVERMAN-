@@ -20,7 +20,8 @@ export type CoachUser = {
   store: string;
   employee_ms_id: string;
   employee_name: string;
-  status: "pending" | "approved" | "rejected" | "disabled";
+  status: "pending" | "approved" | "rejected" | "disabled" | "left";
+  rejoined: boolean;
 };
 
 const CITIES: { store: string; label: string }[] = [
@@ -71,7 +72,7 @@ function cityKeyboard(): ReplyMarkup {
 async function askCity(t: Transport, chatId: number) {
   await t.send(
     chatId,
-    "Здравствуйте! Я помощник стилиста-консультанта Overman: показываю план/факт и подсказываю, что повысить, чтобы закрыть план.\n\nВыберите ваш город:",
+    "Добро пожаловать! Я помощник стилиста-консультанта Overman: показываю план/факт и подсказываю, что повысить, чтобы закрыть план.\n\nВыберите ваш город:",
     cityKeyboard()
   );
 }
@@ -84,6 +85,8 @@ function statusText(u: CoachUser): string {
       return "Заявку отклонили. Если это ошибка, нажмите /start и отправьте её заново или обратитесь к руководителю.";
     case "disabled":
       return "Доступ к боту отключён. Обратитесь к руководителю.";
+    case "left":
+      return "Вы вышли из аккаунта. Чтобы войти снова, нажмите /start.";
     default:
       return "";
   }
@@ -101,10 +104,19 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
     await t.send(u.telegram_chat_id, weekMessage(emp, await weekSummary(emp, today)), MENU_MARKUP);
   } else if (section === "last") {
     await t.send(u.telegram_chat_id, lastWeekMessage(emp, await weekSummary(emp, today)), MENU_MARKUP);
+  } else if (section === "exit") {
+    await t.send(u.telegram_chat_id, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
   } else {
     await t.send(u.telegram_chat_id, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
   }
 }
+
+// «Выход» отвязывает аккаунт: чтобы вернуться, регистрацию нужно пройти заново.
+const EXIT_CONFIRM_TEXT =
+  "Выйти из аккаунта? Бот перестанет присылать вам сообщения. Чтобы вернуться, нужно будет заново выбрать город и имя и дождаться подтверждения руководителя.";
+const EXIT_CONFIRM_KEYBOARD: ReplyMarkup = {
+  inline_keyboard: [[{ text: "Да, выйти", callback_data: "exit:yes" }, { text: "Отмена", callback_data: "exit:no" }]],
+};
 
 // «Помощь» открывает два выбора: обучение (как пользоваться кнопками) и поддержка.
 const HELP_MENU_KEYBOARD: ReplyMarkup = {
@@ -125,6 +137,8 @@ const SECTION_BY_TEXT: Record<string, string> = {
   "итоги прошлой недели": "last",
   "/last": "last",
   помощь: "help",
+  выход: "exit",
+  "/exit": "exit",
   "/help": "help",
 };
 
@@ -158,7 +172,7 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
     return;
   }
 
-  if (!user || (user.status === "rejected" && text === "/start")) {
+  if (!user || user.status === "left" || (user.status === "rejected" && text === "/start")) {
     await askCity(t, chatId);
     return;
   }
@@ -193,7 +207,23 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     return;
   }
 
-  if (existing && existing.status !== "rejected") {
+  if (cb.data.startsWith("exit:")) {
+    if (!existing || existing.status !== "approved") return;
+    await dropCurrent();
+    if (cb.data === "exit:yes") {
+      const { error } = await supabaseAdmin
+        .from("coach_users")
+        .update({ status: "left", left_at: new Date().toISOString() })
+        .eq("id", existing.id);
+      if (error) throw error;
+      await t.send(chatId, "Вы вышли из аккаунта. Чтобы войти снова, нажмите /start и пройдите регистрацию заново.", REMOVE_KEYBOARD);
+    } else {
+      await t.send(chatId, "Остаётесь в системе. Выберите раздел кнопкой внизу.", MENU_MARKUP);
+    }
+    return;
+  }
+
+  if (existing && existing.status !== "rejected" && existing.status !== "left") {
     await dropCurrent();
     await t.send(chatId, statusText(existing) || "Вы уже зарегистрированы.", existing.status === "approved" ? MENU_MARKUP : undefined);
     return;
@@ -247,7 +277,17 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
       await t.send(chatId, "Этот сотрудник уже занят или недоступен. Нажмите /start и выберите ещё раз, либо обратитесь к руководителю.");
       return;
     }
+    // Сотрудник, который раньше выходил из системы, входит как вернувшийся.
+    const { count: leftBefore, error: leftError } = await supabaseAdmin
+      .from("coach_users")
+      .select("id", { count: "exact", head: true })
+      .eq("employee_ms_id", chosen.id)
+      .eq("status", "left");
+    if (leftError) throw leftError;
+    const rejoined = (leftBefore ?? 0) > 0;
     const row = {
+      rejoined,
+      left_at: null,
       telegram_user_id: cb.from.id,
       telegram_chat_id: chatId,
       telegram_username: cb.from.username ?? null,
@@ -269,7 +309,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     }
     await t.send(
       chatId,
-      `Заявка отправлена: <b>${escapeHtml(chosen.name)}</b>. Руководитель должен подтвердить, что это вы. Как только подтвердит, вам придёт сообщение.`,
+      `${rejoined ? "С возвращением! " : ""}Заявка отправлена: <b>${escapeHtml(chosen.name)}</b>. Руководитель должен подтвердить, что это вы. Как только подтвердит, вам придёт сообщение.`,
       REMOVE_KEYBOARD
     );
   }

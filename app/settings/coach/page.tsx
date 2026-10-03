@@ -11,8 +11,9 @@ type CoachUser = {
   telegram_name: string | null;
   store: string;
   employee_name: string;
-  status: "pending" | "approved" | "rejected" | "disabled";
+  status: "pending" | "approved" | "rejected" | "disabled" | "left";
   requested_at: string;
+  left_at: string | null;
   decided_at: string | null;
   decided_by: string | null;
 };
@@ -24,6 +25,7 @@ const STATUS_LABEL: Record<CoachUser["status"], string> = {
   approved: "Подтверждён",
   rejected: "Отклонён",
   disabled: "Отключён",
+  left: "Вышел сам",
 };
 
 function formatDateTime(iso: string) {
@@ -100,7 +102,7 @@ export default function CoachPage() {
 
   const pending = users.filter((u) => u.status === "pending");
   const approved = users.filter((u) => u.status === "approved");
-  const inactive = users.filter((u) => u.status === "rejected" || u.status === "disabled");
+  const inactive = users.filter((u) => u.status === "rejected" || u.status === "disabled" || u.status === "left");
 
   function Section({ title, hint, rows }: { title: string; hint?: string; rows: CoachUser[] }) {
     return (
@@ -124,7 +126,9 @@ export default function CoachPage() {
                   <div className="text-[12px] text-muted">
                     Telegram: {u.telegram_name ?? "—"}
                     {u.telegram_username ? ` (@${u.telegram_username})` : ""} · заявка {formatDateTime(u.requested_at)}
-                    {u.decided_at && ` · ${STATUS_LABEL[u.status].toLowerCase()} ${formatDateTime(u.decided_at)}${u.decided_by ? `, ${u.decided_by}` : ""}`}
+                    {u.status === "left" && u.left_at
+                      ? ` · ${STATUS_LABEL[u.status].toLowerCase()} ${formatDateTime(u.left_at)}`
+                      : u.decided_at && ` · ${STATUS_LABEL[u.status].toLowerCase()} ${formatDateTime(u.decided_at)}${u.decided_by ? `, ${u.decided_by}` : ""}`}
                   </div>
                 </div>
                 {canEdit && (

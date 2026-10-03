@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSectionAccess } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
+import { escapeHtml } from "@/lib/telegram";
 import { MENU_MARKUP, REMOVE_KEYBOARD, telegramTransport } from "@/lib/coach/bot";
 
 type Action = "approve" | "reject" | "disable" | "enable";
@@ -54,7 +55,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   let notified = true;
   try {
-    await telegramTransport.send(user.telegram_chat_id, NOTICE[action].text, NOTICE[action].markup);
+    // При подтверждении заявки: первый вход — «Добро пожаловать», вернувшемуся после выхода — «С возвращением».
+    const name = escapeHtml(user.employee_name);
+    const text =
+      action === "approve"
+        ? user.rejoined
+          ? `🎉 С возвращением в систему, ${name}! Руководитель подтвердил ваш доступ. Выберите раздел кнопкой внизу.`
+          : `🎉 Добро пожаловать, ${name}! Руководитель подтвердил ваш доступ. Выберите раздел кнопкой внизу.`
+        : NOTICE[action].text;
+    await telegramTransport.send(user.telegram_chat_id, text, NOTICE[action].markup);
   } catch (e) {
     notified = false;
     console.error("coach notice error:", getErrorMessage(e));

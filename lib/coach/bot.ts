@@ -59,7 +59,7 @@ export const MENU_MARKUP: ReplyMarkup = {
   keyboard: [
     [{ text: "Мой план" }, { text: "Что повысить" }],
     [{ text: "План на неделю" }, { text: "Итоги прошлой недели" }],
-    [{ text: "Помощь" }],
+    [{ text: "Помощь" }, { text: "Выход" }],
   ],
   resize_keyboard: true,
   is_persistent: true,
