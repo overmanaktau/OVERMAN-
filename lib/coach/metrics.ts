@@ -231,17 +231,28 @@ export type Advice = {
 // Три способа закрыть план при выручке за смену = чеков × средний чек.
 // need — выручка за смену, которая нужна; own — привычные показатели сотрудника.
 //  1) sameCheck: средний чек прежний, растёт количество чеков;
-//  2) fewerChecks: чеков столько же, растёт средний чек (через глубину чека — товаров в чеке
-//     при той же цене товара), то есть меньше чеков, но выше чек;
+//  2) raiseCheck: средний чек растёт по максимуму (через глубину чека — товаров в чеке при
+//     той же цене товара, или более дорогие модели), чеков нужно меньше всего;
 //  3) balanced: понемногу растут и чеки, и средний чек.
+// Средний чек можно поднять не больше чем на 15% (требование пользователя), остальное
+// добирается количеством чеков.
+export const MAX_AVG_CHECK_GROWTH = 1.15;
+
 export function closePlanScenarios(own: PerShift, need: number) {
   const growth = own.revenue > 0 ? need / own.revenue : 1;
-  const both = Math.sqrt(growth);
+  const mk = (checkGrowth: number) => ({
+    checkGrowth,
+    receiptsGrowth: growth / checkGrowth,
+    receipts: (own.receipts * growth) / checkGrowth,
+    avgCheck: own.avgCheck * checkGrowth,
+    depth: own.depth * checkGrowth,
+  });
   return {
     growth,
-    sameCheck: { receipts: own.receipts * growth, avgCheck: own.avgCheck },
-    fewerChecks: { receipts: own.receipts, avgCheck: own.avgCheck * growth, depth: own.depth * growth },
-    balanced: { receipts: own.receipts * both, avgCheck: own.avgCheck * both },
+    sameCheck: mk(1),
+    raiseCheck: mk(Math.min(growth, MAX_AVG_CHECK_GROWTH)),
+    // «Понемногу»: средний чек растёт поровну с чеками, но не больше чем наполовину от максимума.
+    balanced: mk(Math.min(Math.sqrt(growth), 1 + (MAX_AVG_CHECK_GROWTH - 1) / 2)),
   };
 }
 

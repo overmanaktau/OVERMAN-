@@ -9,6 +9,7 @@ import {
   type MonthStatus,
   type PerShift,
   type WeekSummary,
+  MAX_AVG_CHECK_GROWTH,
   closePlanScenarios,
   shortDate,
 } from "@/lib/coach/metrics";
@@ -169,17 +170,22 @@ function scenariosText(own: PerShift, need: number): string {
   }
   const s = closePlanScenarios(own, need);
   const up = (r: number) => `+${Math.round((r - 1) * 100)}%`;
-  const both = Math.sqrt(s.growth);
+  const maxPct = Math.round((MAX_AVG_CHECK_GROWTH - 1) * 100);
+  const r = s.raiseCheck;
+  const b = s.balanced;
+  const capped = s.growth > MAX_AVG_CHECK_GROWTH; // даже с максимальным ростом среднего чека одним чеком не обойтись
   return [
     `<b>Нужно в среднем ${money(need)} за смену</b> — сейчас вы делаете ${money(own.revenue)} (рост в ${s.growth.toFixed(2)} раза). Выручка за смену = чеки × средний чек, поэтому закрыть можно по-разному:`,
     "",
     `<b>1️⃣ По вашему среднему чеку (${money(own.avgCheck)})</b>\nНужно больше чеков: <b>${s.sameCheck.receipts.toFixed(1)}</b> за смену вместо ${own.receipts.toFixed(1)} (${up(s.growth)}).`,
     "",
-    `<b>2️⃣ Поднять средний чек</b>\nЧеков столько же (${own.receipts.toFixed(1)}), но средний чек <b>${money(Math.round(s.fewerChecks.avgCheck))}</b> вместо ${money(own.avgCheck)} (${up(s.growth)}). Для этого в чеке нужно ≈ ${s.fewerChecks.depth.toFixed(1)} товара вместо ${own.depth.toFixed(2)} или более дорогие модели. Так закрыть можно наименьшим количеством чеков.`,
+    `<b>2️⃣ Поднять средний чек${capped ? ` на максимум ${maxPct}%` : ""}</b>\nСредний чек <b>${money(Math.round(r.avgCheck))}</b> вместо ${money(own.avgCheck)} (${up(r.checkGrowth)}), ` +
+      `чеков ${capped ? `<b>${r.receipts.toFixed(1)}</b> вместо ${own.receipts.toFixed(1)} (${up(r.receiptsGrowth)})` : `столько же (${own.receipts.toFixed(1)})`}. ` +
+      `Для этого в чеке нужно ≈ ${r.depth.toFixed(2)} товара вместо ${own.depth.toFixed(2)} или более дорогие модели. Так чеков нужно меньше всего.`,
     "",
-    `<b>3️⃣ Понемногу и то и другое</b>\n${s.balanced.receipts.toFixed(1)} чека со средним чеком ${money(Math.round(s.balanced.avgCheck))} (оба ${up(both)}).`,
+    `<b>3️⃣ Понемногу и то и другое</b>\nСредний чек ${money(Math.round(b.avgCheck))} (${up(b.checkGrowth)}) и ${b.receipts.toFixed(1)} чека за смену (${up(b.receiptsGrowth)}).`,
     "",
-    "Чем выше средний чек, тем меньше чеков нужно, и наоборот.",
+    `Средний чек можно поднять не больше чем на ${maxPct}%, остальное добирается количеством чеков.`,
   ].join("\n");
 }
 
