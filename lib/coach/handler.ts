@@ -35,6 +35,7 @@ export type CoachUser = {
   rejoined: boolean;
   is_admin: boolean;
   admin_scope: "city" | "all";
+  is_protected: boolean;
   is_test: boolean;
   test_role: "consultant" | "manager" | null;
   test_expires_at: string | null;
@@ -142,7 +143,7 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
     if (u.is_admin) await sendSalesStart(t, u.telegram_chat_id, adminStores(u));
     else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
   } else if (section === "exit") {
-    if (u.is_admin) await t.send(u.telegram_chat_id, `${isOwner(u) ? "Владелец" : "Администратор"} не может выйти из аккаунта — иначе вы потеряете доступ к управлению.`, menu);
+    if (u.is_protected) await t.send(u.telegram_chat_id, "Главный владелец не может выйти из аккаунта.", menu);
     else await t.send(u.telegram_chat_id, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
   } else {
     await t.send(u.telegram_chat_id, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
@@ -311,7 +312,8 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     if (cb.data === "exit:yes") {
       const { error } = await supabaseAdmin
         .from("coach_users")
-        .update({ status: "left", left_at: new Date().toISOString() })
+        // Вышедший теряет и роль: вернётся — снова обычным сотрудником.
+        .update({ status: "left", left_at: new Date().toISOString(), is_admin: false, admin_scope: "city", awaiting: null })
         .eq("id", existing.id);
       if (error) throw error;
       await t.send(chatId, LEAVE_TEXT, REMOVE_KEYBOARD);

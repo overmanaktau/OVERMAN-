@@ -24,6 +24,7 @@ type Row = {
   id: number;
   employee_ms_id: string;
   admin_scope: string;
+  is_protected: boolean;
   is_test: boolean;
   employee_name: string;
   store: string;
@@ -59,7 +60,7 @@ const ORDER: Record<Row["status"], number> = { pending: 0, approved: 1, disabled
 async function loadRows(): Promise<Row[]> {
   const { data, error } = await supabaseAdmin
     .from("coach_users")
-    .select("id, employee_ms_id, admin_scope, is_test, employee_name, store, status, telegram_name, telegram_username, is_admin");
+    .select("id, employee_ms_id, admin_scope, is_protected, is_test, employee_name, store, status, telegram_name, telegram_username, is_admin");
   if (error) throw error;
   return ((data ?? []) as Row[]).sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.employee_name.localeCompare(b.employee_name, "ru"));
 }
@@ -89,7 +90,7 @@ export async function sendStaffList(t: Transport, chatId: number | string, kind:
 }
 
 function actionsFor(r: Row): CoachAction[] {
-  if (r.is_admin) return [];
+  if (r.is_protected) return []; // главного владельца нельзя ни отключить, ни убрать
   switch (r.status) {
     case "pending":
       return ["approve", "reject"];
@@ -126,7 +127,7 @@ async function sendCard(t: Transport, chatId: number | string, id: number, store
   const markup: ReplyMarkup = {
     inline_keyboard: [
       ...(buttons.length ? [buttons] : []),
-      ...(r.status === "approved" && !r.is_test ? [[{ text: "👤 Роль", callback_data: `adm:r:${r.id}` }]] : []),
+      ...(r.status === "approved" && !r.is_test && !r.is_protected ? [[{ text: "👤 Роль", callback_data: `adm:r:${r.id}` }]] : []),
       ...(r.is_test ? [] : [[{ text: `📊 Продажи · ${CITY[r.store] ?? r.store}`, callback_data: `adm:s:c:${r.store}` }]]),
       [{ text: "← К списку", callback_data: "adm:list" }],
     ],

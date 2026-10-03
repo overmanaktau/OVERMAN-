@@ -15,6 +15,7 @@ type CoachUser = {
   requested_at: string;
   left_at: string | null;
   is_admin: boolean;
+  is_protected: boolean;
   is_test: boolean;
   admin_scope: "city" | "all";
   decided_at: string | null;
@@ -170,7 +171,8 @@ export default function CoachPage() {
                       : u.decided_at && ` · ${STATUS_LABEL[u.status].toLowerCase()} ${formatDateTime(u.decided_at)}${u.decided_by ? `, ${u.decided_by}` : ""}`}
                   </div>
                 </div>
-                {canEdit && u.status === "approved" && !u.is_test && (
+                {canEdit && u.is_protected && <div className="text-[12px] text-mutedLight">Главный владелец</div>}
+                {canEdit && u.status === "approved" && !u.is_test && !u.is_protected && (
                   <label className="flex items-center gap-1.5 text-[12px] text-muted">
                     Роль
                     <select
@@ -185,7 +187,7 @@ export default function CoachPage() {
                     </select>
                   </label>
                 )}
-                {canEdit && !u.is_admin && (
+                {canEdit && !u.is_protected && (
                   <div className="flex items-center gap-2">
                     {u.status === "pending" && (
                       <>

@@ -82,6 +82,7 @@ export async function changeCoachRole(userId: number, role: CoachRole, actorUser
   if (!user) return { ok: false, code: 404, error: "Сотрудник не найден." };
   if (user.is_test) return { ok: false, code: 400, error: "У тестового аккаунта роль не меняется." };
   if (user.status !== "approved") return { ok: false, code: 409, error: "Роль можно менять только у подтверждённого сотрудника." };
+  if (user.is_protected) return { ok: false, code: 403, error: "Роль главного владельца изменить нельзя." };
   if (actorUserId !== null && actorUserId === user.id) return { ok: false, code: 403, error: "Свою роль изменить нельзя." };
   const current = roleOf(user);
   if (current === role) return { ok: false, code: 409, error: "У сотрудника уже эта роль." };
@@ -132,8 +133,9 @@ export async function decideCoachUser(userId: number, action: CoachAction, decid
 
   const rule = NEXT_STATUS[action];
   if (!rule.from.includes(user.status)) return { ok: false, code: 409, error: "Статус уже изменился — обновите список." };
-  if (user.is_admin && (action === "disable" || action === "remove" || action === "reject")) {
-    return { ok: false, code: 403, error: "Владельца и администраторов бота нельзя отключить или убрать." };
+  // Главного владельца нельзя ни отключить, ни убрать; остальных владельцев и администраторов можно.
+  if (user.is_protected && (action === "disable" || action === "remove" || action === "reject")) {
+    return { ok: false, code: 403, error: "Этого владельца нельзя отключить или убрать." };
   }
 
   const now = new Date().toISOString();
@@ -143,7 +145,8 @@ export async function decideCoachUser(userId: number, action: CoachAction, decid
       status: rule.to,
       decided_at: now,
       decided_by: decidedBy,
-      ...(action === "remove" ? { left_at: now } : {}),
+      // Убранный человек теряет и роль: вернётся — снова обычным сотрудником.
+      ...(action === "remove" ? { left_at: now, is_admin: false, admin_scope: "city", awaiting: null } : {}),
       // Тестовому аккаунту при подтверждении (и включении) даётся 30 минут.
       ...(user.is_test && (action === "approve" || action === "enable") ? { test_expires_at: testExpiresAt() } : {}),
     })
