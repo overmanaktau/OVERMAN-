@@ -23,6 +23,12 @@ type DayRow = {
   locked: boolean;
   requestPending: boolean;
   unlockExpiresAt: string | null;
+  // Whether the channel columns (Instagram/TikTok/…) were ever saved for
+  // this date (traffic_entries.channels_entered). Only this first entry of
+  // the "other data" closes the row — факт трафика (written by the counters'
+  // auto-load) and план never do. Channel columns default to 0 in the DB, so
+  // the values alone can't tell "entered as zero" from "untouched".
+  channelsEntered: boolean;
   // Whether trafficPlan was ever saved — план has its own, date-independent
   // lock (see planFieldLocked): free to set once, but changing an
   // already-set план always needs an approved request, unlike факт/каналы
@@ -212,6 +218,7 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
       locked: false,
       requestPending: false,
       unlockExpiresAt: null,
+      channelsEntered: false,
       planEverEntered: false,
     });
   }
@@ -298,15 +305,18 @@ export default function DataEntryPage() {
 
   // Governs the channel columns (план has its own rule below; факт трафика
   // isn't entered by hand at all — the counters fill it automatically, see
-  // app/api/traffic/sync). A day row from yesterday on is always freely
-  // editable — the automatic факт must NOT make a row count as "already
-  // entered" and close it. Older rows need an approved request; once locked,
-  // only an active (non-expired) approved window opens it back up —
-  // row.locked itself doesn't matter, only the window.
+  // app/api/traffic/sync). A day row with no channels saved yet is only
+  // gated by the first-entry rule (yesterday+) — neither the automatic факт
+  // nor план counts as "entered", so they never close a row. Once channels
+  // were saved, changing them is only free today/future — fixing an
+  // already-saved yesterday needs a request, same as older dates. Either
+  // way, once locked, only an active (non-expired) approved window opens it
+  // back up — row.locked itself doesn't matter, only the window.
   const todayStr = todayYmd();
   const firstEntryCutoff = firstEntryFreeCutoff();
   function dayRowEffectivelyLocked(row: DayRow) {
-    if (row.entryDate >= firstEntryCutoff) return false;
+    const freelyEditable = row.channelsEntered ? row.entryDate >= todayStr : row.entryDate >= firstEntryCutoff;
+    if (freelyEditable) return false;
     return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
 
@@ -391,6 +401,7 @@ export default function DataEntryPage() {
           locked: db.locked ?? false,
           requestPending: pendingDayDates.has(row.entryDate),
           unlockExpiresAt: db.unlock_expires_at ?? null,
+          channelsEntered: db.channels_entered ?? false,
           planEverEntered: db.traffic_plan !== null,
         };
       });
@@ -611,6 +622,12 @@ export default function DataEntryPage() {
           if (f === "trafficFact") continue;
           payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
         }
+        // Первичное внесение каналов закрывает строку (дальше за вчера и
+        // старше — только по запросу); правка одного плана этого не делает.
+        const channelsChanged = (["instagram", "tiktok", "instagramPublic", "flyer", "twoGis"] as const).some(
+          (f) => row[f] !== original[f]
+        );
+        if (channelsChanged) payload.channels_entered = true;
         // Anything before today re-locks immediately on save (even a
         // just-approved yesterday first entry) — changing it again needs a
         // fresh request, same as expenses lock right after their own save.
@@ -756,9 +773,10 @@ export default function DataEntryPage() {
         <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
           Трафик факт заполняется автоматически из счётчиков посетителей каждую ночь за вчера —
-          вручную он не вносится и не меняется, и из-за него строка не закрывается. Каналы: вчера,
-          сегодня и любая будущая дата — свободно, без запроса. Дата старше вчерашней — нужен
-          одобренный запрос на всю строку сразу. Трафик план: можно
+          вручную он не вносится и не меняется, и из-за него (как и из-за плана) строка не закрывается.
+          Каналы: первое внесение за вчера, сегодня и любую будущую дату — свободно, без запроса;
+          после него исправить уже внесённый вчерашний день — только по запросу. Дата старше
+          вчерашней — нужен одобренный запрос на всю строку сразу. Трафик план: можно
           внести один раз свободно, а изменить уже внесённый план — только по одобренному запросу,
           независимо от даты. Таблица трафика и дополнительные расходы сохраняются отдельно —
           своей кнопкой «Сохранить» под каждой таблицей.
