@@ -225,8 +225,25 @@ export type Advice = {
   lagging: "receipts" | "avgCheck" | "depth" | null;
   laggingRatio: number | null; // последние 7 дней ÷ среднее за 28 дней по этому показателю; < 1 — просел
   // now — собственный средний показатель сотрудника за смену (28 дней), recent — за последние 7 дней.
-  rows: { label: string; now: string; recent: string | null; need: string }[];
+  rows: { label: string; now: string; recent: string | null }[];
 };
+
+// Три способа закрыть план при выручке за смену = чеков × средний чек.
+// need — выручка за смену, которая нужна; own — привычные показатели сотрудника.
+//  1) sameCheck: средний чек прежний, растёт количество чеков;
+//  2) fewerChecks: чеков столько же, растёт средний чек (через глубину чека — товаров в чеке
+//     при той же цене товара), то есть меньше чеков, но выше чек;
+//  3) balanced: понемногу растут и чеки, и средний чек.
+export function closePlanScenarios(own: PerShift, need: number) {
+  const growth = own.revenue > 0 ? need / own.revenue : 1;
+  const both = Math.sqrt(growth);
+  return {
+    growth,
+    sameCheck: { receipts: own.receipts * growth, avgCheck: own.avgCheck },
+    fewerChecks: { receipts: own.receipts, avgCheck: own.avgCheck * growth, depth: own.depth * growth },
+    balanced: { receipts: own.receipts * both, avgCheck: own.avgCheck * both },
+  };
+}
 
 // Выручка за смену = чеков × средний чек (а средний чек = глубина × цена
 // товара). Чтобы закрыть план, выручку за смену нужно поднять в R раз; можно
@@ -252,7 +269,6 @@ export function buildAdvice(s: MonthStatus): Advice {
     : [];
   const weakest = ratios.length ? ratios.sort((a, c) => a.ratio - c.ratio)[0] : null;
   const lagging = weakest ? weakest.key : "avgCheck";
-  const both = Math.sqrt(R);
 
   return {
     ...base,
@@ -260,24 +276,13 @@ export function buildAdvice(s: MonthStatus): Advice {
     lagging,
     laggingRatio: weakest ? weakest.ratio : null,
     rows: [
-      {
-        label: "Чеков за смену",
-        now: p.receipts.toFixed(1),
-        recent: r ? r.receipts.toFixed(1) : null,
-        need: `${(p.receipts * both).toFixed(1)} (или ${(p.receipts * R).toFixed(1)}, если только чеками)`,
-      },
+      { label: "Чеков за смену", now: p.receipts.toFixed(1), recent: r ? r.receipts.toFixed(1) : null },
       {
         label: "Средний чек",
         now: `${Math.round(p.avgCheck).toLocaleString("ru-RU")} ₸`,
         recent: r ? `${Math.round(r.avgCheck).toLocaleString("ru-RU")} ₸` : null,
-        need: `${Math.round(p.avgCheck * both).toLocaleString("ru-RU")} ₸`,
       },
-      {
-        label: "Глубина чека",
-        now: p.depth.toFixed(2),
-        recent: r ? r.depth.toFixed(2) : null,
-        need: `${(p.depth * both).toFixed(2)}`,
-      },
+      { label: "Глубина чека", now: p.depth.toFixed(2), recent: r ? r.depth.toFixed(2) : null },
     ],
   };
 }
@@ -305,9 +310,9 @@ export type WeekSummary = {
     factSoFar: number;
     remaining: number | null;
     perShift: number | null;
-    // Чеки и средний чек за смену, при которых цель недели закрывается (рост
-    // делится поровну между чеками и средним чеком), и текущая норма сотрудника.
-    need: { receipts: number; avgCheck: number; nowReceipts: number; nowAvgCheck: number } | null;
+    // Привычные показатели сотрудника за смену и выручка за смену, которая нужна для цели
+    // недели: из них считаются три способа закрыть цель (closePlanScenarios).
+    need: { own: PerShift; perShift: number } | null;
   };
 };
 
@@ -382,10 +387,7 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
   const own = shiftAverages(days28);
   const perShiftTarget = target === null ? null : target / shiftsPerWeek;
   let need: WeekSummary["thisWeek"]["need"] = null;
-  if (own && own.revenue > 0 && perShiftTarget !== null) {
-    const growth = Math.sqrt(perShiftTarget / own.revenue);
-    need = { receipts: own.receipts * growth, avgCheck: own.avgCheck * growth, nowReceipts: own.receipts, nowAvgCheck: own.avgCheck };
-  }
+  if (own && own.revenue > 0 && perShiftTarget !== null) need = { own, perShift: perShiftTarget };
 
   return {
     monday,

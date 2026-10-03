@@ -2,7 +2,16 @@
 // строкой (общее правило оформления отчётов, функция pre из lib/reports/sales).
 import { escapeHtml } from "@/lib/telegram";
 import { money, num, pre } from "@/lib/reports/sales";
-import { type Advice, type DayRow, type EmployeeRef, type MonthStatus, type WeekSummary, shortDate } from "@/lib/coach/metrics";
+import {
+  type Advice,
+  type DayRow,
+  type EmployeeRef,
+  type MonthStatus,
+  type PerShift,
+  type WeekSummary,
+  closePlanScenarios,
+  shortDate,
+} from "@/lib/coach/metrics";
 
 const MONTHS = [
   "январь", "февраль", "март", "апрель", "май", "июнь",
@@ -73,8 +82,8 @@ export const HELP_TEXT = [
   "",
   "Кнопки внизу:",
   "• <b>Мой план</b> — план на месяц, факт, сколько осталось закрыть.",
-  "• <b>Что повысить</b> — какой ваш показатель просел относительно вашего же среднего и сколько чеков и какой средний чек нужны, чтобы закрыть план.",
-  "• <b>План на неделю</b> — цель на текущую неделю (с учётом недобора прошлой), сколько чеков в среднем за смену и какой средний чек нужны, чтобы её закрыть.",
+  "• <b>Что повысить</b> — какой ваш показатель просел относительно вашего же среднего и три способа закрыть план: больше чеков по вашему среднему чеку, меньше чеков, но с более высоким средним чеком, или понемногу того и другого.",
+  "• <b>План на неделю</b> — цель на текущую неделю (с учётом недобора прошлой), как её закрыть: больше чеков по вашему среднему чеку или меньше чеков с более высоким средним чеком.",
   "• <b>Итоги прошлой недели</b> — план недели, ваши цифры за неделю (выручка, смены, чеки, средний чек, глубина) и выполнение плана.",
   "• <b>Помощь</b> — это меню: обучение (то, что вы читаете) и поддержка.",
   "• <b>Выход</b> — отвязать этот Telegram от вашего профиля. Чтобы вернуться, нужно заново пройти регистрацию и дождаться подтверждения руководителя.",
@@ -131,14 +140,13 @@ export function adviceMessage(emp: EmployeeRef, s: MonthStatus, a: Advice): stri
   if (a.noHistory || a.factor === null || !s.perShift) {
     return `${head}\n\nПока мало данных по вашим сменам за последние 4 недели — рекомендации появятся после нескольких смен.`;
   }
-  const rows = a.rows.map(
-    (r) => `${r.label}\n  в среднем за смену ${r.now}${r.recent ? `\n  за последние 7 дней ${r.recent}` : ""}\n  нужно ${r.need}`
-  );
+  const rows = a.rows.map((r) => `${r.label}\n  в среднем за смену ${r.now}${r.recent ? `\n  за последние 7 дней ${r.recent}` : ""}`);
   const lines: string[] = [
     head,
     "",
-    `Чтобы закрыть план, нужно в среднем ${money(a.needPerShift ?? 0)} за смену — сейчас вы делаете ${money(s.perShift.revenue)}. Это рост в ${a.factor.toFixed(2)} раза.`,
+    scenariosText(s.perShift, a.needPerShift ?? 0),
     "",
+    "<b>Ваши показатели сейчас:</b>",
     pre(rows.join("\n")),
   ];
   if (a.lagging) {
@@ -149,8 +157,30 @@ export function adviceMessage(emp: EmployeeRef, s: MonthStatus, a: Advice): stri
     );
     lines.push(LAGGING_TIP[a.lagging]);
   }
-  lines.push("Цифры «нужно» — если поднимать чеки и средний чек вместе, понемногу.");
   return lines.join("\n");
+}
+
+// Три способа закрыть план (или цель недели): тот же результат можно получить
+// большим количеством чеков по привычному среднему чеку, меньшим количеством чеков
+// при более высоком среднем чеке или понемногу тем и другим. need — выручка за смену, которая нужна.
+function scenariosText(own: PerShift, need: number): string {
+  if (need <= own.revenue) {
+    return `✅ По вашему обычному темпу (${money(own.revenue)} за смену в среднем) это закрывается — нужно ${money(need)}. Держите количество чеков (${own.receipts.toFixed(1)}) и средний чек (${money(own.avgCheck)}).`;
+  }
+  const s = closePlanScenarios(own, need);
+  const up = (r: number) => `+${Math.round((r - 1) * 100)}%`;
+  const both = Math.sqrt(s.growth);
+  return [
+    `<b>Нужно в среднем ${money(need)} за смену</b> — сейчас вы делаете ${money(own.revenue)} (рост в ${s.growth.toFixed(2)} раза). Выручка за смену = чеки × средний чек, поэтому закрыть можно по-разному:`,
+    "",
+    `<b>1️⃣ По вашему среднему чеку (${money(own.avgCheck)})</b>\nНужно больше чеков: <b>${s.sameCheck.receipts.toFixed(1)}</b> за смену вместо ${own.receipts.toFixed(1)} (${up(s.growth)}).`,
+    "",
+    `<b>2️⃣ Поднять средний чек</b>\nЧеков столько же (${own.receipts.toFixed(1)}), но средний чек <b>${money(Math.round(s.fewerChecks.avgCheck))}</b> вместо ${money(own.avgCheck)} (${up(s.growth)}). Для этого в чеке нужно ≈ ${s.fewerChecks.depth.toFixed(1)} товара вместо ${own.depth.toFixed(2)} или более дорогие модели. Так закрыть можно наименьшим количеством чеков.`,
+    "",
+    `<b>3️⃣ Понемногу и то и другое</b>\n${s.balanced.receipts.toFixed(1)} чека со средним чеком ${money(Math.round(s.balanced.avgCheck))} (оба ${up(both)}).`,
+    "",
+    "Чем выше средний чек, тем меньше чеков нужно, и наоборот.",
+  ].join("\n");
 }
 
 function weekLines(w: WeekSummary): { last: string; next: string } {
@@ -191,16 +221,7 @@ function weekLines(w: WeekSummary): { last: string; next: string } {
     rows.push(line("Цель недели", money(t.target)));
     if (t.perShift !== null) rows.push(line("≈ в среднем за смену", money(t.perShift)));
     next = `🎯 <b>Цель на неделю ${shortDate(t.from)}–${shortDate(t.to)}</b>\n${pre(rows.join("\n"))}`;
-    if (t.need) {
-      next += `\n<b>Чтобы закрыть цель, в среднем за смену нужно:</b>\n${pre(
-        [
-          line("Чеков", `≈ ${t.need.receipts.toFixed(1)}`),
-          line("  сейчас", t.need.nowReceipts.toFixed(1)),
-          line("Средний чек", `≈ ${money(Math.round(t.need.avgCheck))}`),
-          line("  сейчас", money(Math.round(t.need.nowAvgCheck))),
-        ].join("\n")
-      )}`;
-    }
+    if (t.need) next += `\n\n${scenariosText(t.need.own, t.need.perShift)}\n`;
     if (t.extra > 0) {
       next += "\nНедобор прошлой недели распределён поровну на оставшиеся дни месяца, на эту неделю приходится указанная часть.";
     }

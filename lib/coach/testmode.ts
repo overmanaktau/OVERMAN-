@@ -81,7 +81,7 @@ export function demoWeekSummary(today: string): WeekSummary {
       factSoFar: 520_000,
       remaining: 940_000,
       perShift: 292_000,
-      need: { receipts: 6.9, avgCheck: 34_000, nowReceipts: 6.5, nowAvgCheck: 32_300 },
+      need: { own: { revenue: 210_000, receipts: 6.5, avgCheck: 32_300, depth: 1.9 }, perShift: 292_000 },
     },
   };
 }
