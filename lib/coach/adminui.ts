@@ -8,6 +8,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { COACH_ACTIONS, decideCoachUser, type CoachAction } from "@/lib/coach/decisions";
 import { monthStatus, todayInAlmaty } from "@/lib/coach/metrics";
+import { handleSalesCallback } from "@/lib/coach/salesview";
 import { money } from "@/lib/reports/sales";
 
 type Row = {
@@ -58,8 +59,8 @@ function tgLabel(r: Row): string {
 }
 
 // Раздел «Заявки» (только ожидающие) или «Сотрудники» (все, кроме вышедших).
-export async function sendStaffList(t: Transport, chatId: number | string, kind: "pending" | "all") {
-  const all = await loadRows();
+export async function sendStaffList(t: Transport, chatId: number | string, kind: "pending" | "all", stores: string[]) {
+  const all = (await loadRows()).filter((r) => stores.includes(r.store));
   const rows = kind === "pending" ? all.filter((r) => r.status === "pending") : all.filter((r) => r.status !== "left");
   if (rows.length === 0) {
     await t.send(chatId, kind === "pending" ? "Новых заявок нет." : "Сотрудников пока нет.");
@@ -97,9 +98,9 @@ const ACTION_BUTTON: Record<CoachAction, string> = {
   remove: "🗑 Убрать",
 };
 
-async function sendCard(t: Transport, chatId: number | string, id: number) {
+async function sendCard(t: Transport, chatId: number | string, id: number, stores: string[]) {
   const rows = await loadRows();
-  const r = rows.find((x) => x.id === id);
+  const r = rows.find((x) => x.id === id && stores.includes(x.store));
   if (!r) {
     await t.send(chatId, "Сотрудник не найден.", { inline_keyboard: [[{ text: "← К списку", callback_data: "adm:list" }]] });
     return;
@@ -110,7 +111,11 @@ async function sendCard(t: Transport, chatId: number | string, id: number) {
     callback_data: ACTION_ASK[a] ? `adm:ask:${a}:${r.id}` : `adm:do:${a}:${r.id}`,
   }));
   const markup: ReplyMarkup = {
-    inline_keyboard: [...(buttons.length ? [buttons] : []), [{ text: "← К списку", callback_data: "adm:list" }]],
+    inline_keyboard: [
+      ...(buttons.length ? [buttons] : []),
+      ...(r.is_test ? [] : [[{ text: `📊 Продажи · ${CITY[r.store] ?? r.store}`, callback_data: `adm:s:c:${r.store}` }]]),
+      [{ text: "← К списку", callback_data: "adm:list" }],
+    ],
   };
   // Для настоящего подтверждённого сотрудника — как идёт месяц (план/факт).
   let month = "";
@@ -139,9 +144,10 @@ export async function handleAdminCallback(
   chatId: number | string,
   adminName: string,
   dropCurrent: () => Promise<void>,
-  clearCurrent: () => Promise<void>
+  clearCurrent: () => Promise<void>,
+  stores: string[] // города, которые видит этот администратор
 ): Promise<void> {
-  // adm:list | adm:u:<id> | adm:ask:<action>:<id> | adm:do:<action>:<id> | adm:req:<action>:<id>
+  // adm:list | adm:u:<id> | adm:ask:<action>:<id> | adm:do:<action>:<id> | adm:req:<action>:<id> | adm:s…
   const parts = data.split(":");
   const kind = parts[1];
   // Экраны выбора (списки, карточки, подтверждение) после нажатия исчезают.
@@ -149,22 +155,28 @@ export async function handleAdminCallback(
   // кнопки, как и итоговое «Готово: …».
   if (kind === "req") await clearCurrent();
   else await dropCurrent();
+  if (kind === "s") {
+    await handleSalesCallback(parts, t, chatId, stores);
+    return;
+  }
   if (kind === "list") {
-    await sendStaffList(t, chatId, "all");
+    await sendStaffList(t, chatId, "all", stores);
     return;
   }
   if (kind === "u") {
-    await sendCard(t, chatId, Number(parts[2]));
+    await sendCard(t, chatId, Number(parts[2]), stores);
     return;
   }
   const action = parts[2] as CoachAction;
   const id = Number(parts[3]);
   if (!COACH_ACTIONS.includes(action) || !Number.isFinite(id)) return;
 
+  // Решения — только по сотрудникам своих городов.
+  const target = (await loadRows()).find((x) => x.id === id);
+  if (!target || !stores.includes(target.store)) return;
+
   if (kind === "ask") {
-    const rows = await loadRows();
-    const r = rows.find((x) => x.id === id);
-    if (!r) return;
+    const r = target;
     await t.send(chatId, `${ACTION_ASK[action] ?? ACTION_BUTTON[action]}: <b>${escapeHtml(r.employee_name)}</b>?`, {
       inline_keyboard: [[{ text: "Да", callback_data: `adm:do:${action}:${id}` }, { text: "Нет", callback_data: `adm:u:${id}` }]],
     });
@@ -239,7 +251,7 @@ export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number
         .select("id, employee_name, store, telegram_name, telegram_username, rejoined")
         .eq("telegram_user_id", telegramUserId)
         .maybeSingle(),
-      supabaseAdmin.from("coach_users").select("telegram_chat_id").eq("is_admin", true).eq("status", "approved"),
+      supabaseAdmin.from("coach_users").select("telegram_chat_id, store, admin_scope").eq("is_admin", true).eq("status", "approved"),
     ]);
     if (!req) return;
     const r = req as Row & { rejoined: boolean };
@@ -250,7 +262,9 @@ export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number
         { text: "❌ Отказать", callback_data: `adm:req:reject:${r.id}` },
       ]],
     };
-    for (const a of (admins ?? []) as { telegram_chat_id: number }[]) {
+    for (const a of (admins ?? []) as { telegram_chat_id: number; store: string; admin_scope: string }[]) {
+      // Администратору города — только заявки его города; владельцу (all) — все.
+      if (a.admin_scope !== "all" && a.store !== r.store) continue;
       try {
         await t.send(a.telegram_chat_id, text, markup);
       } catch (e) {

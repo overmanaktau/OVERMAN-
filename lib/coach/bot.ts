@@ -74,14 +74,14 @@ export const MENU_MARKUP: ReplyMarkup = {
 // и плана у него нет, поэтому «Мой план» и остальных консультантских разделов нет.
 // «Выхода» тоже нет — администратор не может отвязать себя.
 export const ADMIN_MENU_MARKUP: ReplyMarkup = {
-  keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Помощь" }]],
+  keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Продажи" }, { text: "Помощь" }]],
   resize_keyboard: true,
   is_persistent: true,
 };
 
 // Тестовый аккаунт в роли руководителя: только разделы управления (с условными данными).
 export const MANAGER_DEMO_MENU_MARKUP: ReplyMarkup = {
-  keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Помощь" }, { text: "Выход" }]],
+  keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Продажи" }], [{ text: "Помощь" }, { text: "Выход" }]],
   resize_keyboard: true,
   is_persistent: true,
 };

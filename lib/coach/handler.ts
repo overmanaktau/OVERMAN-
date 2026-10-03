@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployeeIds } from "@/lib/moysklad";
 import { LEAVE_TEXT, REMOVE_KEYBOARD, menuFor, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
+import { ALL_STORES, sendDemoSales, sendSalesStart } from "@/lib/coach/salesview";
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
 import {
   TEST_BANNER,
@@ -33,6 +34,7 @@ export type CoachUser = {
   status: "pending" | "approved" | "rejected" | "disabled" | "left";
   rejoined: boolean;
   is_admin: boolean;
+  admin_scope: "city" | "all";
   is_test: boolean;
   test_role: "consultant" | "manager" | null;
   test_expires_at: string | null;
@@ -45,6 +47,11 @@ const CITIES: { store: string; label: string }[] = [
 const LOOKBACK_DAYS = 45;
 // Не показываются в списке при регистрации (Saya Park, директор, Қайнар).
 const HIDDEN_NAME = /саяпарк|saya|дамир\s+директор|[кқ]айнар/i;
+
+// Города, которые видит администратор: все (владелец) или только свой.
+function adminStores(u: CoachUser): string[] {
+  return u.admin_scope === "all" ? ALL_STORES : [u.store];
+}
 
 export function refOf(u: CoachUser): EmployeeRef {
   return { id: u.employee_ms_id, name: u.employee_name, store: u.store };
@@ -128,7 +135,10 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
   } else if (section === "last") {
     await t.send(u.telegram_chat_id, lastWeekMessage(emp, await weekSummary(emp, today)), menu);
   } else if (section === "requests" || section === "staff") {
-    if (u.is_admin) await sendStaffList(t, u.telegram_chat_id, section === "requests" ? "pending" : "all");
+    if (u.is_admin) await sendStaffList(t, u.telegram_chat_id, section === "requests" ? "pending" : "all", adminStores(u));
+    else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
+  } else if (section === "sales") {
+    if (u.is_admin) await sendSalesStart(t, u.telegram_chat_id, adminStores(u));
     else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
   } else if (section === "exit") {
     if (u.is_admin) await t.send(u.telegram_chat_id, "Администратор бота не может выйти из аккаунта — иначе вы потеряете управление сотрудниками.", menu);
@@ -151,6 +161,8 @@ async function showTestSection(t: Transport, u: CoachUser, section: string, menu
     await t.send(chat, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
   } else if (manager && (section === "requests" || section === "staff")) {
     await sendDemoStaffList(t, chat, section === "requests" ? "pending" : "all");
+  } else if (manager && section === "sales") {
+    await sendDemoSales(t, chat);
   } else if (!manager && section === "plan") {
     await t.send(chat, TEST_BANNER + myPlanMessage(emp, demoMonthStatus(today)), menu);
   } else if (!manager && section === "advice") {
@@ -195,6 +207,7 @@ const SECTION_BY_TEXT: Record<string, string> = {
   "/exit": "exit",
   заявки: "requests",
   сотрудники: "staff",
+  продажи: "sales",
   "/help": "help",
 };
 
@@ -311,7 +324,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   if (cb.data.startsWith("adm:")) {
     // Только подтверждённый администратор; от остальных нажатия молча игнорируем.
     if (!existing || existing.status !== "approved" || !existing.is_admin || existing.is_test) return;
-    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent);
+    await handleAdminCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent, adminStores(existing));
     return;
   }
 
