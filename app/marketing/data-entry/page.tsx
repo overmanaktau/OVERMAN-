@@ -23,13 +23,6 @@ type DayRow = {
   locked: boolean;
   requestPending: boolean;
   unlockExpiresAt: string | null;
-  // Whether факт трафика (traffic_fact) was ever saved for this date —
-  // план often gets entered weeks ahead for the whole month, which alone
-  // must NOT count as "already entered" for the free-first-entry window
-  // below (see dayRowEffectivelyLocked). Channel columns default to 0 (not
-  // null), so they can't distinguish "untouched" from "entered as zero" —
-  // only traffic_fact, genuinely nullable, is used for this check.
-  factEverEntered: boolean;
   // Whether trafficPlan was ever saved — план has its own, date-independent
   // lock (see planFieldLocked): free to set once, but changing an
   // already-set план always needs an approved request, unlike факт/каналы
@@ -186,8 +179,13 @@ function friendlyError(e: unknown): string {
   return `Не удалось выполнить операцию: ${message}`;
 }
 
+// Факт трафика вручную не вносится (его пишет автозагрузка), поэтому в
+// снимок для «есть ли несохранённые изменения» он не входит — иначе новое
+// значение от автозагрузки выглядело бы как правка сотрудника.
 function numericSnapshot(row: DayRow) {
-  return NUMERIC_FIELDS.map((f) => row[f]).join("|");
+  return NUMERIC_FIELDS.filter((f) => f !== "trafficFact")
+    .map((f) => row[f])
+    .join("|");
 }
 
 function expenseSnapshot(e: ExpenseRow) {
@@ -214,7 +212,6 @@ function buildMonthRows(year: number, monthIndex: number): DayRow[] {
       locked: false,
       requestPending: false,
       unlockExpiresAt: null,
-      factEverEntered: false,
       planEverEntered: false,
     });
   }
@@ -299,20 +296,17 @@ export default function DataEntryPage() {
     return exp.locked || rowIsExpired(exp.unlockExpiresAt);
   }
 
-  // Governs факт трафика + каналы specifically (план has its own rule
-  // below). A day row with no факт/канал data saved yet is only gated by
-  // the first-entry rule (yesterday+) — план alone doesn't count, since
-  // it's routinely entered weeks ahead for the whole month and shouldn't
-  // lock out the actual day-of entry. Once факт/каналы data exists,
-  // changing it is only free today/future — fixing an already-saved
-  // yesterday needs a request, same as older dates. Either way, once
-  // locked, only an active (non-expired) approved window opens it back up —
+  // Governs the channel columns (план has its own rule below; факт трафика
+  // isn't entered by hand at all — the counters fill it automatically, see
+  // app/api/traffic/sync). A day row from yesterday on is always freely
+  // editable — the automatic факт must NOT make a row count as "already
+  // entered" and close it. Older rows need an approved request; once locked,
+  // only an active (non-expired) approved window opens it back up —
   // row.locked itself doesn't matter, only the window.
   const todayStr = todayYmd();
   const firstEntryCutoff = firstEntryFreeCutoff();
   function dayRowEffectivelyLocked(row: DayRow) {
-    const freelyEditable = row.factEverEntered ? row.entryDate >= todayStr : row.entryDate >= firstEntryCutoff;
-    if (freelyEditable) return false;
+    if (row.entryDate >= firstEntryCutoff) return false;
     return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
 
@@ -397,10 +391,6 @@ export default function DataEntryPage() {
           locked: db.locked ?? false,
           requestPending: pendingDayDates.has(row.entryDate),
           unlockExpiresAt: db.unlock_expires_at ?? null,
-          // Only traffic_fact is genuinely nullable — the channel columns
-          // default to 0 (not null) in the DB, so they can't distinguish
-          // "never touched" from "entered as zero" and aren't used here.
-          factEverEntered: db.traffic_fact !== null,
           planEverEntered: db.traffic_plan !== null,
         };
       });
@@ -488,6 +478,7 @@ export default function DataEntryPage() {
 
   function updateCell(index: number, field: (typeof NUMERIC_FIELDS)[number], rawValue: string) {
     if (!canEditSection || !rows[index]) return;
+    if (field === "trafficFact") return; // факт заполняется автоматически из счётчиков
     const fieldLocked = field === "trafficPlan" ? planFieldLocked(rows[index]) : dayRowEffectivelyLocked(rows[index]);
     if (fieldLocked) return;
     if (DECIMAL_FIELDS.has(field)) {
@@ -614,7 +605,12 @@ export default function DataEntryPage() {
         if (!original || numericSnapshot(row) === numericSnapshot(original)) continue;
 
         const payload: Record<string, unknown> = { store, entry_date: row.entryDate };
-        for (const f of NUMERIC_FIELDS) payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
+        // Факт трафика не отправляем: его пишет только автозагрузка, а старое
+        // значение со страницы затёрло бы свежее от неё.
+        for (const f of NUMERIC_FIELDS) {
+          if (f === "trafficFact") continue;
+          payload[DB_FIELD[f]] = row[f] === "" ? null : row[f];
+        }
         // Anything before today re-locks immediately on save (even a
         // just-approved yesterday first entry) — changing it again needs a
         // fresh request, same as expenses lock right after their own save.
@@ -759,8 +755,10 @@ export default function DataEntryPage() {
         <div className="text-xs text-mutedLight">Маркетинг</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">Внесение данных</h1>
         <p className="text-sm text-muted max-w-xl mt-1">
-          Трафик факт и каналы: вчера, сегодня и любая будущая дата — свободно, без запроса.
-          Дата старше вчерашней — нужен одобренный запрос на всю строку сразу. Трафик план: можно
+          Трафик факт заполняется автоматически из счётчиков посетителей каждую ночь за вчера —
+          вручную он не вносится и не меняется, и из-за него строка не закрывается. Каналы: вчера,
+          сегодня и любая будущая дата — свободно, без запроса. Дата старше вчерашней — нужен
+          одобренный запрос на всю строку сразу. Трафик план: можно
           внести один раз свободно, а изменить уже внесённый план — только по одобренному запросу,
           независимо от даты. Таблица трафика и дополнительные расходы сохраняются отдельно —
           своей кнопкой «Сохранить» под каждой таблицей.
@@ -878,7 +876,8 @@ export default function DataEntryPage() {
                           const cellKey = `day-${i}-${field}`;
                           const isEditing = editingField === cellKey;
                           const isDecimal = DECIMAL_FIELDS.has(field);
-                          const fieldEditable = canEditSection && !(field === "trafficPlan" ? planLocked : factLocked);
+                          const fieldEditable =
+  canEditSection && field !== "trafficFact" && !(field === "trafficPlan" ? planLocked : factLocked);
                           return (
                             <label key={field} className="flex flex-col gap-0.5 min-w-0">
                               <span className="text-[10.5px] text-mutedLight truncate">{FIELD_LABEL[field]}</span>
@@ -945,7 +944,8 @@ export default function DataEntryPage() {
                         const cellKey = `day-${i}-${field}`;
                         const isEditing = editingField === cellKey;
                         const isDecimal = DECIMAL_FIELDS.has(field);
-                        const fieldEditable = canEditSection && !(field === "trafficPlan" ? planLocked : factLocked);
+                        const fieldEditable =
+  canEditSection && field !== "trafficFact" && !(field === "trafficPlan" ? planLocked : factLocked);
                         return (
                           <input
                             key={field}
