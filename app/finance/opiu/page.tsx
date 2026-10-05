@@ -162,7 +162,7 @@ function Inner() {
   const netPct = revenue && revenue.fact > 0 && net ? (net.fact / revenue.fact) * 100 : null;
   const expensesPct = revenue && revenue.fact > 0 && total ? (total.expenses.fact / revenue.fact) * 100 : null;
 
-  const isOpen = (r: PnlRow) => open[r.key] ?? true;
+  const isOpen = (r: PnlRow) => open[r.key] ?? false;
 
   function flat(rows: PnlRow[], depth = 0): { row: PnlRow; depth: number }[] {
     const out: { row: PnlRow; depth: number }[] = [];
@@ -170,6 +170,20 @@ function Inner() {
       out.push({ row: r, depth });
       if (r.children && r.children.length > 0 && isOpen(r)) out.push(...flat(r.children, depth + 1));
     }
+    return out;
+  }
+
+  function allKeys(rows: PnlRow[], value: boolean): Record<string, boolean> {
+    const out: Record<string, boolean> = {};
+    const walk = (list: PnlRow[]) => {
+      for (const r of list) {
+        if (r.children && r.children.length > 0) {
+          out[r.key] = value;
+          walk(r.children);
+        }
+      }
+    };
+    walk(rows);
     return out;
   }
 
@@ -218,11 +232,13 @@ function Inner() {
     const kids = (r.children?.length ?? 0) > 0;
     return (
       <>
-        <span style={{ paddingLeft: depth * 18 }} className="inline-flex items-center">
+        <span
+          style={{ paddingLeft: depth * 18 }}
+          className={`inline-flex items-center ${kids ? "cursor-pointer select-none" : ""}`}
+          onClick={kids ? () => setOpen((s) => ({ ...s, [r.key]: !isOpen(r) })) : undefined}
+        >
           {kids ? (
-            <button type="button" onClick={() => setOpen((s) => ({ ...s, [r.key]: !isOpen(r) }))} className="mr-1.5 text-[10px] text-muted w-3 inline-block">
-              {isOpen(r) ? "▼" : "▶"}
-            </button>
+            <span className="mr-1.5 text-[10px] text-muted w-3 inline-block">{isOpen(r) ? "▼" : "▶"}</span>
           ) : (
             <span className="inline-block w-[18px]" />
           )}
@@ -265,8 +281,8 @@ function Inner() {
         ) : view === "months" ? (
           <>
             <div className="flex justify-end mb-2 gap-2">
-              <button className={btnGhost} onClick={() => setOpen(Object.fromEntries(total.rows.flatMap((r) => [[r.key, true]])))}>Развернуть всё</button>
-              <button className={btnGhost} onClick={() => setOpen(Object.fromEntries(total.rows.flatMap((r) => [[r.key, false]])))}>Свернуть всё</button>
+              <button className={btnGhost} onClick={() => setOpen(allKeys(total.rows, true))}>Развернуть всё</button>
+              <button className={btnGhost} onClick={() => setOpen({})}>Свернуть всё</button>
             </div>
             <div className="overflow-x-auto">
               <table className="border-collapse min-w-full">

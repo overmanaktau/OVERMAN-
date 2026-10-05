@@ -445,14 +445,14 @@ export function computePnl(input: {
         const kp = (planByCat.get(k.id) ?? 0) * sign(k);
         fact += kf;
         planSum += kp;
-        if (kf !== 0 || kp !== 0) {
+        if (kf !== 0 || kp !== 0 || k.active) {
           children.push({ key: `c${k.id}`, label: k.name, level: 1, type: "line", fact: kf, plan: kp, goodWhenHigh, categoryId: k.id });
         }
       }
       if (children.length > 0 && (own !== 0 || ownPlan !== 0)) {
         children.unshift({ key: `c${parent.id}o`, label: "Без подпункта", level: 1, type: "line", fact: own, plan: ownPlan, goodWhenHigh, categoryId: parent.id });
       }
-      if (fact === 0 && planSum === 0) continue; // пустые статьи в отчёте не показываем
+      if (fact === 0 && planSum === 0 && !parent.active) continue; // скрытые пустые статьи не показываем
       rows.push({
         key: `c${parent.id}`,
         label: parent.name,
@@ -535,7 +535,10 @@ export function computePnl(input: {
   const indicatorRows: PnlRow[] = EXPENSE_INDICATORS.map((group) => {
     const topRows = groupLines(false, topOf(group));
     // одна статья без подпунктов — детализация не нужна; одна статья с подпунктами — показываем подпункты
-    const children = topRows.length === 1 ? topRows[0].children ?? [] : topRows;
+    const only = topRows.length === 1 ? topRows[0] : null;
+    const children = only
+      ? (only.children ?? []).map((c) => ({ ...c, label: only.label === OPIU_GROUP_LABEL[group] ? c.label : `${only.label} - ${c.label}` }))
+      : topRows;
     return {
       key: `i-${group}`,
       label: OPIU_GROUP_LABEL[group],
