@@ -122,7 +122,7 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
   function row(c: FinCategory, level: 0 | 1) {
     return (
       <tr key={c.id} className={c.active ? "" : "opacity-50"}>
-        <td className={`${tdCls} ${level === 1 ? "pl-9" : "font-semibold"}`}>
+        <td className={`${tdCls} whitespace-nowrap ${level === 1 ? "pl-9" : "font-semibold"}`}>
           {level === 1 ? "└ " : ""}
           {c.name}
         </td>
@@ -137,19 +137,15 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
             <div className="flex gap-1.5 justify-end">
               <button className={btnGhost} title="Выше" disabled={siblingsOf(c)[0]?.id === c.id} onClick={() => move(c, -1)}>▲</button>
               <button className={btnGhost} title="Ниже" disabled={siblingsOf(c).slice(-1)[0]?.id === c.id} onClick={() => move(c, 1)}>▼</button>
-              {level === 0 && (
-                <button className={btnGhost} onClick={() => setEditing({ cat: { parent_id: c.id, kind: c.kind, opiu_group: c.opiu_group, active: true }, isNew: true })}>
+              {level === 0 ? (
+                <button className={`${btnGhost} w-[112px]`} onClick={() => setEditing({ cat: { parent_id: c.id, kind: c.kind, opiu_group: c.opiu_group, active: true }, isNew: true })}>
                   + подпункт
                 </button>
+              ) : (
+                <span className="w-[112px]" />
               )}
-              <button className={btnGhost} onClick={() => setEditing({ cat: c, isNew: false })}>
+              <button className={`${btnGhost} w-[92px]`} onClick={() => setEditing({ cat: c, isNew: false })}>
                 Изменить
-              </button>
-              <button className={btnGhost} onClick={() => toggleActive(c)}>
-                {c.active ? "Скрыть" : "Вернуть"}
-              </button>
-              <button className={btnDanger} onClick={() => remove(c)}>
-                Удалить
               </button>
             </div>
           )}
@@ -187,7 +183,17 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
           </table>
         </div>
       )}
-      {editing && <CategoryModal initial={editing.cat} isNew={editing.isNew} categories={categories} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+      {editing && (
+        <CategoryModal
+          initial={editing.cat}
+          isNew={editing.isNew}
+          categories={categories}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); reload(); }}
+          onToggleActive={editing.isNew ? undefined : async () => { await toggleActive(editing.cat as FinCategory); setEditing(null); }}
+          onDelete={editing.isNew ? undefined : async () => { await remove(editing.cat as FinCategory); setEditing(null); }}
+        />
+      )}
     </Card>
   );
 }
@@ -198,12 +204,16 @@ function CategoryModal({
   categories,
   onClose,
   onSaved,
+  onToggleActive,
+  onDelete,
 }: {
   initial: Partial<FinCategory>;
   isNew: boolean;
   categories: FinCategory[];
   onClose: () => void;
   onSaved: () => void;
+  onToggleActive?: () => void;
+  onDelete?: () => void;
 }) {
   const [name, setName] = useState(initial.name ?? "");
   const [kind, setKind] = useState<"income" | "expense">(initial.kind ?? "expense");
@@ -274,9 +284,15 @@ function CategoryModal({
           </label>
         )}
         <ErrorBox message={error} />
-        <div className="flex gap-2 justify-end">
-          <button className={btnGhost} onClick={onClose}>Отмена</button>
-          <button className={btnPrimary} onClick={save} disabled={saving}>Сохранить</button>
+        <div className="flex gap-2 justify-between items-center flex-wrap">
+          <div className="flex gap-2">
+            {onToggleActive && <button className={btnGhost} onClick={onToggleActive}>{initial.active ? "Скрыть" : "Вернуть"}</button>}
+            {onDelete && <button className={btnDanger} onClick={onDelete}>Удалить</button>}
+          </div>
+          <div className="flex gap-2">
+            <button className={btnGhost} onClick={onClose}>Отмена</button>
+            <button className={btnPrimary} onClick={save} disabled={saving}>Сохранить</button>
+          </div>
         </div>
       </div>
     </Modal>

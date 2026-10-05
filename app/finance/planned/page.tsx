@@ -23,6 +23,7 @@ import {
   type FinPlanned,
 } from "@/lib/finance";
 import {
+  CategorySelect,
   Card,
   Chip,
   Empty,
@@ -328,22 +329,7 @@ function PlannedModal({
           <Field label="Срок"><input type="date" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} /></Field>
           <Field label="Сумма, ₸"><input className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoFocus /></Field>
         </div>
-        <Field label="Статья">
-          <select className={selectCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">Выберите…</option>
-            {tops.map((t) => {
-              const kids = cats.filter((c) => c.parent_id === t.id);
-              return kids.length === 0 ? (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ) : (
-                <optgroup key={t.id} label={t.name}>
-                  <option value={t.id}>{t.name} (без подпункта)</option>
-                  {kids.map((k) => <option key={k.id} value={k.id}>{t.name} → {k.name}</option>)}
-                </optgroup>
-              );
-            })}
-          </select>
-        </Field>
+        <CategorySelect categories={cats} value={categoryId} onChange={setCategoryId} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="Магазин"><select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}><option value="">Общее</option>{stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}</select></Field>
           <Field label="Счёт"><select className={selectCls} value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">Определить при оплате</option>{ref_.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>

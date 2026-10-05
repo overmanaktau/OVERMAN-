@@ -23,6 +23,7 @@ import {
   type FinOperation,
 } from "@/lib/finance";
 import {
+  CategorySelect,
   Card,
   Chip,
   Empty,
@@ -534,22 +535,7 @@ function OperationModal({
         </div>
         {kind !== "transfer" && (
           <>
-            <Field label="Статья">
-              <select className={selectCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-                <option value="">Выберите…</option>
-                {tops.map((t) => {
-                  const kids = cats.filter((c) => c.parent_id === t.id);
-                  return kids.length === 0 ? (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ) : (
-                    <optgroup key={t.id} label={t.name}>
-                      <option value={t.id}>{t.name} (без подпункта)</option>
-                      {kids.map((k) => <option key={k.id} value={k.id}>{t.name} → {k.name}</option>)}
-                    </optgroup>
-                  );
-                })}
-              </select>
-            </Field>
+            <CategorySelect categories={cats} value={categoryId} onChange={setCategoryId} />
             <div className="grid grid-cols-2 gap-3">
               <Field label="Магазин" hint="Пусто — общее по компании">
                 <select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}>

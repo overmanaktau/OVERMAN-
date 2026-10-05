@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import type { SectionKey } from "@/lib/permissions";
-import { PERIOD_LABELS, type PeriodPreset } from "@/lib/finance";
+import { PERIOD_LABELS, type FinCategory, type PeriodPreset } from "@/lib/finance";
 
 export const inputCls =
   "text-[13px] bg-paper border border-border rounded-md px-2.5 py-2 text-ink placeholder:text-mutedLight focus:outline-none focus:border-accent w-full";
@@ -136,11 +136,14 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
       <div
-        className={`bg-surface border border-border rounded-card w-full ${wide ? "max-w-3xl" : "max-w-lg"} my-8 p-6`}
-        onMouseDown={(e) => e.stopPropagation()}
+        className="min-h-full flex items-center justify-center p-4"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       >
+      <div className={`bg-surface border border-border rounded-card w-full ${wide ? "max-w-3xl" : "max-w-lg"} p-6`}>
         <div className="flex items-center justify-between mb-4">
           <div className="font-serif text-[20px] font-semibold text-ink">{title}</div>
           <button type="button" onClick={onClose} className="text-muted hover:text-ink text-xl leading-none px-2">
@@ -149,6 +152,66 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
         </div>
         {children}
       </div>
+      </div>
+    </div>
+  );
+}
+
+// Статья в два шага: сначала пункт, потом подпункт (если он есть) — вместо одного
+// длинного списка. Возвращает id статьи, а пока подпункт не выбран — пустую строку.
+export function CategorySelect({
+  categories,
+  value,
+  onChange,
+  label = "Статья",
+}: {
+  categories: FinCategory[];
+  value: string;
+  onChange: (v: string) => void;
+  label?: string;
+}) {
+  const tops = categories.filter((c) => c.parent_id === null);
+  const current = categories.find((c) => String(c.id) === value);
+  const [top, setTop] = useState(current ? String(current.parent_id ?? current.id) : "");
+
+  useEffect(() => {
+    if (current) setTop(String(current.parent_id ?? current.id));
+    else if (!value && top && !tops.some((t) => String(t.id) === top)) setTop("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, categories]);
+
+  const kids = top ? categories.filter((c) => String(c.parent_id) === top) : [];
+
+  function pickTop(t: string) {
+    setTop(t);
+    const hasKids = categories.some((c) => String(c.parent_id) === t);
+    onChange(t && !hasKids ? t : "");
+  }
+
+  return (
+    <div className={`grid gap-3 ${kids.length > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
+      <Field label={label}>
+        <select className={selectCls} value={top} onChange={(e) => pickTop(e.target.value)}>
+          <option value="">Выберите…</option>
+          {tops.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {kids.length > 0 && (
+        <Field label="Подпункт">
+          <select className={selectCls} value={value} onChange={(e) => onChange(e.target.value)}>
+            <option value="">Выберите…</option>
+            {kids.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
     </div>
   );
 }
