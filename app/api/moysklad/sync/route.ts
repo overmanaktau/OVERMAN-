@@ -24,39 +24,10 @@ import {
   deriveArticle,
 } from "@/lib/moysklad";
 import { WAREHOUSE_STORE } from "@/lib/warehouses";
+import { REGISTER_STORE, SAYA_PARK_REGISTER_ID, SAYA_PARK_RETIRED_FROM, SAYA_PARK_WAREHOUSE_ID } from "@/lib/registers";
 import { snapshotStockForDate } from "@/lib/stockSnapshot";
 
-// Confirmed with the business owner: these are the only live registers
-// (МойСклад entity/retailstore, "точки продаж" — not "склад", which
-// doesn't carry the city in its name). "Онлайн продажи Overman" and
-// "Ак Кала" are inactive retailstore entries and get skipped.
-//
-// Everything is counted by fact: if a register rang sales on a day, that day
-// reports them — even if the register is archived in МойСклад today (it's
-// kept there instead of deleted, so history still resolves). That includes
-// "Актобе (скидка)" (id 111827a0…) on every date.
-//
-// The one exception is Saya Park (now "Актау (скидка)"): the business owner
-// says it does not count from SAYA_PARK_RETIRED_FROM (21 Sept, inclusive)
-// onward, and everything before that date is real sales that must resync
-// correctly (e.g. a historical backfill) — hence a date-gated skip below
-// instead of dropping it from the map. Its stock warehouse (WAREHOUSE_STORE
-// below) is untouched regardless of date: goods may still physically sit
-// there even though the register itself isn't ringing sales.
-//
-// Stays at city granularity (unlike WAREHOUSE_STORE below) — this feeds
-// moysklad_registers/moysklad_sales_daily, which Продажи/Обзор filter by
-// the sidebar's city picker (values point_1/point_3). Changing this would
-// break that filter on those pages.
-const REGISTER_STORE: Record<string, string> = {
-  "01e67f9f-b012-11f0-0a80-0d700024a20d": "point_1", // Overman Актау
-  "d3f209de-4da2-11f0-0a80-027a0003cde2": "point_1", // Saya Park
-  "26e2dddd-a37f-11f1-0a80-1a76002585af": "point_3", // Overman Актобе
-  "111827a0-a440-11f1-0a80-0dcb003111ce": "point_3", // Актобе скидка
-};
-const SAYA_PARK_REGISTER_ID = "d3f209de-4da2-11f0-0a80-027a0003cde2";
-const SAYA_PARK_WAREHOUSE_ID = "fe3b03d3-4da1-11f0-0a80-18910004c37d";
-const SAYA_PARK_RETIRED_FROM = "2026-09-21"; // string-comparable since dates here are always "YYYY-MM-DD"
+// (карта касс REGISTER_STORE и константы Saya Park теперь в lib/registers.ts — общие для синхронизации и сверки)
 
 // Warehouses (entity/store — where stock physically sits, distinct from the
 // retailstore/касса ids above) — unlike REGISTER_STORE, this maps to a code
