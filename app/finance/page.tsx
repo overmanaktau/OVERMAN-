@@ -73,7 +73,7 @@ function Inner() {
         setDebts(d.debts);
         setPayments(d.payments);
         setPlanned(p);
-        setPnl(computePnl({ start, end, isAllStores: isAll, selectedStores: selected, settings: ref.settings, categories: ref.categories, ...inputs }));
+        setPnl(computePnl({ start, end, isAllStores: isAll, selectedStores: selected, settings: ref.settings, categories: ref.categories, accounts: ref.accounts, ...inputs }));
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Не удалось загрузить данные");
       } finally {
@@ -84,7 +84,7 @@ function Inner() {
     return () => {
       cancelled = true;
     };
-  }, [ref.loading, ref.settings, ref.categories, start, end, isAll, selected]);
+  }, [ref.loading, ref.settings, ref.categories, ref.accounts, start, end, isAll, selected]);
 
   const accounts = useMemo(() => ref.accounts.filter((a) => a.active && (isAll || (a.store !== null && selected.includes(a.store)))), [ref.accounts, isAll, selected]);
   const balances = accounts.map((a) => ({ a, bal: accountBalance(a, ops, today) }));
@@ -108,7 +108,7 @@ function Inner() {
   // топ расходов периода по статьям (из ОПИУ: операционные, прочие, налоги)
   const topExpenses = useMemo(() => {
     const lines: { label: string; v: number }[] = [];
-    for (const r of pnl?.rows ?? []) if (r.key.startsWith("c") && r.fact > 0) lines.push({ label: r.label, v: r.fact });
+    for (const r of pnl?.rows ?? []) if (r.key.startsWith("i-") && r.key !== "i-other_income" && r.fact > 0) lines.push({ label: r.label, v: r.fact });
     return lines.sort((a, b) => b.v - a.v).slice(0, 6);
   }, [pnl]);
   const maxExpense = Math.max(1, ...topExpenses.map((x) => x.v));

@@ -296,6 +296,7 @@ function PlannedModal({
     const amt = Number(amount.replace(/\s/g, "").replace(",", "."));
     if (!Number.isFinite(amt) || amt <= 0) return setError("Сумма должна быть больше нуля");
     if (!categoryId) return setError("Выберите статью");
+    if (kind === "expense" && !supplierId && ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier) return setError("Для этой статьи выберите поставщика");
     setSaving(true);
     const payload = {
       due_date: due,

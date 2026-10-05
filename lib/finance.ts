@@ -14,13 +14,27 @@ export type FinAccount = {
   active: boolean;
   sort: number;
 };
-export type OpiuGroup = "revenue" | "cogs" | "opex" | "other_income" | "other_expense" | "tax";
+// Показатели ОПИУ в порядке отчёта владельца; статья относится к одному из них.
+export type OpiuGroup =
+  | "revenue"
+  | "cogs"
+  | "marketing"
+  | "payroll"
+  | "fixed"
+  | "variable"
+  | "bank"
+  | "tax_other"
+  | "tax_3"
+  | "other_income"
+  | "other_expense";
 export type FinCategory = {
   id: number;
   parent_id: number | null;
   name: string;
   kind: "income" | "expense";
   opiu_group: OpiuGroup | null;
+  require_supplier: boolean; // при внесении обязателен выбор поставщика
+  auto_tax: boolean; // сумма считается автоматически (процент от безналичных поступлений)
   active: boolean;
   sort: number;
 };
@@ -39,6 +53,8 @@ export type FinSettings = {
   auto_cogs: boolean;
   debt_alert_days: number;
   low_balance_limit: number;
+  auto_tax: boolean;
+  tax_rate: number;
 };
 export type FinOperation = {
   id: number;
@@ -65,13 +81,21 @@ export const ACCOUNT_KIND_LABEL: Record<FinAccount["kind"], string> = {
 export const OPIU_GROUP_LABEL: Record<OpiuGroup, string> = {
   revenue: "Выручка",
   cogs: "Себестоимость",
-  opex: "Операционные расходы",
+  marketing: "Маркетинговые расходы",
+  payroll: "ФОТ",
+  fixed: "Постоянные расходы",
+  variable: "Переменные расходы",
+  bank: "Комиссия банка",
+  tax_other: "Налоги - отчисления разные",
+  tax_3: "Налоги 3%",
   other_income: "Прочие доходы",
   other_expense: "Прочие расходы",
-  tax: "Налоги",
 };
 
-const DEFAULT_SETTINGS: FinSettings = { auto_revenue: true, auto_cogs: true, debt_alert_days: 7, low_balance_limit: 0 };
+// Расходные показатели в том порядке, в каком они идут в ОПИУ после валовой прибыли.
+export const EXPENSE_INDICATORS: OpiuGroup[] = ["marketing", "payroll", "fixed", "variable", "bank", "tax_other", "tax_3"];
+
+const DEFAULT_SETTINGS: FinSettings = { auto_revenue: true, auto_cogs: true, debt_alert_days: 7, low_balance_limit: 0, auto_tax: true, tax_rate: 3 };
 
 // ── Форматирование и даты ──────────────────────────────────────────────────
 export function fmtMoney(n: number | null | undefined): string {
@@ -229,10 +253,10 @@ export function useFinanceRef() {
   return { accounts, categories, partners, suppliers, settings, loading, error, reload };
 }
 
-// Статьи выручки/себестоимости, которые считаются из МойСклад автоматически,
-// в формах операций не предлагаем — иначе деньги посчитались бы дважды.
+// Статьи, которые считаются автоматически (налог с безналичных поступлений,
+// себестоимость из МойСклад), в формах операций не предлагаем — иначе дважды.
 export function isAutoCategory(c: FinCategory, settings: FinSettings): boolean {
-  return (settings.auto_revenue && c.opiu_group === "revenue") || (settings.auto_cogs && c.opiu_group === "cogs");
+  return (settings.auto_tax && c.auto_tax) || (settings.auto_cogs && c.opiu_group === "cogs");
 }
 
 export function categoryPath(categories: FinCategory[], id: number | null): string {
@@ -275,7 +299,7 @@ export type SalesPlanRow = { store: string; plan_month: string; sales_plan: numb
 export type PnlRow = {
   key: string;
   label: string;
-  level: 0 | 1;
+  level: number;
   type: "line" | "subtotal" | "total";
   fact: number;
   plan: number;
@@ -325,13 +349,14 @@ export function computePnl(input: {
   selectedStores: string[];
   settings: FinSettings;
   categories: FinCategory[];
+  accounts: FinAccount[];
   operations: FinOperation[];
   sales: SalesDay[];
   catSales: CatSalesRow[];
   plan: PnlPlanRow[];
   salesPlan: SalesPlanRow[];
 }): PnlResult {
-  const { start, end, isAllStores, selectedStores, settings, categories, operations, sales, catSales, plan, salesPlan } = input;
+  const { start, end, isAllStores, selectedStores, settings, categories, accounts, operations, sales, catSales, plan, salesPlan } = input;
   const storeOk = (store: string | null) => (isAllStores ? true : store !== null && selectedStores.includes(store));
 
   // факт по статьям из операций
@@ -345,6 +370,21 @@ export function computePnl(input: {
       continue;
     }
     factByCat.set(op.category_id, (factByCat.get(op.category_id) ?? 0) + op.amount);
+  }
+
+  // Автоналог: процент от безналичных поступлений выручки (счета вида банк/карта).
+  // Наличные не считаются. Ручные операции по такой статье не учитываем — иначе дважды.
+  if (settings.auto_tax) {
+    const catById = new Map(categories.map((c) => [c.id, c]));
+    const accById = new Map(accounts.map((a) => [a.id, a]));
+    let base = 0;
+    for (const op of operations) {
+      if (op.kind !== "income" || op.op_date < start || op.op_date > end || !storeOk(op.store)) continue;
+      if (op.category_id === null || catById.get(op.category_id)?.opiu_group !== "revenue") continue;
+      const kind = accById.get(op.account_id)?.kind;
+      if (kind === "bank" || kind === "card") base += op.amount;
+    }
+    for (const c of categories) if (c.auto_tax) factByCat.set(c.id, (base * settings.tax_rate) / 100);
   }
 
   // план по статьям (пропорционально числу дней месяца, попавших в период)
@@ -388,24 +428,27 @@ export function computePnl(input: {
   const catRevenueSum = [...catAgg.values()].reduce((a, v) => a + v.revenue, 0);
   const catCostSum = [...catAgg.values()].reduce((a, v) => a + v.cost, 0);
 
-  function groupLines(group: OpiuGroup, goodWhenHigh: boolean, parents: FinCategory[]): PnlRow[] {
+  // Доходная статья внутри расходного показателя (например, возврат комиссии банка) уменьшает его.
+  const sign = (c: FinCategory) => (c.kind === "income" && c.opiu_group !== "revenue" && c.opiu_group !== "other_income" ? -1 : 1);
+
+  function groupLines(goodWhenHigh: boolean, parents: FinCategory[]): PnlRow[] {
     const rows: PnlRow[] = [];
     for (const parent of parents) {
       const kids = categories.filter((c) => c.parent_id === parent.id);
       const children: PnlRow[] = [];
-      let fact = factByCat.get(parent.id) ?? 0;
-      let planSum = planByCat.get(parent.id) ?? 0;
+      const own = (factByCat.get(parent.id) ?? 0) * sign(parent);
+      const ownPlan = (planByCat.get(parent.id) ?? 0) * sign(parent);
+      let fact = own;
+      let planSum = ownPlan;
       for (const k of kids) {
-        const kf = factByCat.get(k.id) ?? 0;
-        const kp = planByCat.get(k.id) ?? 0;
+        const kf = (factByCat.get(k.id) ?? 0) * sign(k);
+        const kp = (planByCat.get(k.id) ?? 0) * sign(k);
         fact += kf;
         planSum += kp;
         if (kf !== 0 || kp !== 0) {
           children.push({ key: `c${k.id}`, label: k.name, level: 1, type: "line", fact: kf, plan: kp, goodWhenHigh, categoryId: k.id });
         }
       }
-      const own = factByCat.get(parent.id) ?? 0;
-      const ownPlan = planByCat.get(parent.id) ?? 0;
       if (children.length > 0 && (own !== 0 || ownPlan !== 0)) {
         children.unshift({ key: `c${parent.id}o`, label: "Без подпункта", level: 1, type: "line", fact: own, plan: ownPlan, goodWhenHigh, categoryId: parent.id });
       }
@@ -430,7 +473,7 @@ export function computePnl(input: {
   const out: PnlRow[] = [];
 
   // Выручка
-  const revManual = groupLines("revenue", true, topOf("revenue"));
+  const revManual = groupLines(true, topOf("revenue"));
   const revPlanManual = sum(revManual, "plan");
   let revenue: PnlRow;
   if (settings.auto_revenue) {
@@ -454,7 +497,7 @@ export function computePnl(input: {
   out.push(revenue);
 
   // Себестоимость
-  const cogsManual = groupLines("cogs", false, topOf("cogs"));
+  const cogsManual = groupLines(false, topOf("cogs"));
   let cogs: PnlRow;
   if (settings.auto_cogs) {
     const kids: PnlRow[] = catNames.map((n) => ({
@@ -488,26 +531,46 @@ export function computePnl(input: {
   const gross: PnlRow = { key: "gross", label: "Валовая прибыль", level: 0, type: "total", fact: revenue.fact - cogs.fact, plan: revenue.plan - cogs.plan, goodWhenHigh: true };
   out.push(gross);
 
-  // Прочие доходы
-  const oiRows = groupLines("other_income", true, topOf("other_income"));
-  const oi = { fact: sum(oiRows, "fact"), plan: sum(oiRows, "plan") };
-  for (const r of oiRows) out.push(r);
+  // Расходные показатели — всегда в порядке владельца, даже если по ним пока ноль
+  const indicatorRows: PnlRow[] = EXPENSE_INDICATORS.map((group) => {
+    const topRows = groupLines(false, topOf(group));
+    // одна статья без подпунктов — детализация не нужна; одна статья с подпунктами — показываем подпункты
+    const children = topRows.length === 1 ? topRows[0].children ?? [] : topRows;
+    return {
+      key: `i-${group}`,
+      label: OPIU_GROUP_LABEL[group],
+      level: 0,
+      type: children.length > 0 ? "subtotal" : "line",
+      fact: sum(topRows, "fact"),
+      plan: sum(topRows, "plan"),
+      goodWhenHigh: false,
+      children,
+    } as PnlRow;
+  });
+  for (const r of indicatorRows) out.push(r);
 
-  // Расходы — каждая статья верхнего уровня своей строкой, в порядке из «Настроек → Статьи»
-  const expenseGroups: OpiuGroup[] = ["opex", "other_expense", "tax"];
-  const expenseTops = categories.filter((c) => c.parent_id === null && c.opiu_group !== null && expenseGroups.includes(c.opiu_group));
-  const expenseRows: PnlRow[] = [];
-  for (const t of expenseTops) expenseRows.push(...groupLines(t.opiu_group as OpiuGroup, false, [t]));
-  for (const r of expenseRows) out.push(r);
-  const expenses = { fact: sum(expenseRows, "fact"), plan: sum(expenseRows, "plan") };
+  // Прочие доходы/расходы показываем, только если по ним что-то есть
+  const extra = (group: "other_income" | "other_expense"): PnlRow | null => {
+    const topRows = groupLines(group === "other_income", topOf(group));
+    const fact = sum(topRows, "fact");
+    const planSum = sum(topRows, "plan");
+    if (fact === 0 && planSum === 0) return null;
+    return { key: `i-${group}`, label: OPIU_GROUP_LABEL[group], level: 0, type: topRows.length > 0 ? "subtotal" : "line", fact, plan: planSum, goodWhenHigh: group === "other_income", children: topRows };
+  };
+  const oi = extra("other_income");
+  const oe = extra("other_expense");
+  if (oi) out.push(oi);
+  if (oe) out.push(oe);
+
+  const expenses = { fact: sum(indicatorRows, "fact") + (oe?.fact ?? 0), plan: sum(indicatorRows, "plan") + (oe?.plan ?? 0) };
 
   out.push({
     key: "net",
-    label: "Рентабельность (чистая прибыль)",
+    label: "Рентабельность",
     level: 0,
     type: "total",
-    fact: gross.fact + oi.fact - expenses.fact,
-    plan: gross.plan + oi.plan - expenses.plan,
+    fact: gross.fact + (oi?.fact ?? 0) - expenses.fact,
+    plan: gross.plan + (oi?.plan ?? 0) - expenses.plan,
     goodWhenHigh: true,
   });
 

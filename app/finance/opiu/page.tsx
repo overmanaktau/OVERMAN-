@@ -8,6 +8,7 @@ import { downloadExcel } from "@/lib/exportExcel";
 import KpiCard from "@/components/KpiCard";
 import {
   computePnl,
+  EXPENSE_INDICATORS,
   fmtMoney,
   fmtNum,
   fmtPct,
@@ -105,9 +106,9 @@ function Inner() {
   const calc = useCallback(
     (s: string, e: string): PnlResult | null =>
       inputs
-        ? computePnl({ start: s, end: e, isAllStores: isAll, selectedStores: selected, settings: ref.settings, categories: ref.categories, ...inputs })
+        ? computePnl({ start: s, end: e, isAllStores: isAll, selectedStores: selected, settings: ref.settings, categories: ref.categories, accounts: ref.accounts, ...inputs })
         : null,
-    [inputs, isAll, selected, ref.settings, ref.categories]
+    [inputs, isAll, selected, ref.settings, ref.categories, ref.accounts]
   );
 
   const total = useMemo(() => (ref.loading ? null : calc(start, end)), [calc, start, end, ref.loading]);
@@ -391,7 +392,7 @@ function PlanModal({
   // статьи, по которым вообще имеет смысл план; автовыручка идёт из плана продаж
   const planCats = categories.filter((c) => c.opiu_group !== null && (c.active || values[c.id] !== undefined));
   const tops = planCats.filter((c) => c.parent_id === null);
-  const groupsOrder: OpiuGroup[] = ["revenue", "cogs", "opex", "other_income", "other_expense", "tax"];
+  const groupsOrder: OpiuGroup[] = ["revenue", "cogs", ...EXPENSE_INDICATORS, "other_income", "other_expense"];
 
   useEffect(() => {
     let cancelled = false;

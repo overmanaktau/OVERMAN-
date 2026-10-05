@@ -474,6 +474,7 @@ function OperationModal({
     if (!accountId) return setError("Выберите счёт");
     if (kind === "transfer" && (!toAccountId || toAccountId === accountId)) return setError("Выберите другой счёт, куда переводятся деньги");
     if (kind !== "transfer" && !categoryId) return setError("Выберите статью");
+    if (kind === "expense" && !supplierId && ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier) return setError("Для этой статьи выберите поставщика");
     setSaving(true);
     setError(null);
     const payload = {
@@ -557,7 +558,7 @@ function OperationModal({
                 </select>
               </Field>
               {kind === "expense" ? (
-                <Field label="Поставщик">
+                <Field label={ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier ? "Поставщик (обязательно)" : "Поставщик"}>
                   <select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
                     <option value="">—</option>
                     {ref_.suppliers.filter((s) => s.active || String(s.id) === supplierId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

@@ -127,7 +127,11 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
           {c.name}
         </td>
         <td className={tdCls}>{c.kind === "income" ? "Доход" : "Расход"}</td>
-        <td className={tdCls}>{c.opiu_group ? OPIU_GROUP_LABEL[c.opiu_group] : <Chip tone="muted">не входит в ОПИУ</Chip>}</td>
+        <td className={tdCls}>
+          {c.opiu_group ? OPIU_GROUP_LABEL[c.opiu_group] : <Chip tone="muted">не входит в ОПИУ</Chip>}
+          {c.auto_tax && <span className="ml-2"><Chip tone="ok">считается автоматически</Chip></span>}
+          {c.require_supplier && <span className="ml-2"><Chip tone="muted">с выбором поставщика</Chip></span>}
+        </td>
         <td className={`${tdCls} text-right whitespace-nowrap`}>
           {canEdit && (
             <div className="flex gap-1.5 justify-end">
@@ -157,7 +161,7 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
   return (
     <Card
       title="Статьи доходов и расходов"
-      right={canEdit ? <button className={btnPrimary} onClick={() => setEditing({ cat: { kind: "expense", opiu_group: "opex", active: true }, isNew: true })}>+ Пункт</button> : undefined}
+      right={canEdit ? <button className={btnPrimary} onClick={() => setEditing({ cat: { kind: "expense", opiu_group: "marketing", active: true }, isNew: true })}>+ Пункт</button> : undefined}
     >
       <ErrorBox message={error} />
       <p className="text-[12px] text-muted mb-3">
@@ -203,20 +207,20 @@ function CategoryModal({
 }) {
   const [name, setName] = useState(initial.name ?? "");
   const [kind, setKind] = useState<"income" | "expense">(initial.kind ?? "expense");
-  const [group, setGroup] = useState<OpiuGroup | "none">(initial.opiu_group ?? (isNew && initial.parent_id ? "none" : initial.opiu_group === null ? "none" : "opex"));
+  const [requireSupplier, setRequireSupplier] = useState(!!initial.require_supplier);
+  const [group, setGroup] = useState<OpiuGroup | "none">(initial.opiu_group ?? (initial.opiu_group === null || initial.parent_id ? "none" : "marketing"));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const parent = initial.parent_id ? categories.find((c) => c.id === initial.parent_id) : null;
 
-  const groups = (Object.keys(OPIU_GROUP_LABEL) as OpiuGroup[]).filter((g) =>
-    kind === "income" ? g === "revenue" || g === "other_income" : g !== "revenue" && g !== "other_income"
-  );
+  const groups = Object.keys(OPIU_GROUP_LABEL) as OpiuGroup[];
+  const inherited = !!initial.parent_id; // у подпункта показатель такой же, как у пункта
 
   async function save() {
     if (!name.trim()) return setError("Укажите название");
     setSaving(true);
     setError(null);
-    const payload = { name: name.trim(), kind, opiu_group: group === "none" ? null : group };
+    const payload = { name: name.trim(), kind, opiu_group: group === "none" ? null : group, require_supplier: kind === "expense" && requireSupplier };
     const res = isNew
       ? await supabase.from("fin_categories").insert({ ...payload, parent_id: initial.parent_id ?? null, sort: Math.max(0, ...categories.filter((c) => c.parent_id === (initial.parent_id ?? null)).map((c) => c.sort)) + 10 })
       : await supabase.from("fin_categories").update(payload).eq("id", initial.id!);
@@ -238,7 +242,7 @@ function CategoryModal({
             onChange={(e) => {
               const k = e.target.value as "income" | "expense";
               setKind(k);
-              setGroup(k === "income" ? "other_income" : "opex");
+              if (!inherited) setGroup(k === "income" ? "other_income" : "marketing");
             }}
           >
             <option value="expense">Расход</option>
@@ -246,7 +250,7 @@ function CategoryModal({
           </select>
         </Field>
         <Field label="Группа в ОПИУ" hint="«Не входит в ОПИУ» — для движения капитала: закупка товара, займы, взносы партнёров, оборудование.">
-          <select className={selectCls} value={group} onChange={(e) => setGroup(e.target.value as OpiuGroup | "none")}>
+          <select className={selectCls} value={group} onChange={(e) => setGroup(e.target.value as OpiuGroup | "none")} disabled={inherited}>
             {groups.map((g) => (
               <option key={g} value={g}>
                 {OPIU_GROUP_LABEL[g]}
@@ -255,6 +259,12 @@ function CategoryModal({
             <option value="none">Не входит в ОПИУ</option>
           </select>
         </Field>
+        {kind === "expense" && (
+          <label className="flex items-center gap-2 text-[13px] text-ink">
+            <input type="checkbox" checked={requireSupplier} onChange={(e) => setRequireSupplier(e.target.checked)} />
+            При внесении обязательно выбирать поставщика
+          </label>
+        )}
         <ErrorBox message={error} />
         <div className="flex gap-2 justify-end">
           <button className={btnGhost} onClick={onClose}>Отмена</button>
@@ -547,6 +557,8 @@ function SimpleModal({
 function TermsTab({ settings, canEdit, reload }: { settings: ReturnType<typeof useFinanceRef>["settings"]; canEdit: boolean; reload: () => void }) {
   const [autoRevenue, setAutoRevenue] = useState(settings.auto_revenue);
   const [autoCogs, setAutoCogs] = useState(settings.auto_cogs);
+  const [autoTax, setAutoTax] = useState(settings.auto_tax);
+  const [taxRate, setTaxRate] = useState(String(settings.tax_rate));
   const [alertDays, setAlertDays] = useState(String(settings.debt_alert_days));
   const [lowBalance, setLowBalance] = useState(String(settings.low_balance_limit));
   const [saving, setSaving] = useState(false);
@@ -560,6 +572,8 @@ function TermsTab({ settings, canEdit, reload }: { settings: ReturnType<typeof u
     const rows = [
       { key: "auto_revenue", value: autoRevenue },
       { key: "auto_cogs", value: autoCogs },
+      { key: "auto_tax", value: autoTax },
+      { key: "tax_rate", value: Number(taxRate.replace(",", ".")) || 0 },
       { key: "debt_alert_days", value: Number(alertDays) || 0 },
       { key: "low_balance_limit", value: Number(lowBalance.replace(/\s/g, "").replace(",", ".")) || 0 },
     ].map((r) => ({ ...r, updated_at: new Date().toISOString() }));
@@ -588,6 +602,17 @@ function TermsTab({ settings, canEdit, reload }: { settings: ReturnType<typeof u
             <span className="text-[12px] text-muted">Себестоимость проданных товаров по учёту МойСклад. Закупка товара у поставщиков в ОПИУ не попадает — это движение денег, а не расход.</span>
           </span>
         </label>
+        <div className={row}>
+          <input type="checkbox" className="mt-1" checked={autoTax} onChange={(e) => setAutoTax(e.target.checked)} disabled={!canEdit} />
+          <div className="flex-1">
+            <span className="text-[13px] font-semibold text-ink block">Налог «3%» считать автоматически</span>
+            <span className="text-[12px] text-muted block mb-2">В ОПИУ статья налога = процент от безналичных поступлений выручки в ДДС (счета вида «расчётный счёт» и «карта»). Наличные не учитываются; вручную вносить этот налог не нужно.</span>
+            <div className="flex items-center gap-2">
+              <input className={`${inputCls} max-w-[90px]`} value={taxRate} onChange={(e) => setTaxRate(e.target.value)} disabled={!canEdit} inputMode="decimal" />
+              <span className="text-[13px] text-muted">% ставка</span>
+            </div>
+          </div>
+        </div>
         <div className={row}>
           <div className="flex-1">
             <div className="text-[13px] font-semibold text-ink">Предупреждать о сроках за, дней</div>
