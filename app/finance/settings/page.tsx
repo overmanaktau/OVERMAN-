@@ -224,6 +224,14 @@ function CategoryModal({
     const res = isNew
       ? await supabase.from("fin_categories").insert({ ...payload, parent_id: initial.parent_id ?? null, sort: Math.max(0, ...categories.filter((c) => c.parent_id === (initial.parent_id ?? null)).map((c) => c.sort)) + 10 })
       : await supabase.from("fin_categories").update(payload).eq("id", initial.id!);
+    // подпункты всегда в той же группе ОПИУ, что и их пункт
+    if (!res.error && !isNew && initial.parent_id == null) {
+      const kids = await supabase.from("fin_categories").update({ opiu_group: payload.opiu_group }).eq("parent_id", initial.id!);
+      if (kids.error) {
+        setSaving(false);
+        return setError(kids.error.message);
+      }
+    }
     setSaving(false);
     if (res.error) return setError(res.error.message);
     onSaved();
