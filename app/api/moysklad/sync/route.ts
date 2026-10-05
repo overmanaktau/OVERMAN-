@@ -23,6 +23,8 @@ import {
   fetchProfitByProductForDate,
   deriveArticle,
 } from "@/lib/moysklad";
+import { WAREHOUSE_STORE } from "@/lib/warehouses";
+import { snapshotStockForDate } from "@/lib/stockSnapshot";
 
 // Confirmed with the business owner: these are the only live registers
 // (МойСклад entity/retailstore, "точки продаж" — not "склад", which
@@ -69,14 +71,7 @@ const SAYA_PARK_RETIRED_FROM = "2026-09-21"; // string-comparable since dates he
 // next season — never folded into a city's live total. Saya Park and
 // Актобе скидка stay here even though their registers are archived above —
 // this map is about physical stock location, not active points of sale.
-const WAREHOUSE_STORE: Record<string, string> = {
-  "109ed308-b012-11f0-0a80-110900247319": "overman_aktau", // Overman
-  "fe3b03d3-4da1-11f0-0a80-18910004c37d": "saya_park", // Saya Park
-  "bb935bd2-93e9-11f1-0a80-1f560022775d": "overman_aktobe", // Aktobe OVERMAN
-  "2ca9443b-a440-11f1-0a80-03ac00324d3c": "aktobe_discount", // Актобе скидка
-  "14352a86-5e96-11f1-0a80-1cbd00149396": "frozen", // заморозка 03.06.2026
-  "554d7479-2728-11f0-0a80-15980025a3f6": "frozen", // Заморозка 24.02.2026
-};
+// (карта WAREHOUSE_STORE теперь в lib/warehouses.ts — общая для синхронизации и снимков остатков)
 
 function yesterdayInAlmaty(): string {
   // Kazakhstan runs on a single UTC+5 zone (Asia/Almaty covers it, no DST) —
@@ -258,6 +253,25 @@ async function runSync(date: string) {
     if (employeeSalesError) throw employeeSalesError;
   }
 
+  const products = await syncProductSales(date);
+
+  return {
+    date,
+    registers: byRegister.size,
+    employees: byEmployee.size,
+    products,
+    receipts: demands.length,
+    returns: returns.length,
+    returnedAmount,
+    voidedReceipts,
+    skipped,
+  };
+}
+
+// Продажи по товарам за день (и их себестоимость) — отдельно от продаж по кассам и
+// сотрудникам, чтобы историю по товарам можно было восстановить, не трогая остальные
+// цифры (?productsOnly=1).
+async function syncProductSales(date: string): Promise<number> {
   // One /report/profit/byproduct call per склад (МойСклад's store filter
   // only ever accepts a single value — see fetchProfitByProductForDate).
   // Sequential, not Promise.all: МойСклад rate-limits concurrent requests
@@ -314,17 +328,7 @@ async function runSync(date: string) {
   }
   productRows = productRowsToUpsert.length;
 
-  return {
-    date,
-    registers: byRegister.size,
-    employees: byEmployee.size,
-    products: productRows,
-    receipts: demands.length,
-    returns: returns.length,
-    returnedAmount,
-    voidedReceipts,
-    skipped,
-  };
+  return productRows;
 }
 
 // Product catalog + current stock snapshot — not date-scoped (always
@@ -404,6 +408,39 @@ async function syncCatalogAndStock() {
     if (error) throw error;
   }
 
+  // Таблица остатков хранит только позиции с остатком больше нуля. Всё, что распродано или
+  // переехало, раньше оставалось в ней навсегда и раздувало себестоимость остатка (и занижало
+  // оборачиваемость) — теперь такие строки удаляются. Защита: если пришло подозрительно
+  // мало строк (сбой отчёта), ничего не удаляем.
+  let staleRemoved = 0;
+  if (stockRows.length >= 500) {
+    const live = new Set(stockRows.map((r) => `${r.product_ms_id}|${r.store}`));
+    const tracked = new Set(Object.values(WAREHOUSE_STORE));
+    const stale: { product_ms_id: string; store: string }[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await supabaseAdmin
+        .from("moysklad_product_stock")
+        .select("product_ms_id, store")
+        .order("product_ms_id")
+        .order("store")
+        .range(offset, offset + 999);
+      if (error) throw error;
+      for (const r of (data ?? []) as { product_ms_id: string; store: string }[]) {
+        if (tracked.has(r.store) && !live.has(`${r.product_ms_id}|${r.store}`)) stale.push(r);
+      }
+      if (!data || data.length < 1000) break;
+    }
+    const byStore = new Map<string, string[]>();
+    for (const r of stale) byStore.set(r.store, [...(byStore.get(r.store) ?? []), r.product_ms_id]);
+    for (const [store, ids] of byStore) {
+      for (const batch of chunk(ids, 200)) {
+        const { error } = await supabaseAdmin.from("moysklad_product_stock").delete().eq("store", store).in("product_ms_id", batch);
+        if (error) throw error;
+      }
+    }
+    staleRemoved = stale.length;
+  }
+
   // Only ~400 приёмки ever — cheap enough to refetch and rebuild in full
   // every sync, same as the catalog/stock snapshot above.
   const supplies = await fetchAllSupplies();
@@ -428,7 +465,7 @@ async function syncCatalogAndStock() {
     if (error) throw error;
   }
 
-  return { products: products.length, stockRows: stockRows.length, supplyRows: supplyRows.length };
+  return { products: products.length, stockRows: stockRows.length, staleRemoved, supplyRows: supplyRows.length };
 }
 
 async function handle(request: Request) {
@@ -448,7 +485,31 @@ async function handle(request: Request) {
   // the loop passes this to skip straight to that date's aggregates.
   const skipCatalog = url.searchParams.get("skipCatalog") === "1";
 
+  // ?productsOnly=1 — только продажи по товарам за день (для восстановления истории
+  // себестоимости; продажи по кассам и сотрудникам не пересчитываются).
+  const productsOnly = url.searchParams.get("productsOnly") === "1";
+  // ?snapshot=YYYY-MM-DD (или yesterday) — только снимок остатков на конец этого дня для
+  // оборачиваемости по среднему остатку. Отдельным заданием pg_cron каждую ночь (не внутри
+  // основной синхронизации — она и так долгая) и для восстановления истории.
+  const snapshotParam = url.searchParams.get("snapshot");
+  const snapshotDate = snapshotParam === "yesterday" ? yesterdayInAlmaty() : snapshotParam;
+
   try {
+    if (snapshotDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
+      try {
+        return NextResponse.json({ ok: true, snapshot: snapshotDate, rows: await snapshotStockForDate(snapshotDate) });
+      } catch (e) {
+        const message = getErrorMessage(e);
+        await supabaseAdmin
+          .from("notifications")
+          .insert({ type: "sync_error", message: `Снимок остатков не сохранился (${snapshotDate}): ${message}` });
+        return NextResponse.json({ error: message }, { status: 500 });
+      }
+    }
+    if (productsOnly) {
+      return NextResponse.json({ ok: true, date, products: await syncProductSales(date) });
+    }
     const catalog = skipCatalog ? null : await syncCatalogAndStock();
     const result = await runSync(date);
     await supabaseAdmin

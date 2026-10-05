@@ -451,7 +451,9 @@ export type StockReportRow = {
   imageFullHref: string | null; // original-resolution download link — confirmed live: needs our Bearer token (401 without it), so the app fetches it through app/api/moysklad/image rather than using it directly as <img src>
 };
 
-export async function fetchStockAll(): Promise<StockReportRow[]> {
+// moment — «остатки на момент времени» («YYYY-MM-DD HH:mm:ss», время МойСклад): через
+// filter=moment=… (отдельный параметр moment отчёт игнорирует). Без него — остатки сейчас.
+export async function fetchStockAll(moment?: string): Promise<StockReportRow[]> {
   // This report embeds each item's folder by name only, never its id (unlike
   // /entity/product above), so topCategory here is resolved by name through
   // byName — see fetchProductFolders.
@@ -463,6 +465,7 @@ export async function fetchStockAll(): Promise<StockReportRow[]> {
     const page = await moyskladFetch("/report/stock/all", {
       limit: String(limit),
       offset: String(offset),
+      ...(moment ? { filter: `moment=${moment}` } : {}),
     });
     type Raw = {
       meta?: { href?: string };
@@ -510,7 +513,7 @@ export type StoreStockRow = {
   stock: number;
 };
 
-export async function fetchStockByStore(): Promise<StoreStockRow[]> {
+export async function fetchStockByStore(moment?: string): Promise<StoreStockRow[]> {
   const limit = 1000; // safe at max page size — no expand param here either
   let offset = 0;
   const all: StoreStockRow[] = [];
@@ -518,6 +521,7 @@ export async function fetchStockByStore(): Promise<StoreStockRow[]> {
     const page = await moyskladFetch("/report/stock/bystore", {
       limit: String(limit),
       offset: String(offset),
+      ...(moment ? { filter: `moment=${moment}` } : {}),
     });
     type Raw = {
       meta?: { href?: string };
