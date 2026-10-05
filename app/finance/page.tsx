@@ -148,7 +148,7 @@ function Inner() {
   const revPct = revenue && revenue.plan > 0 ? (revenue.fact / revenue.plan) * 100 : null;
   const margin = revenue && revenue.fact > 0 && gross ? (gross.fact / revenue.fact) * 100 : null;
   const burn = pnl?.expenses.fact ?? 0;
-  const periodDays = Math.max(1, daysBetween(start, end) + 1);
+  const periodDays = Math.max(1, daysBetween(start, end < today ? end : today) + 1); // только прошедшие дни периода
   const runwayDays = burn > 0 ? Math.max(0, Math.floor(totalBalance / (burn / periodDays))) : null;
 
   return (

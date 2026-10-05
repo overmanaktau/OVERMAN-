@@ -302,7 +302,11 @@ function DdsReport({
   accounts: ReturnType<typeof useFinanceRef>["accounts"];
   allOps: FinOperation[];
 }) {
-  const months = useMemo(() => monthsInRange(start, end).slice(0, 12), [start, end]);
+  const months = useMemo(() => {
+    const all = monthsInRange(start, end).slice(0, 12);
+    const upto = all.filter((m) => m <= monthStart(todayYmd()));
+    return upto.length > 0 ? upto : all; // будущие месяцы без данных не показываем
+  }, [start, end]);
 
   const data = useMemo(() => {
     const byCat = new Map<number | "none", Map<string, number>>();

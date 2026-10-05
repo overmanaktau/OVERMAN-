@@ -155,11 +155,12 @@ export function monthsInRange(start: string, end: string): string[] {
 }
 
 // ── Период ─────────────────────────────────────────────────────────────────
-export type PeriodPreset = "month" | "prev_month" | "quarter" | "year" | "custom";
+export type PeriodPreset = "month" | "prev_month" | "quarter" | "prev_quarter" | "year" | "custom";
 export const PERIOD_LABELS: { key: PeriodPreset; label: string }[] = [
   { key: "month", label: "Этот месяц" },
   { key: "prev_month", label: "Прошлый месяц" },
   { key: "quarter", label: "Квартал" },
+  { key: "prev_quarter", label: "Прошлый квартал" },
   { key: "year", label: "Год" },
   { key: "custom", label: "Свой период" },
 ];
@@ -174,6 +175,10 @@ export function periodRange(preset: PeriodPreset, customFrom: string, customTo: 
   }
   if (preset === "quarter") {
     const q = Math.floor(now.getMonth() / 3) * 3;
+    return { start: ymd(new Date(now.getFullYear(), q, 1)), end: ymd(new Date(now.getFullYear(), q + 3, 0)) };
+  }
+  if (preset === "prev_quarter") {
+    const q = Math.floor(now.getMonth() / 3) * 3 - 3; // может уйти в прошлый год — Date это учтёт
     return { start: ymd(new Date(now.getFullYear(), q, 1)), end: ymd(new Date(now.getFullYear(), q + 3, 0)) };
   }
   if (preset === "year") {
@@ -387,11 +392,16 @@ export function computePnl(input: {
     for (const c of categories) if (c.auto_tax) factByCat.set(c.id, (base * settings.tax_rate) / 100);
   }
 
+  // План — «на дату»: по неоконченному периоду берём часть плана до сегодняшнего дня,
+  // иначе факт за несколько дней сравнивался бы с планом на весь квартал/месяц.
+  const today = todayYmd();
+  const planEnd = start <= today && end > today ? today : end;
+
   // план по статьям (пропорционально числу дней месяца, попавших в период)
   const planByCat = new Map<number, number>();
   for (const p of plan) {
     if (!(isAllStores ? true : p.store !== null && selectedStores.includes(p.store))) continue;
-    const frac = overlapFraction(p.plan_month, start, end);
+    const frac = overlapFraction(p.plan_month, start, planEnd);
     if (frac <= 0) continue;
     planByCat.set(p.category_id, (planByCat.get(p.category_id) ?? 0) + Number(p.amount) * frac);
   }
@@ -411,7 +421,7 @@ export function computePnl(input: {
   let salesPlanSum = 0;
   for (const p of salesPlan) {
     if (!isAllStores && !selectedStores.includes(p.store)) continue;
-    salesPlanSum += Number(p.sales_plan ?? 0) * overlapFraction(p.plan_month, start, end);
+    salesPlanSum += Number(p.sales_plan ?? 0) * overlapFraction(p.plan_month, start, planEnd);
   }
 
   // выручка и себестоимость по категориям товара
