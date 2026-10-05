@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
-import { SalesPlanWindow } from "@/components/SalesPlanWindow";
+import { SalesPlanWindow, type PlanRange } from "@/components/SalesPlanWindow";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { warehousesForCities } from "@/lib/warehouses";
@@ -181,6 +181,14 @@ export default function ObzorPage() {
 
   const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
   const [activeCustom, setActiveCustom] = useState<{ start: string; end: string } | null>(null);
+  // Окно «План продаж» следует за выбранным периодом; «С начала месяца» — обычное окно месяца.
+  const planRange: PlanRange | null = (() => {
+    if (!activeCustom && periodIndex === DEFAULT_PERIOD) return null;
+    const r = activeCustom
+      ? { start: parseYmd(activeCustom.start), end: parseYmd(activeCustom.end) }
+      : getPeriodRange(periodIndex, new Date());
+    return { from: ymd(r.start), to: ymd(r.end), label: activeCustom ? "Свой период" : PERIODS[periodIndex] };
+  })();
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -485,7 +493,7 @@ export default function ObzorPage() {
         </div>
       </div>
 
-      <SalesPlanWindow stores={selectedStores} />
+      <SalesPlanWindow stores={selectedStores} range={planRange} />
 
       {loading ? (
         <div className="text-sm text-muted">Загрузка…</div>
