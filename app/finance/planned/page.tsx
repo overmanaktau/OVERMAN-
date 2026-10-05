@@ -283,13 +283,13 @@ function PlannedModal({
   const [categoryId, setCategoryId] = useState(initial.category_id ? String(initial.category_id) : "");
   const [store, setStore] = useState(initial.store ?? "");
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
-  const [partnerId, setPartnerId] = useState(initial.partner_id ? String(initial.partner_id) : "");
   const [accountId, setAccountId] = useState(initial.account_id ? String(initial.account_id) : "");
   const [repeat, setRepeat] = useState<FinPlanned["repeat"]>(initial.repeat ?? "none");
   const [comment, setComment] = useState(initial.comment ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const needSupplier = kind === "expense" && !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier;
   const cats = ref_.categories.filter((c) => c.kind === kind && ((c.active && !isAutoCategory(c, ref_.settings)) || String(c.id) === categoryId));
   const tops = cats.filter((c) => c.parent_id === null);
 
@@ -297,7 +297,7 @@ function PlannedModal({
     const amt = Number(amount.replace(/\s/g, "").replace(",", "."));
     if (!Number.isFinite(amt) || amt <= 0) return setError("Сумма должна быть больше нуля");
     if (!categoryId) return setError("Выберите статью");
-    if (kind === "expense" && !supplierId && ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier) return setError("Для этой статьи выберите поставщика");
+    if (needSupplier && !supplierId) return setError("Для этой статьи выберите поставщика");
     setSaving(true);
     const payload = {
       due_date: due,
@@ -305,8 +305,8 @@ function PlannedModal({
       amount: amt,
       category_id: Number(categoryId),
       store: store || null,
-      supplier_id: supplierId ? Number(supplierId) : null,
-      partner_id: partnerId ? Number(partnerId) : null,
+      supplier_id: needSupplier && supplierId ? Number(supplierId) : null,
+      partner_id: initial.partner_id ?? null,
       account_id: accountId ? Number(accountId) : null,
       repeat,
       comment: comment.trim() || null,
@@ -334,10 +334,14 @@ function PlannedModal({
           <Field label="Магазин"><select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}><option value="">Общее</option>{stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}</select></Field>
           <Field label="Счёт"><select className={selectCls} value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">Определить при оплате</option>{ref_.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Поставщик"><select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}><option value="">—</option>{ref_.suppliers.filter((s) => s.active || String(s.id) === supplierId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
-          <Field label="Партнёр"><select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}><option value="">—</option>{ref_.partners.filter((p) => p.active || String(p.id) === partnerId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-        </div>
+        {needSupplier && (
+          <Field label="Поставщик">
+            <select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <option value="">Выберите…</option>
+              {ref_.suppliers.filter((s) => s.active || String(s.id) === supplierId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+        )}
         <Field label="Повтор" hint="После оплаты автоматически создаётся следующий платёж">
           <select className={selectCls} value={repeat} onChange={(e) => setRepeat(e.target.value as FinPlanned["repeat"])}>
             {(Object.keys(REPEAT_LABEL) as FinPlanned["repeat"][]).map((r) => <option key={r} value={r}>{REPEAT_LABEL[r]}</option>)}

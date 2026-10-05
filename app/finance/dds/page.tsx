@@ -462,11 +462,12 @@ function OperationModal({
   // магазин обязателен; предвыбираем его, если в шапке выбран ровно один
   const [store, setStore] = useState(initial.store ?? (initial.id ? "" : defaultStore));
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
-  const [partnerId, setPartnerId] = useState(initial.partner_id ? String(initial.partner_id) : "");
   const [comment, setComment] = useState(initial.comment ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // поставщик нужен только для статей вроде «Закуп - товар»
+  const needSupplier = kind === "expense" && !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier;
   const activeAccounts = ref_.accounts.filter((a) => a.active || String(a.id) === accountId);
   const cats = ref_.categories.filter(
     (c) => c.kind === (kind === "income" ? "income" : "expense") && ((c.active && !isAutoCategory(c, ref_.settings)) || String(c.id) === categoryId)
@@ -481,7 +482,7 @@ function OperationModal({
     if (kind !== "transfer" && !categoryId) return setError("Выберите статью");
     // у старых операций «без магазина» можно сохранять как есть, у новых магазин обязателен
     if (kind !== "transfer" && !store && !(initial.id && initial.store === null)) return setError("Выберите магазин");
-    if (kind === "expense" && !supplierId && ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier) return setError("Для этой статьи выберите поставщика");
+    if (needSupplier && !supplierId) return setError("Для этой статьи выберите поставщика");
     setSaving(true);
     setError(null);
     const payload = {
@@ -492,8 +493,8 @@ function OperationModal({
       to_account_id: kind === "transfer" ? Number(toAccountId) : null,
       category_id: kind === "transfer" ? null : Number(categoryId),
       store: store || null,
-      supplier_id: kind === "expense" && supplierId ? Number(supplierId) : null,
-      partner_id: partnerId ? Number(partnerId) : null,
+      supplier_id: needSupplier && supplierId ? Number(supplierId) : null,
+      partner_id: initial.partner_id ?? null, // партнёр вносится только в разделе «Долги»
       comment: comment.trim() || null,
     };
     const res = initial.id
@@ -542,34 +543,17 @@ function OperationModal({
         {kind !== "transfer" && (
           <>
             <CategorySelect categories={cats} value={categoryId} onChange={setCategoryId} />
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Магазин">
-                <select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}>
+            <Field label="Магазин">
+              <select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}>
+                <option value="">Выберите…</option>
+                {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+              </select>
+            </Field>
+            {needSupplier && (
+              <Field label="Поставщик">
+                <select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
                   <option value="">Выберите…</option>
-                  {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
-                </select>
-              </Field>
-              {kind === "expense" ? (
-                <Field label={ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier ? "Поставщик (обязательно)" : "Поставщик"}>
-                  <select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                    <option value="">—</option>
-                    {ref_.suppliers.filter((s) => s.active || String(s.id) === supplierId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </Field>
-              ) : (
-                <Field label="Партнёр">
-                  <select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
-                    <option value="">—</option>
-                    {ref_.partners.filter((p) => p.active || String(p.id) === partnerId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </Field>
-              )}
-            </div>
-            {kind === "expense" && (
-              <Field label="Партнёр" hint="Если деньги выплачены партнёру">
-                <select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
-                  <option value="">—</option>
-                  {ref_.partners.filter((p) => p.active || String(p.id) === partnerId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {ref_.suppliers.filter((s) => s.active || String(s.id) === supplierId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </Field>
             )}
