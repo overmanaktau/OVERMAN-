@@ -321,13 +321,15 @@ export default function DataEntryPage() {
     return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
   }
 
-  // План: free to set for the first time (any date — no date gate at all,
-  // planning ahead is normal), but once it has a value, changing it always
-  // needs an approved request, regardless of date — unlike факт/каналы,
-  // план doesn't get a free today/future window back after first entry.
+  // План (решение владельца): на сегодня и любые будущие даты первичное внесение
+  // свободно всегда; после первого внесения план закрывается, изменить — только по
+  // одобренному запросу; за прошлое (до сегодняшнего дня) и первичное внесение, и
+  // изменение — только по запросу. Те же правила держит триггер в базе (070).
   function planFieldLocked(row: DayRow) {
-    if (!row.planEverEntered) return false;
-    return !row.unlockExpiresAt || rowIsExpired(row.unlockExpiresAt);
+    const unlockActive = !!row.unlockExpiresAt && !rowIsExpired(row.unlockExpiresAt);
+    if (unlockActive) return false;
+    if (row.planEverEntered) return true;
+    return row.entryDate < todayStr;
   }
 
   const load = useCallback(async () => {
