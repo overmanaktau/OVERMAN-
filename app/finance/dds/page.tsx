@@ -273,6 +273,7 @@ function Inner() {
           initial={editing}
           ref_={ref}
           stores={stores}
+          defaultStore={!isAll && selected.length === 1 ? selected[0] : ""}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -441,12 +442,14 @@ function OperationModal({
   initial,
   ref_,
   stores,
+  defaultStore,
   onClose,
   onSaved,
 }: {
   initial: Partial<FinOperation>;
   ref_: ReturnType<typeof useFinanceRef>;
   stores: { code: string; name: string }[];
+  defaultStore: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -456,7 +459,8 @@ function OperationModal({
   const [accountId, setAccountId] = useState(initial.account_id ? String(initial.account_id) : "");
   const [toAccountId, setToAccountId] = useState(initial.to_account_id ? String(initial.to_account_id) : "");
   const [categoryId, setCategoryId] = useState(initial.category_id ? String(initial.category_id) : "");
-  const [store, setStore] = useState(initial.store ?? "");
+  // магазин обязателен; предвыбираем его, если в шапке выбран ровно один
+  const [store, setStore] = useState(initial.store ?? (initial.id ? "" : defaultStore));
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
   const [partnerId, setPartnerId] = useState(initial.partner_id ? String(initial.partner_id) : "");
   const [comment, setComment] = useState(initial.comment ?? "");
@@ -475,6 +479,8 @@ function OperationModal({
     if (!accountId) return setError("Выберите счёт");
     if (kind === "transfer" && (!toAccountId || toAccountId === accountId)) return setError("Выберите другой счёт, куда переводятся деньги");
     if (kind !== "transfer" && !categoryId) return setError("Выберите статью");
+    // у старых операций «без магазина» можно сохранять как есть, у новых магазин обязателен
+    if (kind !== "transfer" && !store && !(initial.id && initial.store === null)) return setError("Выберите магазин");
     if (kind === "expense" && !supplierId && ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier) return setError("Для этой статьи выберите поставщика");
     setSaving(true);
     setError(null);
@@ -537,9 +543,9 @@ function OperationModal({
           <>
             <CategorySelect categories={cats} value={categoryId} onChange={setCategoryId} />
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Магазин" hint="Пусто — общее по компании">
+              <Field label="Магазин">
                 <select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}>
-                  <option value="">Общее</option>
+                  <option value="">Выберите…</option>
                   {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
                 </select>
               </Field>
