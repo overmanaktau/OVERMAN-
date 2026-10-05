@@ -87,7 +87,7 @@ function Inner() {
     load();
   }, [load]);
 
-  const storeName = (code: string | null) => (code ? stores.find((s) => s.code === code)?.name ?? code : "Общее");
+  const storeName = (code: string | null) => (code ? stores.find((s) => s.code === code)?.name ?? code : "—");
   const accountName = (id: number | null) => ref.accounts.find((a) => a.id === id)?.name ?? "—";
   const supplierName = (id: number | null) => ref.suppliers.find((s) => s.id === id)?.name;
   const partnerName = (id: number | null) => ref.partners.find((p) => p.id === id)?.name;

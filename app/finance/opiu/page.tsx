@@ -399,7 +399,7 @@ function PlanModal({
   onSaved: () => void;
 }) {
   const [month, setMonth] = useState(defaultMonth.slice(0, 7));
-  const [scope, setScope] = useState<string>(!isAll && selected.length === 1 ? selected[0] : "");
+  const [scope, setScope] = useState<string>(!isAll && selected.length === 1 ? selected[0] : stores[0]?.code ?? "");
   const [values, setValues] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -474,9 +474,8 @@ function PlanModal({
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Месяц"><input type="month" className={inputCls} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} /></Field>
-          <Field label="Для чего" hint="План по магазину или общий по компании">
+          <Field label="Магазин">
             <select className={selectCls} value={scope} onChange={(e) => setScope(e.target.value)}>
-              <option value="">Вся компания (общий)</option>
               {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
             </select>
           </Field>

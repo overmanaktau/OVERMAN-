@@ -340,7 +340,7 @@ function AccountsTab({ accounts, canEdit, reload }: { accounts: FinAccount[]; ca
                 <tr key={a.id} className={a.active ? "" : "opacity-50"}>
                   <td className={`${tdCls} font-semibold`}>{a.name}</td>
                   <td className={tdCls}>{ACCOUNT_KIND_LABEL[a.kind]}</td>
-                  <td className={tdCls}>{a.store ? stores.find((s) => s.code === a.store)?.name ?? a.store : "Общий"}</td>
+                  <td className={tdCls}>{a.store ? stores.find((s) => s.code === a.store)?.name ?? a.store : "—"}</td>
                   <td className={`${tdCls} text-right num`}>{fmtMoney(a.opening_balance)}</td>
                   <td className={tdCls}>{fmtDate(a.opening_date)}</td>
                   <td className={`${tdCls} text-right`}>
@@ -375,6 +375,8 @@ function AccountModal({ initial, onClose, onSaved }: { initial: Partial<FinAccou
 
   async function save() {
     if (!name.trim()) return setError("Укажите название");
+    // у старых счетов «без магазина» можно сохранять как есть, у новых магазин обязателен
+    if (!store && !(initial.id && initial.store === null)) return setError("Выберите магазин");
     const bal = Number(balance.replace(/\s/g, "").replace(",", "."));
     if (!Number.isFinite(bal)) return setError("Начальный остаток — число");
     setSaving(true);
@@ -396,9 +398,9 @@ function AccountModal({ initial, onClose, onSaved }: { initial: Partial<FinAccou
             {(Object.keys(ACCOUNT_KIND_LABEL) as FinAccount["kind"][]).map((k) => <option key={k} value={k}>{ACCOUNT_KIND_LABEL[k]}</option>)}
           </select>
         </Field>
-        <Field label="Магазин" hint="Пусто — общий счёт компании">
+        <Field label="Магазин">
           <select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}>
-            <option value="">Общий</option>
+            <option value="">Выберите…</option>
             {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
           </select>
         </Field>

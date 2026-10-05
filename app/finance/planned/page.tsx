@@ -83,7 +83,7 @@ function Inner() {
   }, [load]);
 
   const today = todayYmd();
-  const storeName = (code: string | null) => (code ? stores.find((s) => s.code === code)?.name ?? code : "Общее");
+  const storeName = (code: string | null) => (code ? stores.find((s) => s.code === code)?.name ?? code : "—");
   const supplierName = (id: number | null) => ref.suppliers.find((s) => s.id === id)?.name;
   const partnerName = (id: number | null) => ref.partners.find((p) => p.id === id)?.name;
 
@@ -258,7 +258,7 @@ function Inner() {
         )}
       </Card>
 
-      {editing && <PlannedModal initial={editing} ref_={ref} stores={stores} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {editing && <PlannedModal initial={editing} ref_={ref} stores={stores} defaultStore={!isAll && selected.length === 1 ? selected[0] : ""} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
       {paying && <PayModal item={paying} ref_={ref} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); load(); }} />}
     </div>
   );
@@ -268,12 +268,14 @@ function PlannedModal({
   initial,
   ref_,
   stores,
+  defaultStore,
   onClose,
   onSaved,
 }: {
   initial: Partial<FinPlanned>;
   ref_: ReturnType<typeof useFinanceRef>;
   stores: { code: string; name: string }[];
+  defaultStore: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -281,7 +283,7 @@ function PlannedModal({
   const [due, setDue] = useState(initial.due_date ?? todayYmd());
   const [amount, setAmount] = useState(initial.amount ? String(initial.amount) : "");
   const [categoryId, setCategoryId] = useState(initial.category_id ? String(initial.category_id) : "");
-  const [store, setStore] = useState(initial.store ?? "");
+  const [store, setStore] = useState(initial.store ?? (initial.id ? "" : defaultStore));
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
   const [accountId, setAccountId] = useState(initial.account_id ? String(initial.account_id) : "");
   const [repeat, setRepeat] = useState<FinPlanned["repeat"]>(initial.repeat ?? "none");
@@ -298,6 +300,8 @@ function PlannedModal({
     if (!Number.isFinite(amt) || amt <= 0) return setError("Сумма должна быть больше нуля");
     if (!categoryId) return setError("Выберите статью");
     if (needSupplier && !supplierId) return setError("Для этой статьи выберите поставщика");
+    // у старых платежей «без магазина» можно сохранять как есть, у новых магазин обязателен
+    if (!store && !(initial.id && initial.store === null)) return setError("Выберите магазин");
     setSaving(true);
     const payload = {
       due_date: due,
@@ -331,7 +335,7 @@ function PlannedModal({
         </div>
         <CategorySelect categories={cats} value={categoryId} onChange={setCategoryId} />
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Магазин"><select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}><option value="">Общее</option>{stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}</select></Field>
+          <Field label="Магазин"><select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}><option value="">Выберите…</option>{stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}</select></Field>
           <Field label="Счёт"><select className={selectCls} value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">Определить при оплате</option>{ref_.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
         </div>
         {needSupplier && (
