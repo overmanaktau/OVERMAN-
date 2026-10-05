@@ -189,7 +189,7 @@ export function CategorySelect({
   }
 
   return (
-    <div className={`grid gap-3 ${kids.length > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
+    <div className="flex flex-col gap-3.5">
       <Field label={label}>
         <select className={selectCls} value={top} onChange={(e) => pickTop(e.target.value)}>
           <option value="">Выберите…</option>
