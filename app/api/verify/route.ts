@@ -1,62 +1,56 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getErrorMessage } from "@/lib/errors";
-import { telegramTransport } from "@/lib/coach/bot";
-import { reconcileDay, reconcileFixedMessage, reconcileMessage } from "@/lib/verify/reconcile";
-import { autoFix } from "@/lib/verify/autofix";
 import { yesterdayInAlmaty } from "@/lib/reports/sales";
+import { heldDates } from "@/lib/verify/holds";
+import { notifyOwner } from "@/lib/verify/notifyOwner";
+import { runVerification } from "@/lib/verify/run";
 
 export const maxDuration = 300;
 
-// Ночная сверка отчётов (расписание pg_cron, 03:30 по Алматы, до утренних отчётов в группы).
-// Результат уходит ТОЛЬКО главному владельцу в личку бота-помощника — и когда всё сходится,
-// и когда есть расхождение. ?dry=1 — вернуть результат и текст без отправки,
-// ?date=YYYY-MM-DD — сверить другой день, ?fix=0 — не исправлять автоматически.
-// Если нашлось расхождение, система исправляет его сама (повторный пересчёт нужного шага),
-// сверяет заново и сообщает владельцу итог. Авторизация — CRON_SECRET.
+// Ночная сверка отчётов (расписание pg_cron, 03:30 по Алматы, до утренних отчётов в группы) и
+// перепроверка задержанных отчётов (08:30, ?recheck=1). Цикл: сверка → автоисправление →
+// повторная сверка. Если расхождение исправить не удалось, неправильный отчёт в группы НЕ
+// отправляется (удержание, lib/verify/holds.ts), пока его не исправят или владелец не
+// разрешит отправить как есть. Результат — ТОЛЬКО главному владельцу в личку бота-помощника,
+// каждую ночь: «всё сходится», «исправлено», либо «отчёты задержаны» с кнопками.
+// ?dry=1 — вернуть результат и текст без изменений и отправки, ?date=YYYY-MM-DD — сверить
+// другой день, ?fix=0 — не исправлять автоматически.
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || (request.headers.get("authorization") ?? "") !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Нет доступа." }, { status: 403 });
   }
   const url = new URL(request.url);
-  const date = url.searchParams.get("date") ?? yesterdayInAlmaty();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
   const dry = url.searchParams.get("dry") === "1";
+  const recheck = url.searchParams.get("recheck") === "1";
+  const fix = url.searchParams.get("fix") !== "0";
 
-  let text: string;
-  let result: Awaited<ReturnType<typeof reconcileDay>> | null = null;
-  let fixActions: string[] = [];
+  const dateParam = url.searchParams.get("date");
+  if (dateParam && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
+
+  // Перепроверка — по всем дням, за которые отчёты сейчас задержаны.
+  let dates: string[];
   try {
-    result = await reconcileDay(date);
-    text = reconcileMessage(result);
-    // Нашли расхождение — исправляем сами (один раз), проверяем заново и сообщаем итог.
-    // Ждать подтверждения владельца не нужно: отчёты в группы всё равно уходят в 9:00.
-    if (!result.ok && !dry && url.searchParams.get("fix") !== "0") {
-      fixActions = await autoFix(url.origin, cronSecret, date, result.checks.filter((c) => !c.ok));
-      const after = await reconcileDay(date);
-      text = reconcileFixedMessage(result, after, fixActions);
-      result = after;
+    dates = recheck ? await heldDates() : [dateParam ?? yesterdayInAlmaty()];
+  } catch (e) {
+    return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
+  }
+  if (recheck && dates.length === 0) return NextResponse.json({ ok: true, recheck: true, held: 0 });
+
+  const summary: { date: string; ok: boolean; held: string[]; fixActions: string[]; sentReports: string[]; text?: string }[] = [];
+  for (const date of dates) {
+    try {
+      const r = await runVerification({ origin: url.origin, secret: cronSecret, date, fix, recheck, dry });
+      summary.push({ date, ok: r.result.ok, held: r.heldStores, fixActions: r.fixActions, sentReports: r.sentReports, ...(dry ? { text: r.text } : {}) });
+      if (!dry) await notifyOwner(r.text, r.markup);
+    } catch (e) {
+      // Если сама сверка не смогла выполниться (например, МойСклад не отвечает), владелец тоже узнаёт.
+      const text = `⚠️ <b>Сверка за ${date.split("-").reverse().join(".")} не выполнена</b>\nПричина: ${getErrorMessage(e)}\nОтчёты по этому дню не проверены.`;
+      summary.push({ date, ok: false, held: [], fixActions: [], sentReports: [], text });
+      if (!dry) await notifyOwner(text);
     }
-  } catch (e) {
-    // Если сама сверка не смогла выполниться (например, МойСклад не отвечает), владелец тоже узнаёт.
-    text = `⚠️ <b>Сверка за ${date.split("-").reverse().join(".")} не выполнена</b>\nПричина: ${getErrorMessage(e)}`;
   }
-  if (dry) return NextResponse.json({ date, dry, ok: result?.ok ?? false, checks: result?.checks ?? [], text });
-
-  const { data: owner, error } = await supabaseAdmin
-    .from("coach_users")
-    .select("telegram_chat_id")
-    .eq("is_protected", true)
-    .eq("status", "approved")
-    .maybeSingle();
-  if (error || !owner) return NextResponse.json({ error: "Не найден главный владелец в боте." }, { status: 500 });
-  try {
-    await telegramTransport.send(owner.telegram_chat_id, text);
-  } catch (e) {
-    return NextResponse.json({ error: `Не удалось отправить: ${getErrorMessage(e)}`, text, fixActions }, { status: 500 });
-  }
-  return NextResponse.json({ date, ok: result?.ok ?? false, sent: true, fixActions, text });
+  return NextResponse.json({ ok: summary.every((s) => s.ok), dry, recheck, results: summary });
 }
 
 export async function GET(request: Request) {

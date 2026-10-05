@@ -7,6 +7,7 @@ import { LEAVE_TEXT, REMOVE_KEYBOARD, isOwner, menuFor, roleLabel, type ReplyMar
 import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, setAwaiting } from "@/lib/coach/salesview";
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfCancel, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
 import { TEST_EMPLOYEE_ID, TEST_LABEL, expireTestUser, isTestExpired } from "@/lib/coach/testmode";
+import { handleVerifyCallback } from "@/lib/verify/botActions";
 import {
   AUTO_ONLY_TEXT,
   ADMIN_HELP_TEXT,
@@ -346,6 +347,13 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     // Условный режим «руководитель» — только для тестового аккаунта в этой роли.
     if (!existing || existing.status !== "approved" || !existing.is_test || existing.test_role !== "manager") return;
     await handleDemoCallback(cb.data, t, chatId, dropCurrent);
+    return;
+  }
+
+  if (cb.data.startsWith("vf:")) {
+    // Задержанные отчёты (сверка) — только главный владелец.
+    if (!existing || existing.status !== "approved" || !existing.is_protected) return;
+    await handleVerifyCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent);
     return;
   }
 

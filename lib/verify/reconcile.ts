@@ -15,7 +15,8 @@ import { escapeHtml } from "@/lib/telegram";
 import { money, num, pre } from "@/lib/reports/sales";
 
 export type CheckKind = "sales" | "consistency" | "traffic" | "snapshot" | "sync";
-export type Check = { ok: boolean; kind: CheckKind; title: string; detail?: string };
+// store — город, которого касается проверка (point_1/point_3), "all" — всех сразу, null — отчётов не касается.
+export type Check = { ok: boolean; kind: CheckKind; store: string | null; title: string; detail?: string };
 export type ReconcileResult = {
   date: string;
   ok: boolean;
@@ -74,7 +75,7 @@ function addDays(date: string, n: number): string {
 
 export async function reconcileDay(date: string): Promise<ReconcileResult> {
   const checks: Check[] = [];
-  const push = (ok: boolean, kind: CheckKind, title: string, detail?: string) => checks.push({ ok, kind, title, detail });
+  const push = (ok: boolean, kind: CheckKind, store: string | null, title: string, detail?: string) => checks.push({ ok, kind, store, title, detail });
 
   // 1. Что в нашей базе по кассам (по городам)
   const { data: regRows, error: regError } = await supabaseAdmin
@@ -106,7 +107,7 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
     if (Math.abs(a.revenue - b.revenue) > MONEY_TOLERANCE) diffs.push(`выручка: в базе ${money(a.revenue)}, в МойСклад ${money(b.revenue)}`);
     if (a.receipts !== b.receipts) diffs.push(`чеков: в базе ${num(a.receipts)}, в МойСклад ${num(b.receipts)}`);
     if (Math.abs(a.items - b.items) > 0.001) diffs.push(`товаров: в базе ${num(a.items)}, в МойСклад ${num(b.items)}`);
-    push(diffs.length === 0, "sales", `${c.name}: продажи совпадают с МойСклад`, diffs.join("; "));
+    push(diffs.length === 0, "sales", c.code, `${c.name}: продажи совпадают с МойСклад`, diffs.join("; "));
   }
 
   // 3. Внутренняя согласованность: сотрудники и товары против касс
@@ -137,17 +138,17 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
     if (Math.abs(reg.revenue - e.revenue) > MONEY_TOLERANCE) diffs.push(`выручка: кассы ${money(reg.revenue)}, сотрудники ${money(e.revenue)}`);
     if (reg.receipts !== e.receipts) diffs.push(`чеков: кассы ${num(reg.receipts)}, сотрудники ${num(e.receipts)}`);
     if (Math.abs(reg.items - e.items) > 0.001) diffs.push(`товаров: кассы ${num(reg.items)}, сотрудники ${num(e.items)}`);
-    push(diffs.length === 0, "consistency", `${c.name}: кассы равны сумме по сотрудникам`, diffs.join("; "));
+    push(diffs.length === 0, "consistency", c.code, `${c.name}: кассы равны сумме по сотрудникам`, diffs.join("; "));
 
     // Склады города; Saya Park после 21.09 в продажи не входит.
     const codes = WAREHOUSES.filter((w) => w.cityCode === c.code && !(w.code === "saya_park" && date >= SAYA_PARK_RETIRED_FROM)).map((w) => w.code);
     const productRevenue = codes.reduce((a, code) => a + (prod[code] ?? 0), 0);
     const hasProducts = codes.some((code) => prod[code] !== undefined);
     if (reg.revenue === 0 && !hasProducts) {
-      push(true, "consistency", `${c.name}: продажи по товарам равны кассам`);
+      push(true, "consistency", c.code, `${c.name}: продажи по товарам равны кассам`);
     } else {
       const ok = Math.abs(reg.revenue - productRevenue) <= 5;
-      push(ok, "consistency", `${c.name}: продажи по товарам равны кассам`, ok ? "" : `кассы ${money(reg.revenue)}, по товарам ${money(productRevenue)}`);
+      push(ok, "consistency", c.code, `${c.name}: продажи по товарам равны кассам`, ok ? "" : `кассы ${money(reg.revenue)}, по товарам ${money(productRevenue)}`);
     }
   }
 
@@ -161,7 +162,7 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
     if (date < TRAFFIC_FACT_FROM[c.code]) continue;
     const row = (trafficRows ?? []).find((r) => r.store === c.code);
     const ok = !!row && row.traffic_fact !== null;
-    push(ok, "traffic", `${c.name}: трафик за день загружен`, ok ? "" : "факта трафика за этот день нет — не отработала автозагрузка со счётчиков");
+    push(ok, "traffic", c.code, `${c.name}: трафик за день загружен`, ok ? "" : "факта трафика за этот день нет — не отработала автозагрузка со счётчиков");
   }
 
   // 5. Снимок остатков за вчера и состояние синхронизации
@@ -170,7 +171,7 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
     .select("snapshot_date", { count: "exact", head: true })
     .eq("snapshot_date", date);
   if (snapError) throw snapError;
-  push((snapRows ?? 0) > 0, "snapshot", "Снимок остатков за день сохранён", (snapRows ?? 0) > 0 ? "" : "снимка нет — оборачиваемость за этот день считается без него");
+  push((snapRows ?? 0) > 0, "snapshot", null, "Снимок остатков за день сохранён", (snapRows ?? 0) > 0 ? "" : "снимка нет — оборачиваемость за этот день считается без него");
 
   const { data: syncState } = await supabaseAdmin.from("moysklad_sync_state").select("last_synced_at, last_status, last_error").eq("id", true).maybeSingle();
   const lastSync = syncState?.last_synced_at ? new Date(syncState.last_synced_at).getTime() : 0;
@@ -179,6 +180,7 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
   push(
     syncOk,
     "sync",
+    "all",
     "Ночная синхронизация МойСклад отработала",
     syncOk ? "" : `статус «${syncState?.last_status ?? "нет данных"}»${fresh26 ? "" : ", последний запуск был больше 26 часов назад"}${syncState?.last_error ? `: ${syncState.last_error}` : ""}`
   );
@@ -191,7 +193,7 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
   };
 }
 
-function shortDate(d: string): string {
+export function shortDate(d: string): string {
   const [y, m, day] = d.split("-");
   return `${day}.${m}.${y}`;
 }
@@ -205,7 +207,7 @@ export function reconcileMessage(r: ReconcileResult): string {
     return `${title}\n${pre(lines.join("\n"))}\nПроверено: продажи с МойСклад, кассы и сотрудники, товары, возвраты, трафик, остатки, синхронизация (${r.checks.length} проверок).`;
   }
   const problems = bad.map((c) => `• <b>${escapeHtml(c.title)}</b>${c.detail ? `\n  ${escapeHtml(c.detail)}` : ""}`).join("\n");
-  return `${title}\n${pre(lines.join("\n"))}\n${problems}\n\nОстальные проверки (${r.checks.length - bad.length} из ${r.checks.length}) в порядке. Отчёты в группы уходят как обычно.`;
+  return `${title}\n${pre(lines.join("\n"))}\n${problems}\n\nОстальные проверки (${r.checks.length - bad.length} из ${r.checks.length}) в порядке.`;
 }
 
 // Сообщение после автоисправления: что было не так, что сделали и чем кончилось.
@@ -219,6 +221,14 @@ export function reconcileFixedMessage(first: ReconcileResult, after: ReconcileRe
   if (stillBad.length === 0) {
     return `🛠 <b>Сверка за ${date}: были расхождения — исправлено автоматически</b>\n${pre(lines.join("\n"))}\n<b>Что было не так:</b>\n${list(wasBad)}\n\n<b>Что сделано:</b>\n${done}\n\nПосле исправления все проверки (${after.checks.length}) сходятся. Отчёты в группы уходят как обычно.`;
   }
-  return `⚠️ <b>Сверка за ${date}: расхождения исправить автоматически не удалось</b>\n${pre(lines.join("\n"))}\n<b>Осталось:</b>\n${list(stillBad)}\n\n<b>Что сделано:</b>\n${done}\n\nОтчёты в группы уходят как обычно — цифры в них стоит перепроверить.`;
+  return `⚠️ <b>Сверка за ${date}: расхождения исправить автоматически не удалось</b>\n${pre(lines.join("\n"))}\n<b>Осталось:</b>\n${list(stillBad)}\n\n<b>Что сделано:</b>\n${done}\n\nОтчёты по этому городу в группы не отправляются, пока расхождение не исправлено.`;
+}
+
+// Строки «город: выручка · чеков · товаров» и список проблем — для сообщений владельцу.
+export function cityLines(r: ReconcileResult): string {
+  return r.cities.map((c) => `${c.name}: ${money(c.revenue)} · ${num(c.receipts)} чек. · ${num(c.items)} тов.`).join("\n");
+}
+export function problemList(checks: Check[]): string {
+  return checks.map((c) => `• <b>${escapeHtml(c.title)}</b>${c.detail ? `\n  ${escapeHtml(c.detail)}` : ""}`).join("\n");
 }
 export { addDays };
