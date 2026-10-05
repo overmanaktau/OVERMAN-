@@ -524,6 +524,14 @@ function OperationModal({
           <Field label="Дата"><input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
           <Field label="Сумма, ₸"><input className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoFocus /></Field>
         </div>
+        {kind !== "transfer" && (
+          <Field label="Магазин">
+            <select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}>
+              <option value="">Выберите…</option>
+              {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+            </select>
+          </Field>
+        )}
         <div className={kind === "transfer" ? "grid grid-cols-2 gap-3" : ""}>
           <Field label={kind === "transfer" ? "Со счёта" : kind === "income" ? "На счёт" : "Со счёта"}>
             <select className={selectCls} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
@@ -543,12 +551,6 @@ function OperationModal({
         {kind !== "transfer" && (
           <>
             <CategorySelect categories={cats} value={categoryId} onChange={setCategoryId} />
-            <Field label="Магазин">
-              <select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}>
-                <option value="">Выберите…</option>
-                {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
-              </select>
-            </Field>
             {needSupplier && (
               <Field label="Поставщик">
                 <select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
