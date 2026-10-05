@@ -131,6 +131,7 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
           {c.opiu_group ? OPIU_GROUP_LABEL[c.opiu_group] : <Chip tone="muted">не входит в ОПИУ</Chip>}
           {c.auto_tax && <span className="ml-2"><Chip tone="ok">считается автоматически</Chip></span>}
           {c.require_supplier && <span className="ml-2"><Chip tone="muted">с выбором поставщика</Chip></span>}
+          {c.require_partner && <span className="ml-2"><Chip tone="muted">с выбором партнёра</Chip></span>}
         </td>
         <td className={`${tdCls} text-right whitespace-nowrap`}>
           {canEdit && (
@@ -218,6 +219,7 @@ function CategoryModal({
   const [name, setName] = useState(initial.name ?? "");
   const [kind, setKind] = useState<"income" | "expense">(initial.kind ?? "expense");
   const [requireSupplier, setRequireSupplier] = useState(!!initial.require_supplier);
+  const [requirePartner, setRequirePartner] = useState(!!initial.require_partner);
   const [group, setGroup] = useState<OpiuGroup | "none">(initial.opiu_group ?? (initial.opiu_group === null || initial.parent_id ? "none" : "marketing"));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -230,7 +232,7 @@ function CategoryModal({
     if (!name.trim()) return setError("Укажите название");
     setSaving(true);
     setError(null);
-    const payload = { name: name.trim(), kind, opiu_group: group === "none" ? null : group, require_supplier: kind === "expense" && requireSupplier };
+    const payload = { name: name.trim(), kind, opiu_group: group === "none" ? null : group, require_supplier: kind === "expense" && requireSupplier, require_partner: requirePartner };
     const res = isNew
       ? await supabase.from("fin_categories").insert({ ...payload, parent_id: initial.parent_id ?? null, sort: Math.max(0, ...categories.filter((c) => c.parent_id === (initial.parent_id ?? null)).map((c) => c.sort)) + 10 })
       : await supabase.from("fin_categories").update(payload).eq("id", initial.id!);
@@ -283,6 +285,10 @@ function CategoryModal({
             При внесении обязательно выбирать поставщика
           </label>
         )}
+        <label className="flex items-center gap-2 text-[13px] text-ink">
+          <input type="checkbox" checked={requirePartner} onChange={(e) => setRequirePartner(e.target.checked)} />
+          При внесении обязательно выбирать партнёра
+        </label>
         <ErrorBox message={error} />
         <div className="flex gap-2 justify-between items-center flex-wrap">
           <div className="flex gap-2">

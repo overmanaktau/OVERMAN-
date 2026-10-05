@@ -527,12 +527,14 @@ function OperationModal({
   // магазин обязателен; предвыбираем его, если в шапке выбран ровно один
   const [store, setStore] = useState(initial.store ?? (initial.id ? "" : defaultStore));
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
+  const [partnerId, setPartnerId] = useState(initial.partner_id ? String(initial.partner_id) : "");
   const [comment, setComment] = useState(initial.comment ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // поставщик нужен только для статей вроде «Закуп - товар»
   const needSupplier = kind === "expense" && !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier;
+  const needPartner = kind !== "transfer" && !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_partner;
   const activeAccounts = ref_.accounts.filter((a) => a.active || String(a.id) === accountId);
   const cats = ref_.categories.filter(
     (c) => c.kind === (kind === "income" ? "income" : "expense") && ((c.active && !isAutoCategory(c, ref_.settings)) || String(c.id) === categoryId)
@@ -549,6 +551,7 @@ function OperationModal({
     // у старых операций «без магазина» можно сохранять как есть, у новых магазин обязателен
     if (kind !== "transfer" && !store && !(initial.id && initial.store === null)) return setError("Выберите магазин");
     if (needSupplier && !supplierId) return setError("Для этой статьи выберите поставщика");
+    if (needPartner && !partnerId) return setError("Для этой статьи выберите партнёра");
     setSaving(true);
     setError(null);
     const payload = {
@@ -560,7 +563,7 @@ function OperationModal({
       category_id: kind === "transfer" ? null : Number(categoryId),
       store: store || null,
       supplier_id: needSupplier && supplierId ? Number(supplierId) : null,
-      partner_id: initial.partner_id ?? null, // партнёр вносится только в разделе «Долги»
+      partner_id: needPartner && partnerId ? Number(partnerId) : null,
       comment: comment.trim() || null,
     };
     const res = initial.id
@@ -629,6 +632,14 @@ function OperationModal({
         {kind !== "transfer" && (
           <>
             <CategorySelect categories={cats} value={categoryId} onChange={setCategoryId} />
+            {needPartner && (
+              <Field label="Партнёр">
+                <select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
+                  <option value="">Выберите…</option>
+                  {ref_.partners.filter((p) => p.active || String(p.id) === partnerId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+            )}
             {needSupplier && (
               <Field label="Поставщик">
                 <select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>

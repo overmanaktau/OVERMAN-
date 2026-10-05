@@ -34,6 +34,7 @@ export type FinCategory = {
   kind: "income" | "expense";
   opiu_group: OpiuGroup | null;
   require_supplier: boolean; // при внесении обязателен выбор поставщика
+  require_partner: boolean; // при внесении обязателен выбор партнёра
   auto_tax: boolean; // сумма считается автоматически (процент от безналичных поступлений)
   active: boolean;
   sort: number;
