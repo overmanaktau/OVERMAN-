@@ -248,6 +248,8 @@ export async function fetchPaymentSummariesForRange(fromDate: string, toDate: st
 // returning it means that check no longer represents a completed sale; a
 // return from a multi-item check leaves the receipt counted, just smaller.
 export type RetailSalesReturn = {
+  id?: string;
+  moment?: string; // "2026-10-04 15:45:00.000"
   sum: number; // kopecks
   retailStore?: { name?: string; id?: string } | null;
   owner?: { name?: string; id?: string } | null;
@@ -259,6 +261,58 @@ export async function fetchRetailSalesReturnsForDate(date: string): Promise<Reta
   const { from, to } = dayWindow(date);
   const filter = `moment>=${from};moment<${to}`;
   return fetchAllPages<RetailSalesReturn>("/entity/retailsalesreturn", filter);
+}
+
+// Сколько товаров из этого чека уже вернули ДО данного возврата — за любые дни. Нужно,
+// чтобы поймать чек, который вернули по частям (в разные дни или разными документами):
+// чек аннулируется на том возврате, которым вернули последний товар.
+// Фильтра «возвраты по чеку» у МойСклад нет, поэтому берём все возвраты за окно от момента
+// чека до момента этого возврата (возврат не может быть раньше продажи) и выбираем из них
+// те, что ссылаются на этот чек.
+export async function fetchReturnedItemsBefore(
+  demandHref: string,
+  demandMoment: string,
+  ret: { id?: string; moment?: string }
+): Promise<number> {
+  if (!ret.moment || !demandMoment) return 0;
+  let total = 0;
+  for (let offset = 0; ; offset += 100) {
+    const page = await moyskladFetch("/entity/retailsalesreturn", {
+      filter: `moment>=${demandMoment};moment<=${ret.moment}`,
+      expand: "positions",
+      limit: "100",
+      offset: String(offset),
+    });
+    const rows: {
+      id: string;
+      moment?: string;
+      demand?: { meta?: { href?: string } } | null;
+      positions?: { rows?: { quantity?: number }[] };
+    }[] = page.rows ?? [];
+    for (const row of rows) {
+      if (row.demand?.meta?.href !== demandHref || !row.moment) continue;
+      const earlier = row.moment < ret.moment || (row.moment === ret.moment && !!ret.id && row.id < ret.id);
+      if (earlier) total += (row.positions?.rows ?? []).reduce((acc, p) => acc + (p.quantity ?? 0), 0);
+    }
+    if (rows.length < 100) break;
+  }
+  return total;
+}
+
+// Чек, к которому относится возврат: сколько в нём было товаров и когда он пробит.
+export async function fetchDemandInfo(demandHref: string): Promise<{ items: number; moment: string }> {
+  const url = new URL(demandHref);
+  url.searchParams.set("expand", "positions");
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${getToken()}`, Accept: "application/json;charset=utf-8" },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`МойСклад API ${res.status}: ${body.slice(0, 500)}`);
+  }
+  const demand = await res.json();
+  const rows: { quantity?: number }[] = demand.positions?.rows ?? [];
+  return { items: rows.reduce((acc, p) => acc + (p.quantity ?? 0), 0), moment: demand.moment ?? "" };
 }
 
 // A return doesn't carry its original check's total item count — only what

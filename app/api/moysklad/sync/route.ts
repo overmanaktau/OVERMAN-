@@ -13,7 +13,8 @@ export const maxDuration = 300;
 import {
   fetchRetailDemandsForDate,
   fetchRetailSalesReturnsForDate,
-  fetchDemandItemCount,
+  fetchDemandInfo,
+  fetchReturnedItemsBefore,
   totalCostKopecks,
   fetchAllProducts,
   fetchStockAll,
@@ -156,7 +157,6 @@ async function runSync(date: string) {
   // much of it was returns.
   let returnedAmount = 0;
   let voidedReceipts = 0;
-  const returnedByDemand = new Map<string, number>(); // сколько товаров уже вернули из каждого чека за этот день
   for (const r of returns) {
     const id = r.retailStore?.id;
     const name = r.retailStore?.name;
@@ -175,13 +175,12 @@ async function runSync(date: string) {
     let voidedThisReturn = false;
     const demandHref = r.demand?.meta?.href;
     if (demandHref) {
-      const originalItemCount = await fetchDemandItemCount(demandHref);
+      const { items: originalItemCount, moment: demandMoment } = await fetchDemandInfo(demandHref);
       // Чек аннулируется, если вернули всё, что в нём было: чек из одного товара или любой
       // чек, вернувшийся целиком (вернули столько товаров, сколько в нём было). Если чек
-      // вернули несколькими документами за день, аннулируется на том документе, которым
-      // вернули последний товар.
-      const returnedBefore = returnedByDemand.get(demandHref) ?? 0;
-      returnedByDemand.set(demandHref, returnedBefore + rItems);
+      // возвращали по частям — несколькими документами и даже в разные дни, — он аннулируется
+      // на том возврате, которым вернули последний товар (считаем всё, что вернули раньше).
+      const returnedBefore = await fetchReturnedItemsBefore(demandHref, demandMoment, r);
       if (originalItemCount > 0 && returnedBefore < originalItemCount && returnedBefore + rItems >= originalItemCount) {
         agg.receipts -= 1;
         agg.returnedReceipts += 1;
