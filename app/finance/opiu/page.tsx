@@ -399,7 +399,7 @@ function PlanModal({
   onSaved: () => void;
 }) {
   const [month, setMonth] = useState(defaultMonth.slice(0, 7));
-  const [scope, setScope] = useState<string>(!isAll && selected.length === 1 ? selected[0] : stores[0]?.code ?? "");
+  const [scope, setScope] = useState<string>("");
   const [values, setValues] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -413,10 +413,15 @@ function PlanModal({
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      setLoading(true);
       setError(null);
+      if (!scope) {
+        setValues({});
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       let q = supabase.from("fin_pnl_plan").select("category_id, amount").eq("plan_month", `${month}-01`);
-      q = scope ? q.eq("store", scope) : q.is("store", null);
+      q = q.eq("store", scope);
       const { data, error: e } = await q;
       if (cancelled) return;
       if (e) setError(e.message);
@@ -432,6 +437,7 @@ function PlanModal({
   }, [month, scope]);
 
   async function save() {
+    if (!scope) return setError("Выберите магазин");
     setSaving(true);
     setError(null);
     const rows = Object.entries(values)
@@ -476,6 +482,7 @@ function PlanModal({
           <Field label="Месяц"><input type="month" className={inputCls} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} /></Field>
           <Field label="Магазин">
             <select className={selectCls} value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="">Выберите…</option>
               {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
             </select>
           </Field>
@@ -483,7 +490,9 @@ function PlanModal({
         <p className="text-[12px] text-muted">
           Пустое поле — плана нет. План выручки можно не вносить: если не задан, берётся план из раздела «Продажа». Суммы в тенге за месяц; при просмотре части месяца план пересчитывается по дням.
         </p>
-        {loading ? (
+        {!scope ? (
+          <Empty>Выберите магазин, чтобы внести план</Empty>
+        ) : loading ? (
           <Empty>Загрузка…</Empty>
         ) : (
           <div className="max-h-[50vh] overflow-y-auto border border-border rounded-md px-4 py-2">

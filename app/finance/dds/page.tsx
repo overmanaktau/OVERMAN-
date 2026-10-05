@@ -273,7 +273,7 @@ function Inner() {
           initial={editing}
           ref_={ref}
           stores={stores}
-          defaultStore={!isAll && selected.length === 1 ? selected[0] : ""}
+          defaultStore=""
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);

@@ -258,7 +258,7 @@ function Inner() {
         )}
       </Card>
 
-      {editing && <PlannedModal initial={editing} ref_={ref} stores={stores} defaultStore={!isAll && selected.length === 1 ? selected[0] : ""} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {editing && <PlannedModal initial={editing} ref_={ref} stores={stores} defaultStore="" onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
       {paying && <PayModal item={paying} ref_={ref} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); load(); }} />}
     </div>
   );

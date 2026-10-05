@@ -178,7 +178,7 @@ function Inner() {
             </label>
             <button className={btnGhost} onClick={exportXls}>Скачать Excel</button>
             {canEdit && (
-              <button className={btnPrimary} onClick={() => setEditing({ kind, direction: "payable", store: !isAll && selected.length === 1 ? selected[0] : "" })}>
+              <button className={btnPrimary} onClick={() => setEditing({ kind, direction: "payable", store: "" })}>
                 + Долг
               </button>
             )}
