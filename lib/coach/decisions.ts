@@ -5,7 +5,8 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { getErrorMessage } from "@/lib/errors";
 import { LEAVE_TEXT, REMOVE_KEYBOARD, menuFor, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
-import { TEST_WARNING, testExpiresAt } from "@/lib/coach/testmode";
+import { TEST_WARNING, demoAutoMessages, testExpiresAt } from "@/lib/coach/testmode";
+import { todayInAlmaty } from "@/lib/coach/metrics";
 
 export type CoachAction = "approve" | "reject" | "disable" | "enable" | "remove";
 
@@ -164,6 +165,10 @@ export async function decideCoachUser(userId: number, action: CoachAction, decid
   try {
     const n = notice(action, user as NoticeUser);
     await t.send(user.telegram_chat_id, n.text, n.markup);
+    // Тестовому консультанту сразу показываем образцы сообщений, которые настоящий стилист получает сам.
+    if (user.is_test && user.test_role === "consultant" && (action === "approve" || action === "enable")) {
+      for (const sample of demoAutoMessages(todayInAlmaty())) await t.send(user.telegram_chat_id, sample);
+    }
   } catch (e) {
     notified = false;
     console.error("coach notice error:", getErrorMessage(e));

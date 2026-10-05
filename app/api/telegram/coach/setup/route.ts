@@ -23,10 +23,6 @@ async function handle(request: Request) {
     const commands = await coachApi("setMyCommands", {
       commands: [
         { command: "start", description: "Начать / главное меню" },
-        { command: "plan", description: "Мой план" },
-        { command: "advice", description: "Что повысить" },
-        { command: "week", description: "План на неделю" },
-        { command: "last", description: "Итоги прошлой недели" },
         { command: "help", description: "Помощь" },
       ],
     });

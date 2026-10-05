@@ -3,7 +3,18 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { REMOVE_KEYBOARD, type Transport } from "@/lib/coach/bot";
-import { type MonthStatus, type WeekSummary, addDays, daysBetween, monthEndOf, monthStartOf, mondayOf } from "@/lib/coach/metrics";
+import {
+  type EmployeeRef,
+  type MonthStatus,
+  type WeekSummary,
+  addDays,
+  buildAdvice,
+  daysBetween,
+  monthEndOf,
+  monthStartOf,
+  mondayOf,
+} from "@/lib/coach/metrics";
+import { dailyMessage, weekMessage } from "@/lib/coach/messages";
 
 export const TEST_EMPLOYEE_ID = "test-employee";
 export const TEST_MINUTES = 30;
@@ -41,6 +52,19 @@ export async function expireTestUser(u: { id: number; telegram_chat_id: number }
 }
 
 // ---- Условные данные для тестового консультанта ----
+
+// Образцы того, что настоящий стилист-консультант получает сам: утреннее сообщение после смены
+// и понедельничное с планом на неделю и итогами прошлой. Показываются сразу после подтверждения.
+export function demoAutoMessages(today: string): string[] {
+  const emp: EmployeeRef = { id: TEST_EMPLOYEE_ID, name: "Тестовый консультант", store: "point_1" };
+  const s = demoMonthStatus(today);
+  const yesterday = addDays(today, -1);
+  const day = { date: yesterday, revenue: 235_000, receipts: 7, items: 14 };
+  return [
+    `${TEST_BANNER}<b>Образец: сообщение, которое приходит утром после смены</b>\n\n${dailyMessage(emp, yesterday, day, s, buildAdvice(s))}`,
+    `${TEST_BANNER}<b>Образец: сообщение, которое приходит по понедельникам</b>\n\n${weekMessage(emp, demoWeekSummary(today), true)}`,
+  ];
+}
 
 export function demoMonthStatus(today: string): MonthStatus {
   const plan = 6_000_000;

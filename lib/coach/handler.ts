@@ -6,17 +6,17 @@ import { fetchActiveEmployees } from "@/lib/moysklad";
 import { LEAVE_TEXT, REMOVE_KEYBOARD, isOwner, menuFor, roleLabel, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, setAwaiting } from "@/lib/coach/salesview";
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfCancel, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
+import { TEST_EMPLOYEE_ID, TEST_LABEL, expireTestUser, isTestExpired } from "@/lib/coach/testmode";
 import {
-  TEST_BANNER,
-  TEST_EMPLOYEE_ID,
-  TEST_LABEL,
-  demoMonthStatus,
-  demoWeekSummary,
-  expireTestUser,
-  isTestExpired,
-} from "@/lib/coach/testmode";
-import { ADMIN_HELP_TEXT, CITY_ADMIN_HELP_TEXT, OWNER_VIEW_HELP_TEXT, HELP_MENU_TEXT, HELP_TEXT, SUPPORT_TEXT, adviceMessage, lastWeekMessage, myPlanMessage, weekMessage } from "@/lib/coach/messages";
-import { type EmployeeRef, buildAdvice, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
+  AUTO_ONLY_TEXT,
+  ADMIN_HELP_TEXT,
+  CITY_ADMIN_HELP_TEXT,
+  OWNER_VIEW_HELP_TEXT,
+  HELP_MENU_TEXT,
+  HELP_TEXT,
+  SUPPORT_TEXT,
+} from "@/lib/coach/messages";
+import { type EmployeeRef } from "@/lib/coach/metrics";
 
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
 export type TgUpdate = {
@@ -142,34 +142,30 @@ function statusText(u: CoachUser): string {
   }
 }
 
+// Текст, когда просят то, чего у этой роли нет: консультанту — объяснение, что бот присылает всё сам;
+// администраторам — подсказка про кнопки.
+function noSuchSection(u: CoachUser): string {
+  return u.is_admin ? "Выберите раздел кнопкой внизу или нажмите «Помощь»." : AUTO_ONLY_TEXT;
+}
+
 async function showSection(t: Transport, u: CoachUser, section: string) {
-  const emp = refOf(u);
-  const today = todayInAlmaty();
   const menu = menuFor(u);
   if (u.is_test) {
     await showTestSection(t, u, section, menu);
     return;
   }
-  // У администратора нет ни плана, ни личных продаж — только управление сотрудниками.
-  if (u.is_admin && ["plan", "advice", "week", "last"].includes(section)) {
-    await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
-  } else if (section === "plan") {
-    await t.send(u.telegram_chat_id, myPlanMessage(emp, await monthStatus(emp, today)), menu);
-  } else if (section === "advice") {
-    const s = await monthStatus(emp, today);
-    await t.send(u.telegram_chat_id, adviceMessage(emp, s, buildAdvice(s)), menu);
-  } else if (section === "week") {
-    await t.send(u.telegram_chat_id, weekMessage(emp, await weekSummary(emp, today)), menu);
-  } else if (section === "last") {
-    await t.send(u.telegram_chat_id, lastWeekMessage(emp, await weekSummary(emp, today)), menu);
+  // Стилисту-консультанту план и продажи по запросу не показываются — бот сам присылает сообщения
+  // (утром после смены и по понедельникам); у администраторов личных продаж нет вовсе.
+  if (["plan", "advice", "week", "last"].includes(section)) {
+    await t.send(u.telegram_chat_id, noSuchSection(u), menu);
   } else if (section === "requests" || section === "staff") {
     // «Сотрудники» смотрят владельцы; «Заявки» — только главный владелец.
     if (section === "requests" ? u.is_protected : isOwner(u)) {
       await sendStaffList(t, u.telegram_chat_id, section === "requests" ? "pending" : "all", adminStores(u));
-    } else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
+    } else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
   } else if (section === "sales") {
     if (u.is_admin) await sendSalesStart(t, u.telegram_chat_id, adminStores(u));
-    else await t.send(u.telegram_chat_id, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
+    else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
   } else if (section === "exit") {
     if (u.is_protected) await t.send(u.telegram_chat_id, "Главный владелец не может выйти из аккаунта.", menu);
     else await t.send(u.telegram_chat_id, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
@@ -178,13 +174,12 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
   }
 }
 
-// Тестовый аккаунт: те же разделы, но на условных данных. Консультант видит свои
-// разделы, руководитель — «Заявки» и «Сотрудники» на выдуманных сотрудниках.
+// Тестовый аккаунт. Консультант видит то же, что настоящий: только «Помощь» и «Выход», а
+// сообщения бот присылает сам (образцы — сразу после подтверждения, см. sendDemoAutoMessages).
+// Руководитель — «Заявки», «Сотрудники» и «Продажи» на выдуманных данных.
 async function showTestSection(t: Transport, u: CoachUser, section: string, menu: ReplyMarkup) {
   const chat = u.telegram_chat_id;
   const manager = u.test_role === "manager";
-  const today = todayInAlmaty();
-  const emp: EmployeeRef = { id: TEST_EMPLOYEE_ID, name: "Тестовый консультант", store: u.store };
   if (section === "help") {
     await t.send(chat, HELP_MENU_TEXT, HELP_MENU_KEYBOARD);
   } else if (section === "exit") {
@@ -193,17 +188,8 @@ async function showTestSection(t: Transport, u: CoachUser, section: string, menu
     await sendDemoStaffList(t, chat, section === "requests" ? "pending" : "all");
   } else if (manager && section === "sales") {
     await sendDemoSales(t, chat);
-  } else if (!manager && section === "plan") {
-    await t.send(chat, TEST_BANNER + myPlanMessage(emp, demoMonthStatus(today)), menu);
-  } else if (!manager && section === "advice") {
-    const s = demoMonthStatus(today);
-    await t.send(chat, TEST_BANNER + adviceMessage(emp, s, buildAdvice(s)), menu);
-  } else if (!manager && section === "week") {
-    await t.send(chat, TEST_BANNER + weekMessage(emp, demoWeekSummary(today)), menu);
-  } else if (!manager && section === "last") {
-    await t.send(chat, TEST_BANNER + lastWeekMessage(emp, demoWeekSummary(today)), menu);
   } else {
-    await t.send(chat, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menu);
+    await t.send(chat, manager ? "Выберите раздел кнопкой внизу или нажмите «Помощь»." : AUTO_ONLY_TEXT, menu);
   }
 }
 
@@ -265,7 +251,11 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
       user.telegram_chat_id = chatId;
     }
     if (text === "/start") {
-      await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}!${user.is_admin && !user.is_test ? ` Ваша роль: ${roleLabel(user)}.` : ""} Выберите раздел внизу.`, menuFor(user));
+      await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}!${user.is_admin && !user.is_test ? ` Ваша роль: ${roleLabel(user)}.` : ""} ${
+        user.is_admin || (user.is_test && user.test_role === "manager")
+          ? "Выберите раздел внизу."
+          : "Бот сам будет присылать вам итоги и план: утром после смены и по понедельникам."
+      }`, menuFor(user));
       return;
     }
     const section = SECTION_BY_TEXT[text.toLowerCase()];
@@ -278,7 +268,7 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
     if (section) {
       await showSection(t, user, section);
     } else {
-      await t.send(chatId, "Выберите раздел кнопкой внизу или нажмите «Помощь».", menuFor(user));
+      await t.send(chatId, user.is_test && user.test_role === "manager" ? "Выберите раздел кнопкой внизу или нажмите «Помощь»." : noSuchSection(user), menuFor(user));
     }
     return;
   }
