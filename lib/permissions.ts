@@ -6,6 +6,7 @@
 export const PERMISSION_GROUPS = [
   { key: "warehouse", label: "Склад" },
   { key: "marketing", label: "Маркетинг" },
+  { key: "finance", label: "Финансы" },
   { key: "settings", label: "Настройки" },
   { key: "general", label: "Общие" },
 ] as const;
@@ -32,6 +33,13 @@ export const SECTIONS = [
   { key: "marketing.publications", label: "Публикации", group: "marketing", hasEdit: true },
   { key: "marketing.instagram_target", label: "Инстаграм таргет", group: "marketing", hasEdit: false },
   { key: "marketing.competitor_analytics", label: "Аналитика конкурентов", group: "marketing", hasEdit: true },
+
+  { key: "finance.overview", label: "Финансы: Обзор", group: "finance", hasEdit: false },
+  { key: "finance.dds", label: "Финансы: ДДС (движение денег)", group: "finance", hasEdit: true },
+  { key: "finance.opiu", label: "Финансы: ОПИУ (прибыли и убытки, план)", group: "finance", hasEdit: true },
+  { key: "finance.debts", label: "Финансы: Долги", group: "finance", hasEdit: true },
+  { key: "finance.planned", label: "Финансы: Плановые платежи", group: "finance", hasEdit: true },
+  { key: "finance.settings", label: "Финансы: Настройки (статьи, счета, партнёры, поставщики)", group: "finance", hasEdit: true },
 
   { key: "settings.employees", label: "Сотрудники и доступы", group: "settings", hasEdit: true },
   { key: "settings.passwords", label: "Пароли", group: "settings", hasEdit: true },

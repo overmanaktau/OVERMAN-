@@ -25,6 +25,15 @@ const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] 
   { label: "Внесение данных", href: "/marketing/data-entry", section: "marketing.data_entry" },
 ];
 
+const FINANCE_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
+  { label: "Обзор", href: "/finance", section: "finance.overview" },
+  { label: "ДДС", href: "/finance/dds", section: "finance.dds" },
+  { label: "ОПИУ", href: "/finance/opiu", section: "finance.opiu" },
+  { label: "Долги", href: "/finance/debts", section: "finance.debts" },
+  { label: "Плановые платежи", href: "/finance/planned", section: "finance.planned" },
+  { label: "Настройки", href: "/finance/settings", section: "finance.settings" },
+];
+
 const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "Сотрудники и доступы", href: "/settings/employees", section: "settings.employees" },
   { label: "Пароли", href: "/settings/passwords", section: "settings.passwords" },
@@ -138,6 +147,9 @@ export default function Sidebar() {
   const visibleMarketing = MARKETING_SUBMENU.filter(
     (item) => isAdmin || permissions[item.section]?.canView
   );
+  const visibleFinance = FINANCE_SUBMENU.filter(
+    (item) => isAdmin || permissions[item.section]?.canView
+  );
   const visibleSettings = SETTINGS_SUBMENU.filter(
     (item) => isAdmin || permissions[item.section]?.canView
   );
@@ -172,6 +184,7 @@ export default function Sidebar() {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
     warehouse: WAREHOUSE_SUBMENU.some((item) => pathname === item.href),
     marketing: MARKETING_SUBMENU.some((item) => pathname === item.href),
+    finance: FINANCE_SUBMENU.some((item) => pathname === item.href),
     settings: SETTINGS_SUBMENU.some((item) => pathname === item.href),
   }));
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -359,12 +372,43 @@ export default function Sidebar() {
           </GuardedLink>
         )}
 
-        <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium mt-1">
-          <span>Финансы</span>
-          <span className="text-[10px] tracking-wide uppercase text-sidebarMuted border border-[#3A362E] rounded-full px-2 py-0.5">
-            скоро
-          </span>
-        </div>
+        {visibleFinance.length > 0 ? (
+          <div className="flex flex-col gap-0.5 mt-1">
+            <button
+              type="button"
+              onClick={() => toggleGroup("finance")}
+              className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sidebarText text-sm font-semibold"
+            >
+              <span>Финансы</span>
+              <span className="text-sidebarMuted text-[10px]">{openGroups.finance ? "▲" : "▼"}</span>
+            </button>
+            {openGroups.finance && (
+              <div className="flex flex-col gap-0.5 pl-[30px] ml-[21px] border-l border-[#2C2820]">
+                {visibleFinance.map((item) => {
+                  const active = pathname === item.href;
+                  return (
+                    <GuardedLink
+                      key={item.href}
+                      href={item.href}
+                      onNavigate={closeMobile}
+                      className={`px-3 py-2 rounded-md text-[13px] ${
+                        active
+                          ? "bg-accent text-paper font-semibold"
+                          : "text-[#A39D8E] font-medium hover:text-sidebarText"
+                      }`}
+                    >
+                      {item.label}
+                    </GuardedLink>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[#6B6455] text-sm font-medium mt-1">
+            <span>Финансы</span>
+          </div>
+        )}
 
         {visibleSettings.length > 0 && (
           <div className="flex flex-col gap-0.5 mt-1">
