@@ -280,6 +280,9 @@ export type PnlRow = {
   fact: number;
   plan: number;
   goodWhenHigh: boolean;
+  // знаменатель для «% от выручки»; по умолчанию — выручка периода
+  // (у себестоимости по категории товара — выручка этой же категории)
+  base?: number;
   note?: string;
   categoryId?: number;
   children?: PnlRow[];
@@ -287,9 +290,23 @@ export type PnlRow = {
 
 export type PnlResult = {
   rows: PnlRow[];
+  expenses: { fact: number; plan: number }; // все расходные статьи вместе
   uncategorized: number; // операции без статьи (не вошли в ОПИУ)
   costMissing: boolean;
 };
+
+// Продажи по категориям товара (верхняя папка МойСклад) за месяц.
+export type CatSalesRow = { month: string; category: string; revenue: number; cost: number };
+
+const CATEGORY_ORDER = ["Плечевой", "Верхний", "Брюки", "Обувь", "Аксессуары", "Бесплатно", "Заморозка"];
+function categoryRank(name: string): number {
+  if (name === "Без категории") return 99;
+  const i = CATEGORY_ORDER.indexOf(name);
+  return i === -1 ? CATEGORY_ORDER.length : i;
+}
+
+// Названия папок в МойСклад → как они названы в ОПИУ владельца.
+const CATEGORY_ALIAS: Record<string, string> = { Плечевая: "Плечевой", Верхняя: "Верхний", Бесплатный: "Бесплатно" };
 
 function overlapFraction(month: string, start: string, end: string): number {
   const mStart = parseYmd(month);
@@ -310,11 +327,11 @@ export function computePnl(input: {
   categories: FinCategory[];
   operations: FinOperation[];
   sales: SalesDay[];
+  catSales: CatSalesRow[];
   plan: PnlPlanRow[];
   salesPlan: SalesPlanRow[];
 }): PnlResult {
-  const { start, end, isAllStores, selectedStores, settings, categories, operations, sales, plan, salesPlan } = input;
-  const catById = new Map(categories.map((c) => [c.id, c]));
+  const { start, end, isAllStores, selectedStores, settings, categories, operations, sales, catSales, plan, salesPlan } = input;
   const storeOk = (store: string | null) => (isAllStores ? true : store !== null && selectedStores.includes(store));
 
   // факт по статьям из операций
@@ -357,12 +374,23 @@ export function computePnl(input: {
     salesPlanSum += Number(p.sales_plan ?? 0) * overlapFraction(p.plan_month, start, end);
   }
 
-  const top = (group: OpiuGroup) =>
-    categories.filter((c) => c.parent_id === null && c.opiu_group === group && (c.active || (factByCat.get(c.id) ?? 0) > 0));
+  // выручка и себестоимость по категориям товара
+  const mFrom = monthStart(start);
+  const catAgg = new Map<string, { revenue: number; cost: number }>();
+  for (const r of catSales) {
+    if (r.month < mFrom || r.month > end) continue;
+    const a = catAgg.get(r.category) ?? { revenue: 0, cost: 0 };
+    a.revenue += Number(r.revenue);
+    a.cost += Number(r.cost);
+    catAgg.set(r.category, a);
+  }
+  const catNames = [...catAgg.keys()].sort((a, b) => categoryRank(a) - categoryRank(b) || a.localeCompare(b, "ru"));
+  const catRevenueSum = [...catAgg.values()].reduce((a, v) => a + v.revenue, 0);
+  const catCostSum = [...catAgg.values()].reduce((a, v) => a + v.cost, 0);
 
-  function buildGroup(group: OpiuGroup, goodWhenHigh: boolean): PnlRow[] {
+  function groupLines(group: OpiuGroup, goodWhenHigh: boolean, parents: FinCategory[]): PnlRow[] {
     const rows: PnlRow[] = [];
-    for (const parent of top(group)) {
+    for (const parent of parents) {
       const kids = categories.filter((c) => c.parent_id === parent.id);
       const children: PnlRow[] = [];
       let fact = factByCat.get(parent.id) ?? 0;
@@ -382,78 +410,119 @@ export function computePnl(input: {
         children.unshift({ key: `c${parent.id}o`, label: "Без подпункта", level: 1, type: "line", fact: own, plan: ownPlan, goodWhenHigh, categoryId: parent.id });
       }
       if (fact === 0 && planSum === 0) continue; // пустые статьи в отчёте не показываем
-      rows.push({ key: `c${parent.id}`, label: parent.name, level: 0, type: "line", fact, plan: planSum, goodWhenHigh, categoryId: parent.id, children });
+      rows.push({
+        key: `c${parent.id}`,
+        label: parent.name,
+        level: 0,
+        type: children.length > 0 ? "subtotal" : "line",
+        fact,
+        plan: planSum,
+        goodWhenHigh,
+        categoryId: parent.id,
+        children,
+      });
     }
     return rows;
   }
+  const topOf = (group: OpiuGroup) => categories.filter((c) => c.parent_id === null && c.opiu_group === group);
   const sum = (rows: PnlRow[], f: "fact" | "plan") => rows.reduce((a, r) => a + r[f], 0);
 
   const out: PnlRow[] = [];
 
   // Выручка
-  let revenueRows: PnlRow[];
+  const revManual = groupLines("revenue", true, topOf("revenue"));
+  const revPlanManual = sum(revManual, "plan");
+  let revenue: PnlRow;
   if (settings.auto_revenue) {
-    const planned = sum(buildGroup("revenue", true), "plan");
-    revenueRows = [
-      {
-        key: "rev-ms",
-        label: "Выручка от продаж (МойСклад)",
-        level: 0,
-        type: "line",
-        fact: salesRevenue,
-        plan: planned > 0 ? planned : salesPlanSum,
-        goodWhenHigh: true,
-        note: planned > 0 ? undefined : "план — из раздела «Продажа»",
-      },
-    ];
+    const kids: PnlRow[] = catNames.map((n) => ({ key: `rev-${n}`, label: n, level: 1, type: "line", fact: catAgg.get(n)!.revenue, plan: 0, goodWhenHigh: true }));
+    const diff = salesRevenue - catRevenueSum;
+    if (kids.length > 0 && Math.abs(diff) > 1) kids.push({ key: "rev-rest", label: "Прочее", level: 1, type: "line", fact: diff, plan: 0, goodWhenHigh: true });
+    revenue = {
+      key: "h-rev",
+      label: "Выручка",
+      level: 0,
+      type: "subtotal",
+      fact: salesRevenue,
+      plan: revPlanManual > 0 ? revPlanManual : salesPlanSum,
+      goodWhenHigh: true,
+      note: revPlanManual > 0 || salesPlanSum === 0 ? undefined : "план — из раздела «Продажа»",
+      children: kids,
+    };
   } else {
-    revenueRows = buildGroup("revenue", true);
+    revenue = { key: "h-rev", label: "Выручка", level: 0, type: "subtotal", fact: sum(revManual, "fact"), plan: revPlanManual, goodWhenHigh: true, children: revManual };
   }
-  out.push({ key: "h-rev", label: "Выручка", level: 0, type: "subtotal", fact: sum(revenueRows, "fact"), plan: sum(revenueRows, "plan"), goodWhenHigh: true, children: revenueRows });
-  const revenue = out[out.length - 1];
+  out.push(revenue);
 
   // Себестоимость
-  let cogsRows: PnlRow[];
+  const cogsManual = groupLines("cogs", false, topOf("cogs"));
+  let cogs: PnlRow;
   if (settings.auto_cogs) {
-    const planned = sum(buildGroup("cogs", false), "plan");
-    cogsRows = [
-      { key: "cogs-ms", label: "Себестоимость проданного (МойСклад)", level: 0, type: "line", fact: salesCost, plan: planned, goodWhenHigh: false, note: costMissing ? "в части дней себестоимость не загружена" : undefined },
-    ];
+    const kids: PnlRow[] = catNames.map((n) => ({
+      key: `cogs-${n}`,
+      label: n,
+      level: 1,
+      type: "line",
+      fact: catAgg.get(n)!.cost,
+      plan: 0,
+      goodWhenHigh: false,
+      base: catAgg.get(n)!.revenue,
+    }));
+    const diff = salesCost - catCostSum;
+    if (kids.length > 0 && Math.abs(diff) > 1) kids.push({ key: "cogs-rest", label: "Прочее", level: 1, type: "line", fact: diff, plan: 0, goodWhenHigh: false });
+    cogs = {
+      key: "h-cogs",
+      label: "Себестоимость",
+      level: 0,
+      type: "subtotal",
+      fact: salesCost,
+      plan: sum(cogsManual, "plan"),
+      goodWhenHigh: false,
+      note: costMissing ? "в части дней себестоимость не загружена" : undefined,
+      children: kids,
+    };
   } else {
-    cogsRows = buildGroup("cogs", false);
+    cogs = { key: "h-cogs", label: "Себестоимость", level: 0, type: "subtotal", fact: sum(cogsManual, "fact"), plan: sum(cogsManual, "plan"), goodWhenHigh: false, children: cogsManual };
   }
-  const cogs: PnlRow = { key: "h-cogs", label: "Себестоимость", level: 0, type: "subtotal", fact: sum(cogsRows, "fact"), plan: sum(cogsRows, "plan"), goodWhenHigh: false, children: cogsRows };
   out.push(cogs);
 
   const gross: PnlRow = { key: "gross", label: "Валовая прибыль", level: 0, type: "total", fact: revenue.fact - cogs.fact, plan: revenue.plan - cogs.plan, goodWhenHigh: true };
   out.push(gross);
 
-  const opexRows = buildGroup("opex", false);
-  const opex: PnlRow = { key: "h-opex", label: "Операционные расходы", level: 0, type: "subtotal", fact: sum(opexRows, "fact"), plan: sum(opexRows, "plan"), goodWhenHigh: false, children: opexRows };
-  out.push(opex);
+  // Прочие доходы
+  const oiRows = groupLines("other_income", true, topOf("other_income"));
+  const oi = { fact: sum(oiRows, "fact"), plan: sum(oiRows, "plan") };
+  for (const r of oiRows) out.push(r);
 
-  const operating: PnlRow = { key: "operating", label: "Операционная прибыль", level: 0, type: "total", fact: gross.fact - opex.fact, plan: gross.plan - opex.plan, goodWhenHigh: true };
-  out.push(operating);
-
-  const oiRows = buildGroup("other_income", true);
-  const oeRows = buildGroup("other_expense", false);
-  const taxRows = buildGroup("tax", false);
-  const oi: PnlRow = { key: "h-oi", label: "Прочие доходы", level: 0, type: "subtotal", fact: sum(oiRows, "fact"), plan: sum(oiRows, "plan"), goodWhenHigh: true, children: oiRows };
-  const oe: PnlRow = { key: "h-oe", label: "Прочие расходы", level: 0, type: "subtotal", fact: sum(oeRows, "fact"), plan: sum(oeRows, "plan"), goodWhenHigh: false, children: oeRows };
-  const tax: PnlRow = { key: "h-tax", label: "Налоги", level: 0, type: "subtotal", fact: sum(taxRows, "fact"), plan: sum(taxRows, "plan"), goodWhenHigh: false, children: taxRows };
-  out.push(oi, oe, tax);
+  // Расходы — каждая статья верхнего уровня своей строкой, в порядке из «Настроек → Статьи»
+  const expenseGroups: OpiuGroup[] = ["opex", "other_expense", "tax"];
+  const expenseTops = categories.filter((c) => c.parent_id === null && c.opiu_group !== null && expenseGroups.includes(c.opiu_group));
+  const expenseRows: PnlRow[] = [];
+  for (const t of expenseTops) expenseRows.push(...groupLines(t.opiu_group as OpiuGroup, false, [t]));
+  for (const r of expenseRows) out.push(r);
+  const expenses = { fact: sum(expenseRows, "fact"), plan: sum(expenseRows, "plan") };
 
   out.push({
     key: "net",
-    label: "Чистая прибыль",
+    label: "Рентабельность (чистая прибыль)",
     level: 0,
     type: "total",
-    fact: operating.fact + oi.fact - oe.fact - tax.fact,
-    plan: operating.plan + oi.plan - oe.plan - tax.plan,
+    fact: gross.fact + oi.fact - expenses.fact,
+    plan: gross.plan + oi.plan - expenses.plan,
     goodWhenHigh: true,
   });
 
-  return { rows: out, uncategorized, costMissing };
+  return { rows: out, expenses, uncategorized, costMissing };
+}
+
+export async function loadCatSales(start: string, end: string, cities: string[] | null): Promise<CatSalesRow[]> {
+  const { data, error } = await supabase.rpc("finance_sales_by_category", { p_from: start, p_to: end, p_cities: cities });
+  if (error) return []; // нет доступа или функция недоступна — разбивка по категориям просто не показывается
+  return ((data ?? []) as { month: string; category: string; revenue: number; cost: number }[]).map((r) => ({
+    month: r.month,
+    category: CATEGORY_ALIAS[r.category] ?? r.category,
+    revenue: Number(r.revenue ?? 0),
+    cost: Number(r.cost ?? 0),
+  }));
 }
 
 export async function loadSales(start: string, end: string): Promise<SalesDay[]> {
@@ -469,10 +538,11 @@ export async function loadSales(start: string, end: string): Promise<SalesDay[]>
   return rows.map((r) => ({ sale_date: r.sale_date, revenue: Number(r.revenue), cost: r.cost === null ? null : Number(r.cost), store: r.moysklad_registers?.store ?? null }));
 }
 
-export async function loadPnlInputs(start: string, end: string) {
+export async function loadPnlInputs(start: string, end: string, cities: string[] | null) {
   const months = monthsInRange(start, end);
-  const [sales, plan, salesPlan, ops] = await Promise.all([
+  const [sales, catSales, plan, salesPlan, ops] = await Promise.all([
     loadSales(start, end),
+    loadCatSales(start, end, cities),
     supabase.from("fin_pnl_plan").select("plan_month, category_id, store, amount").in("plan_month", months),
     supabase.from("sales_plan_monthly").select("store, plan_month, sales_plan").in("plan_month", months),
     fetchAll<FinOperation>((from, to) =>
@@ -482,6 +552,7 @@ export async function loadPnlInputs(start: string, end: string) {
   // план ОПИУ и план продаж видны не всем — без доступа просто пусто
   return {
     sales,
+    catSales,
     plan: ((plan.error ? [] : (plan.data ?? [])) as PnlPlanRow[]).map((p) => ({ ...p, amount: Number(p.amount) })),
     salesPlan: (salesPlan.error ? [] : (salesPlan.data ?? [])) as SalesPlanRow[],
     operations: ops.map((o) => ({ ...o, amount: Number(o.amount) })),
@@ -523,6 +594,19 @@ export async function loadDebts(): Promise<{ debts: FinDebt[]; payments: FinDebt
     debts: ((d.data ?? []) as FinDebt[]).map((x) => ({ ...x, amount: Number(x.amount) })),
     payments: ((p.data ?? []) as FinDebtPayment[]).map((x) => ({ ...x, amount: Number(x.amount) })),
   };
+}
+
+// Чей это долг относительно выбранных магазинов: payable — мы должны,
+// receivable — нам должны, null — не считаем (расчёты между своими магазинами
+// при выборе «все магазины» или когда оба магазина выбраны).
+export function debtDirection(d: FinDebt, isAll: boolean, selected: string[]): "payable" | "receivable" | null {
+  if (d.kind !== "store_store") return d.direction;
+  if (isAll) return null;
+  const debtorIn = selected.includes(d.store);
+  const creditorIn = d.counterparty_store !== null && selected.includes(d.counterparty_store);
+  if (debtorIn && !creditorIn) return "payable";
+  if (creditorIn && !debtorIn) return "receivable";
+  return null;
 }
 
 export function debtRemaining(debt: FinDebt, payments: FinDebtPayment[]): number {

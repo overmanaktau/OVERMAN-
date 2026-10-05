@@ -143,12 +143,6 @@ function Inner() {
       <PageTitle
         title="Плановые платежи"
         subtitle="Будущие оплаты и ожидаемые поступления: аренда, зарплата, налоги, поставщики. По ним строится прогноз остатка денег — видно заранее, где не хватит."
-        actions={
-          <>
-            <button className={btnGhost} onClick={exportXls}>Скачать Excel</button>
-            {canEdit && <button className={btnPrimary} onClick={() => setEditing({ due_date: addDays(today, 1), kind: "expense", repeat: "none" })}>+ Платёж</button>}
-          </>
-        }
       />
       <ErrorBox message={error ?? ref.error} />
 
@@ -194,10 +188,14 @@ function Inner() {
       <Card
         title="Платежи"
         right={
-          <div className="flex gap-1 bg-paper border border-border rounded-md p-1">
-            {([["planned", "Ожидают"], ["paid", "Оплачены"], ["all", "Все"]] as const).map(([k, l]) => (
-              <button key={k} onClick={() => setFilter(k)} className={`text-[12px] rounded px-3 py-1 ${filter === k ? "bg-accent text-paper font-bold" : "text-muted font-medium"}`}>{l}</button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex gap-1 bg-paper border border-border rounded-md p-1">
+              {([["planned", "Ожидают"], ["paid", "Оплачены"], ["all", "Все"]] as const).map(([k, l]) => (
+                <button key={k} onClick={() => setFilter(k)} className={`text-[12px] rounded px-3 py-1 ${filter === k ? "bg-accent text-paper font-bold" : "text-muted font-medium"}`}>{l}</button>
+              ))}
+            </div>
+            <button className={btnGhost} onClick={exportXls}>Скачать Excel</button>
+            {canEdit && <button className={btnPrimary} onClick={() => setEditing({ due_date: addDays(today, 1), kind: "expense", repeat: "none" })}>+ Платёж</button>}
           </div>
         }
       >

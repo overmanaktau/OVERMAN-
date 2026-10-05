@@ -9,6 +9,7 @@ import KpiCard from "@/components/KpiCard";
 import {
   addDays,
   daysBetween,
+  debtDirection,
   debtRemaining,
   fmtDate,
   fmtMoney,
@@ -107,23 +108,23 @@ function Inner() {
   const withRemaining = useMemo(() => scoped.map((d) => ({ d, rem: debtRemaining(d, payments) })), [scoped, payments]);
   const open = withRemaining.filter((x) => x.rem > 0);
 
-  const sum = (rows: typeof open, dir: FinDebt["direction"]) => rows.filter((x) => x.d.direction === dir).reduce((a, x) => a + x.rem, 0);
+  const sum = (rows: typeof open, dir: FinDebt["direction"]) => rows.filter((x) => debtDirection(x.d, isAll, selected) === dir).reduce((a, x) => a + x.rem, 0);
   const weOwe = sum(open, "payable");
   const owedToUs = sum(open, "receivable");
   const overdue = open.filter((x) => x.d.due_date && x.d.due_date < today);
-  const overdueSum = overdue.filter((x) => x.d.direction === "payable").reduce((a, x) => a + x.rem, 0);
+  const overdueSum = overdue.filter((x) => debtDirection(x.d, isAll, selected) === "payable").reduce((a, x) => a + x.rem, 0);
 
   const list = withRemaining
     .filter((x) => x.d.kind === kind && (showClosed || x.rem > 0))
     .sort((a, b) => (a.d.due_date ?? "9999").localeCompare(b.d.due_date ?? "9999"));
 
   function counterparty(d: FinDebt): string {
-    if (d.kind === "store_store") return storeName(d.counterparty_store);
+    if (d.kind === "store_store") return "";
     if (d.kind === "supplier") return supplierName(d.supplier_id);
     return partnerName(d.partner_id);
   }
   function directionLabel(d: FinDebt): string {
-    if (d.kind === "store_store") return d.direction === "payable" ? `${storeName(d.store)} должен` : `${storeName(d.store)} должны`;
+    if (d.kind === "store_store") return `${storeName(d.store)} → ${storeName(d.counterparty_store)}`;
     return d.direction === "payable" ? "Мы должны" : "Нам должны";
   }
 
@@ -156,12 +157,6 @@ function Inner() {
       <PageTitle
         title="Долги"
         subtitle="Что должны мы и что должны нам: между магазинами, поставщикам и партнёрам. Остаток считается по погашениям; погашение можно сразу провести в ДДС."
-        actions={
-          <>
-            <button className={btnGhost} onClick={exportXls}>Скачать Excel</button>
-            {canEdit && <button className={btnPrimary} onClick={() => setEditing({ kind, direction: "payable", debt_date: todayYmd(), store: !isAll && selected.length === 1 ? selected[0] : "" })}>+ Долг</button>}
-          </>
-        }
       />
       <ErrorBox message={error ?? ref.error} />
 
@@ -177,9 +172,17 @@ function Inner() {
       <Card
         title={KIND_LABEL[kind]}
         right={
-          <label className="flex items-center gap-2 text-[12px] text-muted">
-            <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} /> показывать закрытые
-          </label>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-[12px] text-muted">
+              <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} /> показывать закрытые
+            </label>
+            <button className={btnGhost} onClick={exportXls}>Скачать Excel</button>
+            {canEdit && (
+              <button className={btnPrimary} onClick={() => setEditing({ kind, direction: "payable", store: !isAll && selected.length === 1 ? selected[0] : "" })}>
+                + Долг
+              </button>
+            )}
+          </div>
         }
       >
         {loading ? (
@@ -191,7 +194,7 @@ function Inner() {
             <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  <th className={thCls}>Направление</th>
+                  <th className={thCls}>Долг</th>
                   <th className={thCls}>Контрагент</th>
                   <th className={thCls}>Дата</th>
                   <th className={thCls}>Срок</th>
@@ -227,7 +230,7 @@ function Inner() {
                           )}
                         </td>
                         <td className={`${tdCls} text-right num`}>{fmtMoney(d.amount)}</td>
-                        <td className={`${tdCls} text-right num font-bold ${rem === 0 ? "text-accent" : d.direction === "payable" ? "text-[#A34B36]" : "text-accent"}`}>
+                        <td className={`${tdCls} text-right num font-bold ${rem === 0 ? "text-accent" : debtDirection(d, isAll, selected) === "payable" ? "text-[#A34B36]" : debtDirection(d, isAll, selected) === "receivable" ? "text-accent" : ""}`}>
                           {rem === 0 ? "закрыт" : fmtMoney(rem)}
                         </td>
                         <td className={`${tdCls} text-right whitespace-nowrap`}>
@@ -305,14 +308,14 @@ function DebtModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [kind, setKind] = useState<Kind>(initial.kind ?? "store_store");
-  const [direction, setDirection] = useState<FinDebt["direction"]>(initial.direction ?? "payable");
+  const kind: Kind = initial.kind ?? "store_store";
+  // между магазинами: store — кто должен, counterparty_store — кому должен
+  const [direction, setDirection] = useState<FinDebt["direction"]>(kind === "store_store" ? "payable" : initial.direction ?? "payable");
   const [store, setStore] = useState(initial.store ?? "");
   const [otherStore, setOtherStore] = useState(initial.counterparty_store ?? "");
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
   const [partnerId, setPartnerId] = useState(initial.partner_id ? String(initial.partner_id) : "");
   const [amount, setAmount] = useState(initial.amount ? String(initial.amount) : "");
-  const [date, setDate] = useState(initial.debt_date ?? todayYmd());
   const [due, setDue] = useState(initial.due_date ?? "");
   const [comment, setComment] = useState(initial.comment ?? "");
   const [saving, setSaving] = useState(false);
@@ -321,16 +324,16 @@ function DebtModal({
   function onSupplier(id: string) {
     setSupplierId(id);
     const terms = ref_.suppliers.find((s) => String(s.id) === id)?.payment_terms_days;
-    if (terms && !due) setDue(addDays(date, terms));
+    if (terms && !due) setDue(addDays(initial.debt_date ?? todayYmd(), terms));
   }
 
   async function save() {
     const amt = Number(amount.replace(/\s/g, "").replace(",", "."));
-    if (!Number.isFinite(amt) || amt <= 0) return setError("Сумма должна быть больше нуля");
-    if (!store) return setError("Выберите магазин");
-    if (kind === "store_store" && (!otherStore || otherStore === store)) return setError("Выберите второй магазин");
+    if (!store) return setError(kind === "store_store" ? "Выберите, какой магазин должен" : "Выберите магазин");
+    if (kind === "store_store" && !otherStore) return setError("Выберите, какому магазину должен");
     if (kind === "supplier" && !supplierId) return setError("Выберите поставщика");
     if (kind === "partner" && !partnerId) return setError("Выберите партнёра");
+    if (!Number.isFinite(amt) || amt <= 0) return setError("Укажите сумму");
     setSaving(true);
     const payload = {
       kind,
@@ -340,7 +343,7 @@ function DebtModal({
       supplier_id: kind === "supplier" ? Number(supplierId) : null,
       partner_id: kind === "partner" ? Number(partnerId) : null,
       amount: amt,
-      debt_date: date,
+      debt_date: initial.debt_date ?? todayYmd(),
       due_date: due || null,
       comment: comment.trim() || null,
     };
@@ -350,72 +353,92 @@ function DebtModal({
     onSaved();
   }
 
-  const storeLabel = kind === "store_store" ? (direction === "payable" ? "Магазин-должник" : "Магазин-кредитор") : "Магазин";
+  const storeSelect = (value: string, onChange: (v: string) => void, exclude?: string) => (
+    <select className={selectCls} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Выберите…</option>
+      {stores
+        .filter((s) => s.code !== exclude)
+        .map((s) => (
+          <option key={s.code} value={s.code}>
+            {s.name}
+          </option>
+        ))}
+    </select>
+  );
+
   return (
-    <Modal title={initial.id ? "Изменить долг" : "Новый долг"} onClose={onClose}>
+    <Modal title={`${initial.id ? "Изменить долг" : "Новый долг"} — ${KIND_LABEL[kind].toLowerCase()}`} onClose={onClose}>
       <div className="flex flex-col gap-3.5">
-        <Field label="Вид">
-          <select className={selectCls} value={kind} onChange={(e) => setKind(e.target.value as Kind)} disabled={!!initial.id}>
-            {(Object.keys(KIND_LABEL) as Kind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-          </select>
-        </Field>
-        <Field label="Направление">
-          <select className={selectCls} value={direction} onChange={(e) => setDirection(e.target.value as FinDebt["direction"])}>
-            {kind === "store_store" ? (
-              <>
-                <option value="payable">Первый магазин должен второму</option>
-                <option value="receivable">Второй магазин должен первому</option>
-              </>
-            ) : (
-              <>
-                <option value="payable">Магазин должен {kind === "supplier" ? "поставщику" : "партнёру"}</option>
-                <option value="receivable">{kind === "supplier" ? "Поставщик" : "Партнёр"} должен магазину</option>
-              </>
-            )}
-          </select>
-        </Field>
-        <div className={kind === "store_store" ? "grid grid-cols-2 gap-3" : ""}>
-          <Field label={kind === "store_store" ? "Первый магазин" : storeLabel}>
-            <select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}>
-              <option value="">Выберите…</option>
-              {stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
-            </select>
-          </Field>
-          {kind === "store_store" && (
-            <Field label="Второй магазин">
-              <select className={selectCls} value={otherStore} onChange={(e) => setOtherStore(e.target.value)}>
-                <option value="">Выберите…</option>
-                {stores.filter((s) => s.code !== store).map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
-              </select>
-            </Field>
-          )}
-        </div>
-        {kind === "supplier" && (
-          <Field label="Поставщик">
-            <select className={selectCls} value={supplierId} onChange={(e) => onSupplier(e.target.value)}>
-              <option value="">Выберите…</option>
-              {ref_.suppliers.filter((s) => s.active || String(s.id) === supplierId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </Field>
+        {kind === "store_store" ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Кто должен">{storeSelect(store, setStore, otherStore)}</Field>
+            <Field label="Кому должен">{storeSelect(otherStore, setOtherStore, store)}</Field>
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-1.5 bg-paper border border-border rounded-md p-1 w-fit">
+              {([["payable", "Мы должны"], ["receivable", "Нам должны"]] as const).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setDirection(k)}
+                  className={`text-[13px] rounded px-4 py-1.5 ${direction === k ? "bg-accent text-paper font-bold" : "text-muted font-medium"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Магазин">{storeSelect(store, setStore)}</Field>
+              {kind === "supplier" ? (
+                <Field label="Поставщик">
+                  <select className={selectCls} value={supplierId} onChange={(e) => onSupplier(e.target.value)}>
+                    <option value="">Выберите…</option>
+                    {ref_.suppliers
+                      .filter((s) => s.active || String(s.id) === supplierId)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              ) : (
+                <Field label="Партнёр">
+                  <select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
+                    <option value="">Выберите…</option>
+                    {ref_.partners
+                      .filter((p) => p.active || String(p.id) === partnerId)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              )}
+            </div>
+          </>
         )}
-        {kind === "partner" && (
-          <Field label="Партнёр">
-            <select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
-              <option value="">Выберите…</option>
-              {ref_.partners.filter((p) => p.active || String(p.id) === partnerId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Сумма, ₸">
+            <input className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
           </Field>
-        )}
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Сумма, ₸"><input className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" /></Field>
-          <Field label="Дата долга"><input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-          <Field label="Срок оплаты"><input type="date" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} /></Field>
+          <Field label="Оплатить до" hint="можно не указывать">
+            <input type="date" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} />
+          </Field>
         </div>
-        <Field label="Комментарий"><input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Накладная, договор, за что долг" /></Field>
+        <Field label="Комментарий">
+          <input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="За что долг, номер накладной" />
+        </Field>
         <ErrorBox message={error} />
         <div className="flex gap-2 justify-end">
-          <button className={btnGhost} onClick={onClose}>Отмена</button>
-          <button className={btnPrimary} onClick={save} disabled={saving}>Сохранить</button>
+          <button className={btnGhost} onClick={onClose}>
+            Отмена
+          </button>
+          <button className={btnPrimary} onClick={save} disabled={saving}>
+            Сохранить
+          </button>
         </div>
       </div>
     </Modal>

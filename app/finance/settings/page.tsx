@@ -85,6 +85,26 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
 
   const tops = categories.filter((c) => c.parent_id === null);
 
+  // Поменять статью местами с соседней (в пределах одного пункта): порядок
+  // пересчитывается у всех «соседей», чтобы не зависеть от прежних номеров.
+  async function move(c: FinCategory, dir: -1 | 1) {
+    setError(null);
+    const siblings = categories
+      .filter((x) => x.parent_id === c.parent_id)
+      .sort((a, b) => a.sort - b.sort || a.id - b.id);
+    const i = siblings.findIndex((x) => x.id === c.id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= siblings.length) return;
+    [siblings[i], siblings[j]] = [siblings[j], siblings[i]];
+    const results = await Promise.all(
+      siblings.map((x, idx) => (x.sort === (idx + 1) * 10 ? null : supabase.from("fin_categories").update({ sort: (idx + 1) * 10 }).eq("id", x.id)))
+    );
+    const failed = results.find((r) => r && r.error);
+    if (failed?.error) setError(failed.error.message);
+    reload();
+  }
+  const siblingsOf = (c: FinCategory) => categories.filter((x) => x.parent_id === c.parent_id).sort((a, b) => a.sort - b.sort || a.id - b.id);
+
   async function toggleActive(c: FinCategory) {
     setError(null);
     const { error: e } = await supabase.from("fin_categories").update({ active: !c.active }).eq("id", c.id);
@@ -111,6 +131,8 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
         <td className={`${tdCls} text-right whitespace-nowrap`}>
           {canEdit && (
             <div className="flex gap-1.5 justify-end">
+              <button className={btnGhost} title="Выше" disabled={siblingsOf(c)[0]?.id === c.id} onClick={() => move(c, -1)}>▲</button>
+              <button className={btnGhost} title="Ниже" disabled={siblingsOf(c).slice(-1)[0]?.id === c.id} onClick={() => move(c, 1)}>▼</button>
               {level === 0 && (
                 <button className={btnGhost} onClick={() => setEditing({ cat: { parent_id: c.id, kind: c.kind, opiu_group: c.opiu_group, active: true }, isNew: true })}>
                   + подпункт
@@ -196,7 +218,7 @@ function CategoryModal({
     setError(null);
     const payload = { name: name.trim(), kind, opiu_group: group === "none" ? null : group };
     const res = isNew
-      ? await supabase.from("fin_categories").insert({ ...payload, parent_id: initial.parent_id ?? null, sort: categories.length * 10 + 10 })
+      ? await supabase.from("fin_categories").insert({ ...payload, parent_id: initial.parent_id ?? null, sort: Math.max(0, ...categories.filter((c) => c.parent_id === (initial.parent_id ?? null)).map((c) => c.sort)) + 10 })
       : await supabase.from("fin_categories").update(payload).eq("id", initial.id!);
     setSaving(false);
     if (res.error) return setError(res.error.message);

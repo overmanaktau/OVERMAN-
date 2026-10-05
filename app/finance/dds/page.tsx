@@ -155,18 +155,18 @@ function Inner() {
       <PageTitle
         title="ДДС — движение денег"
         subtitle="Все поступления и выплаты по счетам и кассам. Продажи из МойСклад сюда не попадают — они в ОПИУ; здесь вносятся реальные деньги: инкассация, оплаты, переводы."
-        actions={
-          <>
-            <button className={btnGhost} onClick={exportExcel}>Скачать Excel</button>
-            {canEdit && (
-              <button className={btnPrimary} onClick={() => setEditing({ op_date: todayYmd(), kind: "expense" })}>
-                + Операция
-              </button>
-            )}
-          </>
-        }
       />
-      <PeriodTabs preset={period.preset} onPreset={period.setPreset} from={period.from} onFrom={period.setFrom} to={period.to} onTo={period.setTo} />
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <PeriodTabs preset={period.preset} onPreset={period.setPreset} from={period.from} onFrom={period.setFrom} to={period.to} onTo={period.setTo} />
+        <div className="flex items-center gap-2">
+          <button className={btnGhost} onClick={exportExcel}>Скачать Excel</button>
+          {canEdit && (
+            <button className={btnPrimary} onClick={() => setEditing({ op_date: todayYmd(), kind: "expense" })}>
+              + Операция
+            </button>
+          )}
+        </div>
+      </div>
       <ErrorBox message={error ?? ref.error} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">

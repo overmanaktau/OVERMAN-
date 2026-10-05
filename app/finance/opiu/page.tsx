@@ -9,12 +9,18 @@ import KpiCard from "@/components/KpiCard";
 import {
   computePnl,
   fmtMoney,
+  fmtNum,
   fmtPct,
   loadPnlInputs,
+  monthLabel,
   monthStart,
+  monthsInRange,
   OPIU_GROUP_LABEL,
+  todayYmd,
   useFinanceRef,
   usePeriod,
+  ymd,
+  parseYmd,
   type FinCategory,
   type OpiuGroup,
   type PnlResult,
@@ -29,6 +35,7 @@ import {
   Modal,
   PageTitle,
   PeriodTabs,
+  Tabs,
   btnGhost,
   btnPrimary,
   inputCls,
@@ -46,55 +53,124 @@ export default function OpiuPage() {
   );
 }
 
+type View = "months" | "planfact";
+type Inputs = Awaited<ReturnType<typeof loadPnlInputs>>;
+
+function lastDayOf(month: string): string {
+  const d = parseYmd(month);
+  return ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+}
+
+function pctText(p: number | null): string {
+  if (p === null || !Number.isFinite(p)) return "";
+  return `${p.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
 function Inner() {
   const ref = useFinanceRef();
   const { stores } = useAuth();
   const { selected, isAll } = useStoreSelection();
   const { canEdit } = useSection("finance.opiu");
-  const period = usePeriod("month");
+  const period = usePeriod("year");
   const { start, end } = period.range;
 
-  const [result, setResult] = useState<PnlResult | null>(null);
+  const [view, setView] = useState<View>("months");
+  const [inputs, setInputs] = useState<Inputs | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [planOpen, setPlanOpen] = useState(false);
   const [tick, setTick] = useState(0);
 
-  const load = useCallback(async () => {
-    if (ref.loading) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const inputs = await loadPnlInputs(start, end);
-      setResult(
-        computePnl({
-          start,
-          end,
-          isAllStores: isAll,
-          selectedStores: selected,
-          settings: ref.settings,
-          categories: ref.categories,
-          ...inputs,
-        })
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось построить отчёт");
-    } finally {
-      setLoading(false);
-    }
-  }, [start, end, isAll, selected, ref.loading, ref.settings, ref.categories]);
-
   useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await loadPnlInputs(start, end, isAll ? null : selected);
+        if (!cancelled) setInputs(data);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Не удалось построить отчёт");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
     load();
-  }, [load, tick]);
+    return () => {
+      cancelled = true;
+    };
+  }, [start, end, isAll, selected, tick]);
 
-  const byKey = useMemo(() => new Map((result?.rows ?? []).map((r) => [r.key, r])), [result]);
+  const calc = useCallback(
+    (s: string, e: string): PnlResult | null =>
+      inputs
+        ? computePnl({ start: s, end: e, isAllStores: isAll, selectedStores: selected, settings: ref.settings, categories: ref.categories, ...inputs })
+        : null,
+    [inputs, isAll, selected, ref.settings, ref.categories]
+  );
+
+  const total = useMemo(() => (ref.loading ? null : calc(start, end)), [calc, start, end, ref.loading]);
+
+  // колонки-месяцы (будущие месяцы не показываем — по ним ещё нет факта)
+  const months = useMemo(() => {
+    const all = monthsInRange(start, end);
+    const upto = all.filter((m) => m <= monthStart(todayYmd()));
+    return upto.length > 0 ? upto : all;
+  }, [start, end]);
+
+  const columns = useMemo(() => {
+    if (ref.loading) return [];
+    return months.map((m) => {
+      const cs = m > start ? m : start;
+      const ce = lastDayOf(m) < end ? lastDayOf(m) : end;
+      const res = calc(cs, ce);
+      const rev = res?.rows.find((r) => r.key === "h-rev")?.fact ?? 0;
+      const cells = new Map<string, { fact: number; pct: number | null }>();
+      const walk = (rows: PnlRow[]) => {
+        for (const r of rows) {
+          const base = r.base ?? rev;
+          cells.set(r.key, { fact: r.fact, pct: base > 0 ? (r.fact / base) * 100 : null });
+          if (r.children) walk(r.children);
+        }
+      };
+      if (res) walk(res.rows);
+      return { month: m, cells };
+    });
+  }, [months, calc, start, end, ref.loading]);
+
+  const totalCells = useMemo(() => {
+    const cells = new Map<string, { fact: number; pct: number | null }>();
+    const rev = total?.rows.find((r) => r.key === "h-rev")?.fact ?? 0;
+    const walk = (rows: PnlRow[]) => {
+      for (const r of rows) {
+        const base = r.base ?? rev;
+        cells.set(r.key, { fact: r.fact, pct: base > 0 ? (r.fact / base) * 100 : null });
+        if (r.children) walk(r.children);
+      }
+    };
+    if (total) walk(total.rows);
+    return cells;
+  }, [total]);
+
+  const byKey = useMemo(() => new Map((total?.rows ?? []).map((r) => [r.key, r])), [total]);
   const revenue = byKey.get("h-rev");
   const gross = byKey.get("gross");
   const net = byKey.get("net");
   const marginPct = revenue && revenue.fact > 0 && gross ? (gross.fact / revenue.fact) * 100 : null;
   const netPct = revenue && revenue.fact > 0 && net ? (net.fact / revenue.fact) * 100 : null;
+  const expensesPct = revenue && revenue.fact > 0 && total ? (total.expenses.fact / revenue.fact) * 100 : null;
+
+  const isOpen = (r: PnlRow) => open[r.key] ?? true;
+
+  function flat(rows: PnlRow[], depth = 0): { row: PnlRow; depth: number }[] {
+    const out: { row: PnlRow; depth: number }[] = [];
+    for (const r of rows) {
+      out.push({ row: r, depth });
+      if (r.children && r.children.length > 0 && isOpen(r)) out.push(...flat(r.children, depth + 1));
+    }
+    return out;
+  }
 
   function pct(row: PnlRow): number | null {
     return row.plan > 0 ? (row.fact / row.plan) * 100 : null;
@@ -109,105 +185,163 @@ function Inner() {
   }
 
   function exportXls() {
-    if (!result) return;
-    const out: (string | number)[][] = [];
-    const push = (r: PnlRow, indent: string) => {
-      out.push([indent + r.label, Math.round(r.plan), Math.round(r.fact), Math.round(r.fact - r.plan), r.plan > 0 ? Math.round((r.fact / r.plan) * 100) : ""]);
-      for (const c of r.children ?? []) {
-        push(c, indent + "   ");
-      }
-    };
-    result.rows.forEach((r) => push(r, ""));
-    downloadExcel(`ОПИУ_${start}_${end}`, ["Статья", "План", "Факт", "Отклонение", "% выполнения"], out);
+    if (!total) return;
+    if (view === "months") {
+      const headers = ["Статья", ...columns.flatMap((c) => [monthLabel(c.month), "%"]), "Итого", "%"];
+      const rows = flat(total.rows).map(({ row, depth }) => [
+        "   ".repeat(depth) + row.label,
+        ...columns.flatMap((c) => {
+          const cell = c.cells.get(row.key);
+          return [Math.round(cell?.fact ?? 0), cell?.pct === null || cell === undefined ? "" : Math.round(cell.pct * 100) / 100];
+        }),
+        Math.round(totalCells.get(row.key)?.fact ?? 0),
+        totalCells.get(row.key)?.pct === null || !totalCells.get(row.key) ? "" : Math.round((totalCells.get(row.key)!.pct as number) * 100) / 100,
+      ]);
+      downloadExcel(`ОПИУ_по_месяцам_${start}_${end}`, headers, rows);
+      return;
+    }
+    const out: (string | number)[][] = flat(total.rows).map(({ row, depth }) => [
+      "   ".repeat(depth) + row.label,
+      Math.round(row.plan),
+      Math.round(row.fact),
+      Math.round(row.fact - row.plan),
+      row.plan > 0 ? Math.round((row.fact / row.plan) * 100) : "",
+    ]);
+    downloadExcel(`ОПИУ_план_факт_${start}_${end}`, ["Статья", "План", "Факт", "Отклонение", "% выполнения"], out);
   }
 
   const storeScope = isAll ? "по всей компании" : selected.length === 1 ? stores.find((s) => s.code === selected[0])?.name ?? "" : `по выбранным магазинам (${selected.length})`;
 
-  function renderRows(rows: PnlRow[]): React.ReactNode[] {
-    const out: React.ReactNode[] = [];
-    for (const r of rows) {
-      const hasKids = (r.children?.length ?? 0) > 0;
-      const expanded = open[r.key] ?? r.type === "subtotal";
-      const isTotal = r.type === "total";
-      const isSub = r.type === "subtotal";
-      const p = pct(r);
-      const diff = r.fact - r.plan;
-      out.push(
-        <tr key={r.key} className={isTotal ? "bg-paper" : ""}>
-          <td className={`${tdCls} ${isTotal ? "font-bold" : isSub ? "font-bold" : r.level ? "pl-9 text-muted" : "pl-6 font-medium"}`}>
-            {hasKids ? (
-              <button type="button" onClick={() => setOpen((s) => ({ ...s, [r.key]: !expanded }))} className="mr-1.5 text-[10px] text-muted w-3 inline-block">
-                {expanded ? "▼" : "▶"}
-              </button>
-            ) : (
-              <span className="inline-block w-[18px]" />
-            )}
-            {r.label}
-            {r.note && <span className="ml-2 text-[11px] text-mutedLight font-normal">({r.note})</span>}
-          </td>
-          <td className={`${tdCls} text-right num ${isTotal || isSub ? "font-bold" : ""}`}>{r.plan ? fmtMoney(r.plan) : <span className="text-mutedLight">—</span>}</td>
-          <td className={`${tdCls} text-right num ${isTotal || isSub ? "font-bold" : ""}`}>{fmtMoney(r.fact)}</td>
-          <td className={`${tdCls} text-right num ${r.plan ? "" : "text-mutedLight"}`}>
-            {r.plan ? `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${fmtMoney(Math.abs(diff))}` : "—"}
-          </td>
-          <td className={`${tdCls} text-right num font-bold ${tone(r)}`}>{fmtPct(p)}</td>
-        </tr>
-      );
-      if (hasKids && expanded) out.push(...renderRows(r.children!));
-    }
-    return out;
-  }
+  const rowStyle = (r: PnlRow) => (r.type === "total" ? "bg-paper font-bold" : r.type === "subtotal" ? "font-bold" : "");
+  const labelCell = (r: PnlRow, depth: number) => {
+    const kids = (r.children?.length ?? 0) > 0;
+    return (
+      <>
+        <span style={{ paddingLeft: depth * 18 }} className="inline-flex items-center">
+          {kids ? (
+            <button type="button" onClick={() => setOpen((s) => ({ ...s, [r.key]: !isOpen(r) }))} className="mr-1.5 text-[10px] text-muted w-3 inline-block">
+              {isOpen(r) ? "▼" : "▶"}
+            </button>
+          ) : (
+            <span className="inline-block w-[18px]" />
+          )}
+          <span className={depth > 0 ? "text-muted font-normal" : ""}>{r.label}</span>
+        </span>
+        {r.note && <span className="ml-2 text-[11px] text-mutedLight font-normal">({r.note})</span>}
+      </>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-5">
       <PageTitle
         title="ОПИУ — прибыли и убытки"
-        subtitle={`План и факт по статьям ${storeScope}. Выручка и себестоимость берутся из МойСклад, расходы — из ДДС по статьям с группой ОПИУ.`}
-        actions={
-          <>
-            <button className={btnGhost} onClick={exportXls} disabled={!result}>Скачать Excel</button>
-            {canEdit && <button className={btnPrimary} onClick={() => setPlanOpen(true)}>Внести план</button>}
-          </>
-        }
+        subtitle={`Отчёт ${storeScope}. Выручка и себестоимость — из МойСклад по категориям товара, расходы — из ДДС по статьям.`}
       />
-      <PeriodTabs preset={period.preset} onPreset={period.setPreset} from={period.from} onFrom={period.setFrom} to={period.to} onTo={period.setTo} />
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <PeriodTabs preset={period.preset} onPreset={period.setPreset} from={period.from} onFrom={period.setFrom} to={period.to} onTo={period.setTo} />
+        <div className="flex items-center gap-2">
+          <button className={btnGhost} onClick={exportXls} disabled={!total}>Скачать Excel</button>
+          {canEdit && <button className={btnPrimary} onClick={() => setPlanOpen(true)}>Внести план</button>}
+        </div>
+      </div>
       <ErrorBox message={error ?? ref.error} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <KpiCard label="Выручка" value={revenue ? fmtMoney(revenue.fact) : "—"} note={revenue?.plan ? `${fmtPct(pct(revenue))} от плана` : "план не задан"} noteTone={revenue && pct(revenue) !== null && (pct(revenue) as number) >= 100 ? "positive" : "neutral"} />
+        <KpiCard label="Выручка" value={revenue ? fmtMoney(revenue.fact) : "—"} note={view === "planfact" && revenue?.plan ? `${fmtPct(pct(revenue))} от плана` : "за выбранный период"} />
         <KpiCard label="Валовая прибыль" value={gross ? fmtMoney(gross.fact) : "—"} note={marginPct === null ? undefined : `маржа ${marginPct.toFixed(1)}%`} />
-        <KpiCard label="Операционная прибыль" value={byKey.get("operating") ? fmtMoney(byKey.get("operating")!.fact) : "—"} valueTone={(byKey.get("operating")?.fact ?? 0) < 0 ? "negative" : "neutral"} />
-        <KpiCard label="Чистая прибыль" value={net ? fmtMoney(net.fact) : "—"} valueTone={(net?.fact ?? 0) < 0 ? "negative" : "positive"} note={netPct === null ? undefined : `${netPct.toFixed(1)}% от выручки`} />
+        <KpiCard label="Расходы" value={total ? fmtMoney(total.expenses.fact) : "—"} note={expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от выручки`} />
+        <KpiCard label="Рентабельность" value={net ? fmtMoney(net.fact) : "—"} valueTone={(net?.fact ?? 0) < 0 ? "negative" : "positive"} note={netPct === null ? undefined : `${netPct.toFixed(1)}% от выручки`} />
       </div>
+
+      <Tabs value={view} onChange={setView} items={[{ key: "months", label: "По месяцам" }, { key: "planfact", label: "План и факт" }]} />
 
       <Card>
         {loading || ref.loading ? (
           <Empty>Загрузка…</Empty>
-        ) : !result ? (
+        ) : !total ? (
           <Empty>Нет данных</Empty>
-        ) : (
+        ) : view === "months" ? (
           <>
+            <div className="flex justify-end mb-2 gap-2">
+              <button className={btnGhost} onClick={() => setOpen(Object.fromEntries(total.rows.flatMap((r) => [[r.key, true]])))}>Развернуть всё</button>
+              <button className={btnGhost} onClick={() => setOpen(Object.fromEntries(total.rows.flatMap((r) => [[r.key, false]])))}>Свернуть всё</button>
+            </div>
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse min-w-[560px]">
+              <table className="border-collapse min-w-full">
                 <thead>
                   <tr>
-                    <th className={thCls}>Статья</th>
-                    <th className={`${thCls} text-right`}>План</th>
-                    <th className={`${thCls} text-right`}>Факт</th>
-                    <th className={`${thCls} text-right`}>Отклонение</th>
-                    <th className={`${thCls} text-right`}>% плана</th>
+                    <th className={`${thCls} sticky left-0 bg-surface z-10 min-w-[240px]`}>Статья</th>
+                    {columns.map((c) => (
+                      <th key={c.month} colSpan={2} className={`${thCls} text-center`}>{monthLabel(c.month)}</th>
+                    ))}
+                    <th colSpan={2} className={`${thCls} text-center`}>Итого</th>
                   </tr>
                 </thead>
-                <tbody>{renderRows(result.rows)}</tbody>
+                <tbody>
+                  {flat(total.rows).map(({ row, depth }) => {
+                    const style = rowStyle(row);
+                    const sticky = row.type === "total" ? "bg-paper" : "bg-surface";
+                    return (
+                      <tr key={row.key} className={style}>
+                        <td className={`${tdCls} sticky left-0 z-10 whitespace-nowrap ${sticky}`}>{labelCell(row, depth)}</td>
+                        {columns.map((c) => {
+                          const cell = c.cells.get(row.key);
+                          return [
+                            <td key={`${c.month}a`} className={`${tdCls} text-right num whitespace-nowrap ${depth > 0 ? "text-muted" : ""}`}>{cell && cell.fact !== 0 ? fmtNum(cell.fact) : <span className="text-mutedLight">—</span>}</td>,
+                            <td key={`${c.month}p`} className={`${tdCls} text-right num whitespace-nowrap text-[12px] text-muted pl-1`}>{cell && cell.fact !== 0 ? pctText(cell.pct) : ""}</td>,
+                          ];
+                        })}
+                        <td className={`${tdCls} text-right num whitespace-nowrap font-semibold border-l border-border`}>{(totalCells.get(row.key)?.fact ?? 0) !== 0 ? fmtNum(totalCells.get(row.key)!.fact) : <span className="text-mutedLight">—</span>}</td>
+                        <td className={`${tdCls} text-right num whitespace-nowrap text-[12px] text-muted pl-1`}>{(totalCells.get(row.key)?.fact ?? 0) !== 0 ? pctText(totalCells.get(row.key)!.pct) : ""}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
               </table>
             </div>
-            <div className="mt-3 flex flex-col gap-1 text-[12px] text-muted">
-              <div>% плана: доходы — чем выше, тем лучше; расходы — чем ниже, тем лучше. Для расходов выше 100% плана цифра краснеет.</div>
-              {!isAll && <div>При выборе отдельных магазинов общие расходы без магазина в отчёт не входят.</div>}
-              {result.uncategorized > 0 && <div className="text-[#B8752E]">Операций без статьи за период: {result.uncategorized} — они не вошли в ОПИУ. Укажите статью в ДДС.</div>}
-              {result.costMissing && <div className="text-[#B8752E]">В некоторых днях МойСклад не отдал себестоимость — прибыль может быть завышена.</div>}
-            </div>
           </>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse min-w-[560px]">
+              <thead>
+                <tr>
+                  <th className={thCls}>Статья</th>
+                  <th className={`${thCls} text-right`}>План</th>
+                  <th className={`${thCls} text-right`}>Факт</th>
+                  <th className={`${thCls} text-right`}>Отклонение</th>
+                  <th className={`${thCls} text-right`}>% плана</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flat(total.rows).map(({ row, depth }) => {
+                  const diff = row.fact - row.plan;
+                  const p = pct(row);
+                  return (
+                    <tr key={row.key} className={rowStyle(row)}>
+                      <td className={`${tdCls} whitespace-nowrap`}>{labelCell(row, depth)}</td>
+                      <td className={`${tdCls} text-right num`}>{row.plan ? fmtMoney(row.plan) : <span className="text-mutedLight">—</span>}</td>
+                      <td className={`${tdCls} text-right num`}>{fmtMoney(row.fact)}</td>
+                      <td className={`${tdCls} text-right num ${row.plan ? "" : "text-mutedLight"}`}>{row.plan ? `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${fmtMoney(Math.abs(diff))}` : "—"}</td>
+                      <td className={`${tdCls} text-right num font-bold ${tone(row)}`}>{fmtPct(p)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {total && !loading && (
+          <div className="mt-3 flex flex-col gap-1 text-[12px] text-muted">
+            {view === "months" ? (
+              <div>Серым справа от суммы — процент от выручки месяца. У себестоимости по категории — процент от выручки этой категории.</div>
+            ) : (
+              <div>% плана: доходы — чем выше, тем лучше; расходы — чем ниже, тем лучше. План вносится кнопкой «Внести план».</div>
+            )}
+            {!isAll && <div>При выборе отдельных магазинов общие расходы без магазина в отчёт не входят.</div>}
+            {total.uncategorized > 0 && <div className="text-[#B8752E]">Операций без статьи за период: {total.uncategorized} — они не вошли в ОПИУ. Укажите статью в ДДС.</div>}
+            {total.costMissing && <div className="text-[#B8752E]">В некоторых днях МойСклад не отдал себестоимость — прибыль может быть завышена.</div>}
+          </div>
         )}
       </Card>
 

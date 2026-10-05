@@ -11,6 +11,7 @@ import {
   categoryPath,
   computePnl,
   daysBetween,
+  debtDirection,
   debtRemaining,
   fmtDate,
   fmtMoney,
@@ -65,7 +66,7 @@ function Inner() {
           loadAllOperations().catch(() => [] as FinOperation[]),
           loadDebts().catch(() => ({ debts: [] as FinDebt[], payments: [] as FinDebtPayment[] })),
           loadPlanned().catch(() => [] as FinPlanned[]),
-          loadPnlInputs(start, end),
+          loadPnlInputs(start, end, isAll ? null : selected),
         ]);
         if (cancelled) return;
         setOps(o);
@@ -97,21 +98,17 @@ function Inner() {
     .filter((d) => isAll || selected.includes(d.store) || (d.counterparty_store !== null && selected.includes(d.counterparty_store)))
     .map((d) => ({ d, rem: debtRemaining(d, payments) }))
     .filter((x) => x.rem > 0);
-  const weOwe = debtRows.filter((x) => x.d.direction === "payable").reduce((s, x) => s + x.rem, 0);
-  const owedToUs = debtRows.filter((x) => x.d.direction === "receivable").reduce((s, x) => s + x.rem, 0);
+  const weOwe = debtRows.filter((x) => debtDirection(x.d, isAll, selected) === "payable").reduce((s, x) => s + x.rem, 0);
+  const owedToUs = debtRows.filter((x) => debtDirection(x.d, isAll, selected) === "receivable").reduce((s, x) => s + x.rem, 0);
 
   const revenue = pnl?.rows.find((r) => r.key === "h-rev");
   const net = pnl?.rows.find((r) => r.key === "net");
   const gross = pnl?.rows.find((r) => r.key === "gross");
-  const opex = pnl?.rows.find((r) => r.key === "h-opex");
 
   // топ расходов периода по статьям (из ОПИУ: операционные, прочие, налоги)
   const topExpenses = useMemo(() => {
     const lines: { label: string; v: number }[] = [];
-    for (const key of ["h-opex", "h-oe", "h-tax"]) {
-      const sec = pnl?.rows.find((r) => r.key === key);
-      for (const c of sec?.children ?? []) if (c.fact > 0) lines.push({ label: c.label, v: c.fact });
-    }
+    for (const r of pnl?.rows ?? []) if (r.key.startsWith("c") && r.fact > 0) lines.push({ label: r.label, v: r.fact });
     return lines.sort((a, b) => b.v - a.v).slice(0, 6);
   }, [pnl]);
   const maxExpense = Math.max(1, ...topExpenses.map((x) => x.v));
@@ -124,7 +121,7 @@ function Inner() {
     if (x.bal < ref.settings.low_balance_limit || x.bal < 0) attention.push({ tone: "bad", text: `Остаток на счёте «${x.a.name}»: ${fmtMoney(x.bal)}`, href: "/finance/dds" });
   }
   for (const { d, rem } of debtRows) {
-    if (d.direction !== "payable" || !d.due_date) continue;
+    if (debtDirection(d, isAll, selected) !== "payable" || !d.due_date) continue;
     const left = daysBetween(today, d.due_date);
     const who =
       d.kind === "supplier"
@@ -150,7 +147,7 @@ function Inner() {
 
   const revPct = revenue && revenue.plan > 0 ? (revenue.fact / revenue.plan) * 100 : null;
   const margin = revenue && revenue.fact > 0 && gross ? (gross.fact / revenue.fact) * 100 : null;
-  const burn = opex?.fact ?? 0;
+  const burn = pnl?.expenses.fact ?? 0;
   const periodDays = Math.max(1, daysBetween(start, end) + 1);
   const runwayDays = burn > 0 ? Math.max(0, Math.floor(totalBalance / (burn / periodDays))) : null;
 
@@ -169,7 +166,7 @@ function Inner() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <KpiCard label="Мы должны" value={fmtMoney(weOwe)} valueTone={weOwe > 0 ? "warning" : "neutral"} />
         <KpiCard label="Нам должны" value={fmtMoney(owedToUs)} valueTone="positive" />
-        <KpiCard label="Операционные расходы" value={fmtMoney(burn)} note={revenue && revenue.fact > 0 ? `${((burn / revenue.fact) * 100).toFixed(1)}% от выручки` : undefined} />
+        <KpiCard label="Расходы за период" value={fmtMoney(burn)} note={revenue && revenue.fact > 0 ? `${((burn / revenue.fact) * 100).toFixed(1)}% от выручки` : undefined} />
         <KpiCard label="Запас на расходах" value={runwayDays === null ? "—" : `${runwayDays} дн.`} note="на сколько дней хватит остатка при таких расходах" />
       </div>
 
