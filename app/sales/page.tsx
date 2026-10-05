@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
 import { useStoreSelection } from "@/components/StoreSelection";
-import { SalesPlanWindow } from "@/components/SalesPlanWindow";
+import { SalesPlanWindow, type PlanRange } from "@/components/SalesPlanWindow";
 import { SalesPlanEntry } from "@/components/SalesPlanEntry";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
@@ -140,6 +140,14 @@ export default function SalesPage() {
 
   const [periodIndex, setPeriodIndex] = useState(DEFAULT_PERIOD);
   const [activeCustom, setActiveCustom] = useState<{ start: string; end: string } | null>(null);
+  // Окно «План продаж» следует за выбранным периодом; «С начала месяца» — обычное окно месяца.
+  const planRange: PlanRange | null = (() => {
+    if (!activeCustom && periodIndex === DEFAULT_PERIOD) return null;
+    const r = activeCustom
+      ? { start: parseYmd(activeCustom.start), end: parseYmd(activeCustom.end) }
+      : getPeriodRange(periodIndex, new Date());
+    return { from: ymd(r.start), to: ymd(r.end), label: activeCustom ? "Свой период" : PERIODS[periodIndex] };
+  })();
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -650,7 +658,7 @@ export default function SalesPage() {
         </div>
       </div>
 
-      <SalesPlanWindow stores={selectedStores} refreshKey={planVersion} />
+      <SalesPlanWindow stores={selectedStores} refreshKey={planVersion} range={planRange} />
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-1.5 w-fit">
         <div className="text-xs text-muted">Конверсия (чек / посетитель)</div>
