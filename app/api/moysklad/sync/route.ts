@@ -145,9 +145,10 @@ async function runSync(date: string) {
 
   // A return always subtracts from the day it happened on, not the day of
   // the original sale — today's return reduces today's numbers, period. It
-  // also voids the receipt itself (receipts_count -1) when the original
-  // check was a single item, since there's no completed sale left; a return
-  // from a multi-item check just shrinks that receipt, it doesn't void it.
+  // also voids the receipt itself (receipts_count -1) when the whole original
+  // check came back (a single-item check, or a multi-item check returned in
+  // full), since there's no completed sale left; a return of only part of a
+  // multi-item check just shrinks that receipt, it doesn't void it.
   // Counts are shown as they are, not clamped at zero: a return of a sale
   // made on an earlier day leaves a negative number for the return day.
   // returnedAmount/returnedReceipts/returnedItems are kept alongside so the
@@ -174,7 +175,9 @@ async function runSync(date: string) {
     const demandHref = r.demand?.meta?.href;
     if (demandHref) {
       const originalItemCount = await fetchDemandItemCount(demandHref);
-      if (originalItemCount === 1) {
+      // Чек аннулируется, если вернули всё, что в нём было: чек из одного товара или любой
+      // чек, вернувшийся целиком (вернули столько товаров, сколько в нём было).
+      if (originalItemCount > 0 && rItems >= originalItemCount) {
         agg.receipts -= 1;
         agg.returnedReceipts += 1;
         voidedReceipts += 1;
