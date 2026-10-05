@@ -58,7 +58,6 @@ type Kind = FinDebt["kind"];
 const KIND_LABEL: Record<Kind, string> = {
   store_store: "Между магазинами",
   supplier: "Магазин ↔ поставщики",
-  partner: "Партнёры ↔ магазины",
 };
 
 type Ref = ReturnType<typeof useFinanceRef>;
@@ -74,7 +73,7 @@ function Inner() {
   const byName = fullName || email || "—";
   const { selected, isAll } = useStoreSelection();
   const { canEdit } = useSection("finance.debts");
-  const [kind, setKind] = useState<Kind>("partner");
+  const [kind, setKind] = useState<Kind>("supplier");
   const [debts, setDebts] = useState<FinDebt[]>([]);
   const [payments, setPayments] = useState<FinDebtPayment[]>([]);
   const [pending, setPending] = useState<Set<number>>(new Set());
@@ -110,14 +109,13 @@ function Inner() {
   useEffect(() => {
     if (tabPicked || loading) return;
     setTabPicked(true);
-    const kinds: Kind[] = ["partner", "supplier", "store_store"];
+    const kinds: Kind[] = ["supplier", "store_store"];
     const first = kinds.find((k) => debts.some((d) => d.kind === k && debtRemaining(d, payments) > 0));
     if (first) setKind(first);
   }, [tabPicked, loading, debts, payments]);
 
   const storeName = (code: string | null) => (code ? stores.find((s) => s.code === code)?.name ?? code : "—");
   const supplierName = (id: number | null) => ref.suppliers.find((s) => s.id === id)?.name ?? "—";
-  const partnerName = (id: number | null) => ref.partners.find((p) => p.id === id)?.name ?? "—";
   const today = todayYmd();
 
   const scoped = useMemo(
@@ -137,12 +135,10 @@ function Inner() {
 
   function directionLabel(d: FinDebt): string {
     if (d.kind === "store_store") return `${storeName(d.store)} должен ${storeName(d.counterparty_store)}`;
-    if (d.kind === "supplier") return d.direction === "payable" ? "Мы должны поставщику" : "Предоплата поставщику";
-    return d.direction === "payable" ? "Мы должны партнёру" : "Партнёр должен нам";
+    return d.direction === "payable" ? "Мы должны поставщику" : "Предоплата поставщику";
   }
   function counterpartyName(d: FinDebt): string {
     if (d.kind === "supplier") return supplierName(d.supplier_id);
-    if (d.kind === "partner") return partnerName(d.partner_id);
     return `${storeName(d.store)} → ${storeName(d.counterparty_store)}`;
   }
   const describeDebt = (d: FinDebt) => `${KIND_LABEL[d.kind]}: ${directionLabel(d)}${d.kind === "store_store" ? "" : ` · ${counterpartyName(d)}`} · ${fmtMoney(d.amount)} от ${fmtDate(d.debt_date)}`;
@@ -157,9 +153,6 @@ function Inner() {
       if (d.kind === "supplier") {
         key = `s${d.supplier_id}`;
         label = supplierName(d.supplier_id);
-      } else if (d.kind === "partner") {
-        key = `p${d.partner_id}`;
-        label = partnerName(d.partner_id);
       } else {
         const [a, b] = [d.store, d.counterparty_store ?? ""].sort();
         key = `${a}|${b}`;
@@ -173,7 +166,7 @@ function Inner() {
       .map((g) => ({ ...g, rows: g.rows.sort((a, b) => (a.d.due_date ?? "9999").localeCompare(b.d.due_date ?? "9999") || a.d.debt_date.localeCompare(b.d.debt_date)) }))
       .sort((a, b) => a.label.localeCompare(b.label, "ru"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [withRemaining, kind, showClosed, stores, ref.suppliers, ref.partners]);
+  }, [withRemaining, kind, showClosed, stores, ref.suppliers]);
 
   // возраст открытых долгов выбранной вкладки по направлениям
   const aging = useMemo(() => {
@@ -199,13 +192,8 @@ function Inner() {
     const owe = openRows.filter((r) => r.d.direction === "payable").reduce((acc, r) => acc + r.rem, 0);
     const owed = openRows.filter((r) => r.d.direction === "receivable").reduce((acc, r) => acc + r.rem, 0);
     const parts: string[] = [];
-    if (kind === "partner") {
-      if (owed) parts.push(`должен нам: ${fmtMoney(owed)}`);
-      if (owe) parts.push(`мы должны: ${fmtMoney(owe)}`);
-    } else {
-      if (owe) parts.push(`мы должны: ${fmtMoney(owe)}`);
-      if (owed) parts.push(`предоплата: ${fmtMoney(owed)}`);
-    }
+    if (owe) parts.push(`мы должны: ${fmtMoney(owe)}`);
+    if (owed) parts.push(`предоплата: ${fmtMoney(owed)}`);
     return { text: parts.join(" · ") || "долгов нет", overdue: openRows.filter(isOverdue).reduce((acc, r) => acc + r.rem, 0) };
   }
 
@@ -256,7 +244,7 @@ function Inner() {
     <div className="flex flex-col gap-5">
       <PageTitle
         title="Долги"
-        subtitle="Кто кому должен: партнёры, поставщики и расчёты между магазинами. Остаток считается по погашениям, деньги по ним проводятся в ДДС."
+        subtitle="Кто кому должен: поставщики и расчёты между магазинами. Остаток считается по погашениям, деньги по ним проводятся в ДДС."
       />
       <ErrorBox message={error ?? ref.error} />
 
@@ -267,7 +255,7 @@ function Inner() {
         <KpiCard label="Просрочено нам" value={fmtMoney(overdueReceivable)} valueTone={overdueReceivable > 0 ? "warning" : "neutral"} note={overdueReceivable ? "должники не вернули в срок" : "просрочек нет"} />
       </div>
 
-      <Tabs value={kind} onChange={setKind} items={(["partner", "supplier", "store_store"] as Kind[]).map((k) => ({ key: k, label: `${KIND_LABEL[k]} (${open.filter((x) => x.d.kind === k).length})` }))} />
+      <Tabs value={kind} onChange={setKind} items={(["supplier", "store_store"] as Kind[]).map((k) => ({ key: k, label: `${KIND_LABEL[k]} (${open.filter((x) => x.d.kind === k).length})` }))} />
 
       <Card
         title={KIND_LABEL[kind]}
@@ -278,7 +266,7 @@ function Inner() {
             </label>
             <button className={btnGhost} onClick={exportXls}>Скачать Excel</button>
             {canEdit && (
-              <button className={btnPrimary} onClick={() => setEditing({ kind, direction: kind === "partner" ? "receivable" : "payable" })}>
+              <button className={btnPrimary} onClick={() => setEditing({ kind, direction: "payable" })}>
                 + Долг
               </button>
             )}
@@ -368,7 +356,7 @@ function Inner() {
                                           Погашения ({myPayments.length})
                                         </button>
                                       )}
-                                      {canEdit && rem > 0 && <button className={btnPrimary} onClick={() => setPaying(d)}>{d.kind === "partner" && d.direction === "receivable" ? "Принять / списать" : "Погасить"}</button>}
+                                      {canEdit && rem > 0 && <button className={btnPrimary} onClick={() => setPaying(d)}>Погасить</button>}
                                       {canEdit && unlocked && (
                                         <>
                                           <button className={btnGhost} onClick={() => setEditing(d)}>Изменить</button>
@@ -429,11 +417,9 @@ function Inner() {
         <PayModal
           debt={paying}
           remaining={debtRemaining(paying, payments)}
-          paymentsCount={payments.filter((p) => p.debt_id === paying.id).length}
           ref_={ref}
           storeName={storeName}
           describeDebt={describeDebt}
-          byName={byName}
           onClose={() => setPaying(null)}
           onSaved={() => {
             setPaying(null);
@@ -480,13 +466,12 @@ function DebtModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const kind: Kind = initial.kind ?? "partner";
+  const kind: Kind = initial.kind ?? "supplier";
   const isEdit = !!initial.id;
-  const [direction, setDirection] = useState<FinDebt["direction"]>(kind === "store_store" ? "payable" : initial.direction ?? (kind === "partner" ? "receivable" : "payable"));
+  const [direction, setDirection] = useState<FinDebt["direction"]>(kind === "store_store" ? "payable" : initial.direction ?? "payable");
   const [store, setStore] = useState(initial.store ?? "");
   const [otherStore, setOtherStore] = useState(initial.counterparty_store ?? "");
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
-  const [partnerId, setPartnerId] = useState(initial.partner_id ? String(initial.partner_id) : "");
   const [amount, setAmount] = useState(initial.amount ? String(initial.amount) : "");
   const [date, setDate] = useState(initial.debt_date ?? todayYmd());
   const [due, setDue] = useState(initial.due_date ?? "");
@@ -511,18 +496,8 @@ function DebtModal({
     if (!store) return setError(kind === "store_store" ? "Выберите, какой магазин должен" : "Выберите магазин");
     if (kind === "store_store" && !otherStore) return setError("Выберите, какому магазину должен");
     if (kind === "supplier" && !supplierId) return setError("Выберите поставщика");
-    if (kind === "partner" && !partnerId) return setError("Выберите партнёра");
     if (!Number.isFinite(amt) || amt <= 0) return setError("Укажите сумму");
     if (kind === "store_store" && !isEdit && !!fromAccount !== !!toAccount) return setError("Для передачи денег выберите оба счёта или оставьте оба пустыми");
-
-    // статья для денег по долгу (только при создании)
-    let cashCategory: number | null = null;
-    if (!isEdit && kind === "partner" && fromAccount) {
-      const name = direction === "receivable" ? "Займ партнёру (выдан)" : "Займ от партнёра (получено)";
-      const cat = findCategory(ref_.categories, name);
-      if (!cat) return setError(`В «Настройки → Статьи» нет статьи «${name}»`);
-      cashCategory = cat.id;
-    }
 
     setSaving(true);
     setError(null);
@@ -532,7 +507,6 @@ function DebtModal({
       store,
       counterparty_store: kind === "store_store" ? otherStore : null,
       supplier_id: kind === "supplier" ? Number(supplierId) : null,
-      partner_id: kind === "partner" ? Number(partnerId) : null,
       amount: amt,
       debt_date: date,
       due_date: due || null,
@@ -564,28 +538,16 @@ function DebtModal({
     }
     const debtId = ins.data.id as number;
 
-    // деньги по долгу — сразу в ДДС
-    let opPayload: Record<string, unknown> | null = null;
-    if (kind === "partner" && fromAccount && cashCategory !== null) {
-      opPayload = {
-        op_date: date,
-        kind: direction === "receivable" ? "expense" : "income",
-        amount: amt,
-        account_id: Number(fromAccount),
-        category_id: cashCategory,
-        store,
-        partner_id: Number(partnerId),
-        debt_id: debtId,
-        comment: comment.trim() || (direction === "receivable" ? "Займ партнёру" : "Займ от партнёра"),
-      };
-    } else if (kind === "store_store" && fromAccount && toAccount) {
-      opPayload = { op_date: date, kind: "transfer", amount: amt, account_id: Number(fromAccount), to_account_id: Number(toAccount), store: null, debt_id: debtId, comment: comment.trim() || "Передача денег между магазинами" };
-    }
-    if (opPayload) {
-      const op = await supabase.from("fin_operations").insert(opPayload).select("id").single();
+    // деньги, переданные другому магазину, — сразу переводом в ДДС
+    if (kind === "store_store" && fromAccount && toAccount) {
+      const op = await supabase
+        .from("fin_operations")
+        .insert({ op_date: date, kind: "transfer", amount: amt, account_id: Number(fromAccount), to_account_id: Number(toAccount), store: null, debt_id: debtId, comment: comment.trim() || "Передача денег между магазинами" })
+        .select("id")
+        .single();
       if (op.error) {
         setSaving(false);
-        return setError(`Долг записан, но операцию в ДДС создать не удалось: ${op.error.message}. Внесите её в ДДС вручную.`);
+        return setError(`Долг записан, но перевод в ДДС создать не удалось: ${op.error.message}. Внесите его в ДДС вручную.`);
       }
       await supabase.from("fin_debts").update({ operation_id: op.data.id }).eq("id", debtId);
     }
@@ -616,10 +578,7 @@ function DebtModal({
     </select>
   );
 
-  const directionOptions: [FinDebt["direction"], string][] =
-    kind === "partner"
-      ? [["receivable", "Партнёр должен нам"], ["payable", "Мы должны партнёру"]]
-      : [["payable", "Мы должны поставщику"], ["receivable", "Предоплата поставщику"]];
+  const directionOptions: [FinDebt["direction"], string][] = [["payable", "Мы должны поставщику"], ["receivable", "Предоплата поставщику"]];
 
   return (
     <Modal title={`${isEdit ? "Изменить долг" : "Новый долг"} — ${KIND_LABEL[kind].toLowerCase()}`} onClose={onClose}>
@@ -644,33 +603,18 @@ function DebtModal({
               ))}
             </div>
             <Field label="Магазин">{storeSelect(store, setStore)}</Field>
-            {kind === "supplier" ? (
-              <Field label="Поставщик">
-                <select className={selectCls} value={supplierId} onChange={(e) => onSupplier(e.target.value)}>
-                  <option value="">Выберите…</option>
-                  {ref_.suppliers
-                    .filter((s) => s.active || String(s.id) === supplierId)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-            ) : (
-              <Field label="Партнёр">
-                <select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
-                  <option value="">Выберите…</option>
-                  {ref_.partners
-                    .filter((p) => p.active || String(p.id) === partnerId)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-            )}
+            <Field label="Поставщик">
+              <select className={selectCls} value={supplierId} onChange={(e) => onSupplier(e.target.value)}>
+                <option value="">Выберите…</option>
+                {ref_.suppliers
+                  .filter((s) => s.active || String(s.id) === supplierId)
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+              </select>
+            </Field>
           </>
         )}
         <div className="grid grid-cols-3 gap-3">
@@ -693,14 +637,6 @@ function DebtModal({
           <input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="За что долг" />
         </Field>
 
-        {!isEdit && kind === "partner" && (
-          <Field
-            label={direction === "receivable" ? "Деньги выданы со счёта" : "Деньги получены на счёт"}
-            hint="Выберите счёт, если эти деньги ещё не внесены в ДДС: операция появится там сама. Иначе оставьте «Не вносить»."
-          >
-            {accountSelect(fromAccount, setFromAccount, accounts)}
-          </Field>
-        )}
         {!isEdit && kind === "store_store" && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Деньги переданы со счёта" hint={otherStore ? "счёт магазина-кредитора" : "сначала выберите магазины"}>
@@ -726,27 +662,22 @@ function DebtModal({
 function PayModal({
   debt,
   remaining,
-  paymentsCount,
   ref_,
   storeName,
   describeDebt,
-  byName,
   onClose,
   onSaved,
 }: {
   debt: FinDebt;
   remaining: number;
-  paymentsCount: number;
   ref_: Ref;
   storeName: (code: string | null) => string;
   describeDebt: (d: FinDebt) => string;
-  byName: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const isPartnerReceivable = debt.kind === "partner" && debt.direction === "receivable";
   const isSupplierReceivable = debt.kind === "supplier" && debt.direction === "receivable";
-  // режимы без денег: списание в дивиденды (партнёр), зачёт поставкой (предоплата поставщику)
+  // предоплата поставщику закрывается либо возвратом денег, либо поставкой (без денег)
   const [mode, setMode] = useState<"cash" | "noncash">("cash");
   const [amount, setAmount] = useState(String(remaining));
   const [date, setDate] = useState(todayYmd());
@@ -758,32 +689,23 @@ function PayModal({
 
   const accounts = ref_.accounts.filter((a) => a.active);
   const accountsOf = (code: string | null) => accounts.filter((a) => a.store === code || a.store === null);
-  const noncash = mode === "noncash" && (isPartnerReceivable || isSupplierReceivable);
-  const partner = ref_.partners.find((p) => p.id === debt.partner_id);
+  const noncash = mode === "noncash" && isSupplierReceivable;
 
   // что за операция создаётся в ДДС
   function operationFor(amt: number): { payload: Record<string, unknown>; missing?: string } | null {
     if (noncash) return null;
     const base = { op_date: date, amount: amt, store: debt.store, debt_id: debt.id, comment: comment.trim() || "Погашение долга" };
-    const cat = (name: string) => findCategory(ref_.categories, name);
     if (debt.kind === "store_store") {
       return { payload: { ...base, kind: "transfer", account_id: Number(accountId), to_account_id: Number(toAccountId), store: null } };
     }
-    if (debt.kind === "supplier") {
-      if (debt.direction === "payable") {
-        const c = cat("Закуп - товар");
-        return c ? { payload: { ...base, kind: "expense", account_id: Number(accountId), category_id: c.id, supplier_id: debt.supplier_id } } : { payload: {}, missing: "Закуп - товар" };
-      }
-      const c = cat("Возврат от поставщика");
-      return c ? { payload: { ...base, kind: "income", account_id: Number(accountId), category_id: c.id, supplier_id: debt.supplier_id } } : { payload: {}, missing: "Возврат от поставщика" };
-    }
-    const name = debt.direction === "receivable" ? "Возврат займа от партнёра" : "Возврат займа партнёру";
-    const c = cat(name);
-    return c ? { payload: { ...base, kind: debt.direction === "receivable" ? "income" : "expense", account_id: Number(accountId), category_id: c.id, partner_id: debt.partner_id } } : { payload: {}, missing: name };
+    const name = debt.direction === "payable" ? "Закуп - товар" : "Возврат от поставщика";
+    const c = findCategory(ref_.categories, name);
+    if (!c) return { payload: {}, missing: name };
+    return { payload: { ...base, kind: debt.direction === "payable" ? "expense" : "income", account_id: Number(accountId), category_id: c.id, supplier_id: debt.supplier_id } };
   }
 
   async function save() {
-    const amt = noncash && isPartnerReceivable ? remaining : Number(amount.replace(/\s/g, "").replace(",", "."));
+    const amt = Number(amount.replace(/\s/g, "").replace(",", "."));
     if (!Number.isFinite(amt) || amt <= 0) return setError("Сумма должна быть больше нуля");
     if (amt > remaining) return setError(`Сумма больше остатка долга (${fmtMoney(remaining)})`);
     if (!noncash && !accountId) return setError(debt.kind === "store_store" ? "Выберите счёт, с которого переданы деньги" : "Выберите счёт");
@@ -791,14 +713,6 @@ function PayModal({
 
     const op = operationFor(amt);
     if (op?.missing) return setError(`В «Настройки → Статьи» нет статьи «${op.missing}»`);
-    let dividendsCat: number | null = null;
-    if (noncash && isPartnerReceivable) {
-      if (partner && debt.operation_id && paymentsCount === 0) {
-        const sub = findCategory(ref_.categories, partner.name, "Дивиденды");
-        if (!sub) return setError(`В статье «Дивиденды» нет подпункта «${partner.name}»`);
-        dividendsCat = sub.id;
-      }
-    }
 
     setSaving(true);
     setError(null);
@@ -816,27 +730,19 @@ function PayModal({
       pay_date: date,
       amount: amt,
       operation_id: operationId,
-      comment: comment.trim() || (noncash ? (isPartnerReceivable ? "Списано в дивиденды" : "Зачтено поставкой") : null),
+      comment: comment.trim() || (noncash ? "Зачтено поставкой" : null),
     });
     if (pay.error) {
       if (operationId) await supabase.from("fin_operations").delete().eq("id", operationId);
       setSaving(false);
       return setError(pay.error.message);
     }
-    // списание в дивиденды: выданные когда-то деньги в ДДС теперь значатся дивидендами партнёра
-    if (dividendsCat !== null && debt.operation_id) {
-      await supabase.from("fin_operations").update({ category_id: dividendsCat }).eq("id", debt.operation_id);
-    }
     if (amt >= remaining) await supabase.from("fin_debts").update({ closed: true }).eq("id", debt.id);
-    if (noncash && isPartnerReceivable) {
-      await logChange({ table: "fin_debts", rowId: debt.id, store: debt.store, summary: `Долг списан в дивиденды: ${describeDebt(debt)}`, byName });
-    }
     setSaving(false);
     onSaved();
   }
 
-  const title =
-    debt.kind === "partner" ? (debt.direction === "receivable" ? "Партнёр возвращает долг" : "Возврат займа партнёру") : debt.kind === "supplier" ? (debt.direction === "payable" ? "Оплата поставщику" : "Предоплата поставщику") : "Расчёт между магазинами";
+  const title = debt.kind === "supplier" ? (debt.direction === "payable" ? "Оплата поставщику" : "Предоплата поставщику") : "Расчёт между магазинами";
 
   const accountSelect = (value: string, onChange: (v: string) => void, list: Account[]) => (
     <select className={selectCls} value={value} onChange={(e) => onChange(e.target.value)}>
@@ -849,26 +755,20 @@ function PayModal({
     </select>
   );
 
-  const modes: [typeof mode, string][] | null = isPartnerReceivable
-    ? [["cash", "Вернул деньги"], ["noncash", "Списать в дивиденды"]]
-    : isSupplierReceivable
-      ? [["cash", "Поставщик вернул деньги"], ["noncash", "Зачтено поставкой"]]
-      : null;
-
   return (
     <Modal title={title} onClose={onClose}>
       <div className="flex flex-col gap-3.5">
         <div className="text-[13px] text-muted">{describeDebt(debt)}. Остаток: <b className="text-ink">{fmtMoney(remaining)}</b></div>
-        {modes && (
+        {isSupplierReceivable && (
           <div className="flex gap-1.5 bg-paper border border-border rounded-md p-1 w-fit flex-wrap">
-            {modes.map(([k, label]) => (
+            {([["cash", "Поставщик вернул деньги"], ["noncash", "Зачтено поставкой"]] as const).map(([k, label]) => (
               <button key={k} type="button" onClick={() => setMode(k)} className={`text-[13px] rounded px-4 py-1.5 ${mode === k ? "bg-accent text-paper font-bold" : "text-muted font-medium"}`}>{label}</button>
             ))}
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Сумма, ₸">
-            <input className={inputCls} value={noncash && isPartnerReceivable ? String(remaining) : amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" disabled={noncash && isPartnerReceivable} autoFocus />
+            <input className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoFocus />
           </Field>
           <Field label="Дата">
             <input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />
@@ -881,17 +781,10 @@ function PayModal({
             <Field label={`На счёт (${storeName(debt.counterparty_store)})`}>{accountSelect(toAccountId, setToAccountId, accountsOf(debt.counterparty_store))}</Field>
           </div>
         )}
-        {!noncash && debt.kind !== "store_store" && (
-          <Field label={(debt.kind === "partner" && debt.direction === "receivable") || (debt.kind === "supplier" && debt.direction === "receivable") ? "На счёт" : "Со счёта"} hint="Операция появится в ДДС сама">
+        {!noncash && debt.kind === "supplier" && (
+          <Field label={isSupplierReceivable ? "На счёт" : "Со счёта"} hint="Операция появится в ДДС сама">
             {accountSelect(accountId, setAccountId, accounts)}
           </Field>
-        )}
-        {noncash && isPartnerReceivable && (
-          <div className="text-[12px] text-muted bg-paper border border-border rounded-md px-3 py-2">
-            {debt.operation_id && paymentsCount === 0
-              ? `Долг закроется, а выданные деньги в ДДС перейдут в статью «Дивиденды → ${partner?.name ?? ""}».`
-              : "Долг закроется. Эти деньги выдавались вне ДДС (или долг частично гасился), поэтому в ДДС дивиденды сами не появятся — при необходимости внесите их операцией вручную."}
-          </div>
         )}
         <Field label="Комментарий">
           <input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} />

@@ -34,7 +34,6 @@ export type FinCategory = {
   kind: "income" | "expense";
   opiu_group: OpiuGroup | null;
   require_supplier: boolean; // при внесении обязателен выбор поставщика
-  require_partner: boolean; // при внесении обязателен выбор партнёра
   auto_tax: boolean; // сумма считается автоматически (процент от безналичных поступлений)
   active: boolean;
   sort: number;
@@ -67,7 +66,6 @@ export type FinOperation = {
   category_id: number | null;
   store: string | null;
   supplier_id: number | null;
-  partner_id: number | null;
   debt_id: number | null;
   comment: string | null;
   unlock_expires_at: string | null; // окно правки по одобренному запросу
@@ -640,12 +638,11 @@ export async function loadPnlInputs(start: string, end: string, cities: string[]
 // ── Долги ──────────────────────────────────────────────────────────────────
 export type FinDebt = {
   id: number;
-  kind: "store_store" | "supplier" | "partner";
+  kind: "store_store" | "supplier";
   direction: "payable" | "receivable";
   store: string;
   counterparty_store: string | null;
   supplier_id: number | null;
-  partner_id: number | null;
   amount: number;
   debt_date: string;
   due_date: string | null;
@@ -704,7 +701,6 @@ export type FinPlanned = {
   category_id: number | null;
   store: string | null;
   supplier_id: number | null;
-  partner_id: number | null;
   account_id: number | null;
   repeat: "none" | "weekly" | "monthly";
   status: "planned" | "paid" | "cancelled";

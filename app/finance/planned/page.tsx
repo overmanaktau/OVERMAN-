@@ -98,7 +98,6 @@ function Inner() {
   const today = todayYmd();
   const storeName = (code: string | null) => (code ? stores.find((s) => s.code === code)?.name ?? code : "—");
   const supplierName = (id: number | null) => ref.suppliers.find((s) => s.id === id)?.name;
-  const partnerName = (id: number | null) => ref.partners.find((p) => p.id === id)?.name;
 
   const scoped = useMemo(() => items.filter((i) => isAll || (i.store !== null && selected.includes(i.store))), [items, isAll, selected]);
   const planned = scoped.filter((i) => i.status === "planned");
@@ -165,7 +164,7 @@ function Inner() {
     downloadExcel(
       "Плановые_платежи",
       ["Срок", "Тип", "Статья", "Магазин", "Контрагент", "Сумма", "Повтор", "Статус", "Комментарий"],
-      list.map((i) => [fmtDate(i.due_date), i.kind === "income" ? "Приход" : "Расход", categoryPath(ref.categories, i.category_id), storeName(i.store), supplierName(i.supplier_id) ?? partnerName(i.partner_id) ?? "", i.amount, REPEAT_LABEL[i.repeat], i.status === "paid" ? "оплачен" : "ожидает", i.comment ?? ""])
+      list.map((i) => [fmtDate(i.due_date), i.kind === "income" ? "Приход" : "Расход", categoryPath(ref.categories, i.category_id), storeName(i.store), supplierName(i.supplier_id) ?? "", i.amount, REPEAT_LABEL[i.repeat], i.status === "paid" ? "оплачен" : "ожидает", i.comment ?? ""])
     );
   }
 
@@ -262,7 +261,7 @@ function Inner() {
                       <td className={tdCls}>{categoryPath(ref.categories, i.category_id)}</td>
                       <td className={tdCls}>{storeName(i.store)}</td>
                       <td className={tdCls}>
-                        {[supplierName(i.supplier_id), partnerName(i.partner_id)].filter(Boolean).join(", ")}
+                        {supplierName(i.supplier_id)}
                         {i.comment && <div className="text-[12px] text-muted">{i.comment}</div>}
                       </td>
                       <td className={tdCls}>{REPEAT_LABEL[i.repeat]}</td>
@@ -315,7 +314,6 @@ function PlannedModal({
   const [categoryId, setCategoryId] = useState(initial.category_id ? String(initial.category_id) : "");
   const [store, setStore] = useState(initial.store ?? (initial.id ? "" : defaultStore));
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
-  const [partnerId, setPartnerId] = useState(initial.partner_id ? String(initial.partner_id) : "");
   const [accountId, setAccountId] = useState(initial.account_id ? String(initial.account_id) : "");
   const [repeat, setRepeat] = useState<FinPlanned["repeat"]>(initial.repeat ?? "none");
   const [comment, setComment] = useState(initial.comment ?? "");
@@ -323,7 +321,6 @@ function PlannedModal({
   const [error, setError] = useState<string | null>(null);
 
   const needSupplier = kind === "expense" && !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier;
-  const needPartner = !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_partner;
   const cats = ref_.categories.filter((c) => c.kind === kind && ((c.active && !isAutoCategory(c, ref_.settings)) || String(c.id) === categoryId));
   const tops = cats.filter((c) => c.parent_id === null);
 
@@ -332,7 +329,6 @@ function PlannedModal({
     if (!Number.isFinite(amt) || amt <= 0) return setError("Сумма должна быть больше нуля");
     if (!categoryId) return setError("Выберите статью");
     if (needSupplier && !supplierId) return setError("Для этой статьи выберите поставщика");
-    if (needPartner && !partnerId) return setError("Для этой статьи выберите партнёра");
     // у старых платежей «без магазина» можно сохранять как есть, у новых магазин обязателен
     if (!store && !(initial.id && initial.store === null)) return setError("Выберите магазин");
     setSaving(true);
@@ -343,7 +339,6 @@ function PlannedModal({
       category_id: Number(categoryId),
       store: store || null,
       supplier_id: needSupplier && supplierId ? Number(supplierId) : null,
-      partner_id: needPartner && partnerId ? Number(partnerId) : null,
       account_id: accountId ? Number(accountId) : null,
       repeat,
       comment: comment.trim() || null,
@@ -371,14 +366,6 @@ function PlannedModal({
           <Field label="Магазин"><select className={selectCls} value={store} onChange={(e) => setStore(e.target.value)}><option value="">Выберите…</option>{stores.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}</select></Field>
           <Field label="Счёт"><select className={selectCls} value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">Определить при оплате</option>{ref_.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
         </div>
-        {needPartner && (
-          <Field label="Партнёр">
-            <select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
-              <option value="">Выберите…</option>
-              {ref_.partners.filter((p) => p.active || String(p.id) === partnerId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </Field>
-        )}
         {needSupplier && (
           <Field label="Поставщик">
             <select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
@@ -428,7 +415,6 @@ function PayModal({ item, ref_, onClose, onSaved }: { item: FinPlanned; ref_: Re
         category_id: item.category_id,
         store: item.store,
         supplier_id: item.supplier_id,
-        partner_id: item.partner_id,
         comment: item.comment,
       })
       .select("id")
@@ -452,7 +438,6 @@ function PayModal({ item, ref_, onClose, onSaved }: { item: FinPlanned; ref_: Re
         category_id: item.category_id,
         store: item.store,
         supplier_id: item.supplier_id,
-        partner_id: item.partner_id,
         account_id: item.account_id,
         repeat: item.repeat,
         comment: item.comment,

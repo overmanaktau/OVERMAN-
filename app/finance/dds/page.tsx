@@ -100,7 +100,6 @@ function Inner() {
   const storeName = (code: string | null) => (code ? stores.find((s) => s.code === code)?.name ?? code : "—");
   const accountName = (id: number | null) => ref.accounts.find((a) => a.id === id)?.name ?? "—";
   const supplierName = (id: number | null) => ref.suppliers.find((s) => s.id === id)?.name;
-  const partnerName = (id: number | null) => ref.partners.find((p) => p.id === id)?.name;
 
   const visibleAccounts = useMemo(
     () => ref.accounts.filter((a) => isAll || (a.store !== null && selected.includes(a.store))),
@@ -122,7 +121,7 @@ function Inner() {
       .filter((o) => !kindFilter || o.kind === kindFilter)
       .filter((o) => {
         if (!q) return true;
-        const text = [categoryPath(ref.categories, o.category_id), o.comment, supplierName(o.supplier_id), partnerName(o.partner_id), accountName(o.account_id)]
+        const text = [categoryPath(ref.categories, o.category_id), o.comment, supplierName(o.supplier_id), accountName(o.account_id)]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
@@ -130,7 +129,7 @@ function Inner() {
       })
       .sort((a, b) => (a.op_date === b.op_date ? b.id - a.id : b.op_date.localeCompare(a.op_date)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inPeriod, accountFilter, kindFilter, query, ref.categories, ref.accounts, ref.suppliers, ref.partners]);
+  }, [inPeriod, accountFilter, kindFilter, query, ref.categories, ref.accounts, ref.suppliers]);
 
   const income = inPeriod.filter((o) => o.kind === "income").reduce((a, o) => a + o.amount, 0);
   const expense = inPeriod.filter((o) => o.kind === "expense").reduce((a, o) => a + o.amount, 0);
@@ -160,7 +159,7 @@ function Inner() {
         o.kind === "transfer" ? `${accountName(o.account_id)} → ${accountName(o.to_account_id)}` : accountName(o.account_id),
         o.kind === "transfer" ? "Перевод между счетами" : categoryPath(ref.categories, o.category_id),
         storeName(o.store),
-        supplierName(o.supplier_id) ?? partnerName(o.partner_id) ?? "",
+        supplierName(o.supplier_id) ?? "",
         o.comment ?? "",
         o.kind === "expense" ? -o.amount : o.amount,
       ])
@@ -256,7 +255,7 @@ function Inner() {
                       </td>
                       <td className={tdCls}>{storeName(o.store)}</td>
                       <td className={tdCls}>
-                        {[supplierName(o.supplier_id), partnerName(o.partner_id)].filter(Boolean).join(", ")}
+                        {supplierName(o.supplier_id)}
                         {o.comment && <div className="text-muted text-[12px]">{o.comment}</div>}
                       </td>
                       <td className={`${tdCls} text-right num font-semibold whitespace-nowrap ${o.kind === "income" ? "text-accent" : o.kind === "expense" ? "text-[#A34B36]" : "text-muted"}`}>
@@ -527,14 +526,12 @@ function OperationModal({
   // магазин обязателен; предвыбираем его, если в шапке выбран ровно один
   const [store, setStore] = useState(initial.store ?? (initial.id ? "" : defaultStore));
   const [supplierId, setSupplierId] = useState(initial.supplier_id ? String(initial.supplier_id) : "");
-  const [partnerId, setPartnerId] = useState(initial.partner_id ? String(initial.partner_id) : "");
   const [comment, setComment] = useState(initial.comment ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // поставщик нужен только для статей вроде «Закуп - товар»
   const needSupplier = kind === "expense" && !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier;
-  const needPartner = kind !== "transfer" && !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_partner;
   const activeAccounts = ref_.accounts.filter((a) => a.active || String(a.id) === accountId);
   const cats = ref_.categories.filter(
     (c) => c.kind === (kind === "income" ? "income" : "expense") && ((c.active && !isAutoCategory(c, ref_.settings)) || String(c.id) === categoryId)
@@ -551,7 +548,6 @@ function OperationModal({
     // у старых операций «без магазина» можно сохранять как есть, у новых магазин обязателен
     if (kind !== "transfer" && !store && !(initial.id && initial.store === null)) return setError("Выберите магазин");
     if (needSupplier && !supplierId) return setError("Для этой статьи выберите поставщика");
-    if (needPartner && !partnerId) return setError("Для этой статьи выберите партнёра");
     setSaving(true);
     setError(null);
     const payload = {
@@ -563,7 +559,6 @@ function OperationModal({
       category_id: kind === "transfer" ? null : Number(categoryId),
       store: store || null,
       supplier_id: needSupplier && supplierId ? Number(supplierId) : null,
-      partner_id: needPartner && partnerId ? Number(partnerId) : null,
       comment: comment.trim() || null,
     };
     const res = initial.id
@@ -632,14 +627,6 @@ function OperationModal({
         {kind !== "transfer" && (
           <>
             <CategorySelect categories={cats} value={categoryId} onChange={setCategoryId} />
-            {needPartner && (
-              <Field label="Партнёр">
-                <select className={selectCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
-                  <option value="">Выберите…</option>
-                  {ref_.partners.filter((p) => p.active || String(p.id) === partnerId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </Field>
-            )}
             {needSupplier && (
               <Field label="Поставщик">
                 <select className={selectCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>

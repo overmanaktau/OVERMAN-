@@ -124,11 +124,7 @@ function Inner() {
     if (debtDirection(d, isAll, selected) !== "payable" || !d.due_date) continue;
     const left = daysBetween(today, d.due_date);
     const who =
-      d.kind === "supplier"
-        ? ref.suppliers.find((s) => s.id === d.supplier_id)?.name
-        : d.kind === "partner"
-          ? ref.partners.find((p) => p.id === d.partner_id)?.name
-          : stores.find((s) => s.code === d.counterparty_store)?.name;
+      d.kind === "supplier" ? ref.suppliers.find((s) => s.id === d.supplier_id)?.name : stores.find((s) => s.code === d.counterparty_store)?.name;
     if (left < 0) attention.push({ tone: "bad", text: `Долг «${who ?? "—"}» ${fmtMoney(rem)} просрочен на ${-left} дн.`, href: "/finance/debts" });
     else if (left <= alertDays) attention.push({ tone: "warn", text: `Долг «${who ?? "—"}» ${fmtMoney(rem)} — срок через ${left} дн.`, href: "/finance/debts" });
   }
