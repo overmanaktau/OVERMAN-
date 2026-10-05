@@ -156,6 +156,7 @@ async function runSync(date: string) {
   // much of it was returns.
   let returnedAmount = 0;
   let voidedReceipts = 0;
+  const returnedByDemand = new Map<string, number>(); // сколько товаров уже вернули из каждого чека за этот день
   for (const r of returns) {
     const id = r.retailStore?.id;
     const name = r.retailStore?.name;
@@ -176,8 +177,12 @@ async function runSync(date: string) {
     if (demandHref) {
       const originalItemCount = await fetchDemandItemCount(demandHref);
       // Чек аннулируется, если вернули всё, что в нём было: чек из одного товара или любой
-      // чек, вернувшийся целиком (вернули столько товаров, сколько в нём было).
-      if (originalItemCount > 0 && rItems >= originalItemCount) {
+      // чек, вернувшийся целиком (вернули столько товаров, сколько в нём было). Если чек
+      // вернули несколькими документами за день, аннулируется на том документе, которым
+      // вернули последний товар.
+      const returnedBefore = returnedByDemand.get(demandHref) ?? 0;
+      returnedByDemand.set(demandHref, returnedBefore + rItems);
+      if (originalItemCount > 0 && returnedBefore < originalItemCount && returnedBefore + rItems >= originalItemCount) {
         agg.receipts -= 1;
         agg.returnedReceipts += 1;
         voidedReceipts += 1;
