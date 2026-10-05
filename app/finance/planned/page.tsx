@@ -8,6 +8,8 @@ import { downloadExcel } from "@/lib/exportExcel";
 import KpiCard from "@/components/KpiCard";
 import {
   accountBalance,
+  debtDirection,
+  debtRemaining,
   addDays,
   categoryPath,
   daysBetween,
@@ -15,10 +17,13 @@ import {
   fmtMoney,
   isAutoCategory,
   loadAllOperations,
+  loadDebts,
   loadPlanned,
   nextDueDate,
   todayYmd,
   useFinanceRef,
+  type FinDebt,
+  type FinDebtPayment,
   type FinOperation,
   type FinPlanned,
 } from "@/lib/finance";
@@ -59,6 +64,8 @@ function Inner() {
   const { canEdit } = useSection("finance.planned");
   const [items, setItems] = useState<FinPlanned[]>([]);
   const [ops, setOps] = useState<FinOperation[]>([]);
+  const [debts, setDebts] = useState<FinDebt[]>([]);
+  const [debtPayments, setDebtPayments] = useState<FinDebtPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"planned" | "paid" | "all">("planned");
@@ -69,9 +76,15 @@ function Inner() {
     setLoading(true);
     setError(null);
     try {
-      const [p, o] = await Promise.all([loadPlanned(), loadAllOperations().catch(() => [] as FinOperation[])]);
+      const [p, o, d] = await Promise.all([
+        loadPlanned(),
+        loadAllOperations().catch(() => [] as FinOperation[]),
+        loadDebts().catch(() => ({ debts: [] as FinDebt[], payments: [] as FinDebtPayment[] })),
+      ]);
       setItems(p);
       setOps(o);
+      setDebts(d.debts);
+      setDebtPayments(d.payments);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось загрузить плановые платежи");
     } finally {
@@ -93,10 +106,27 @@ function Inner() {
 
   const overdue = planned.filter((i) => i.kind === "expense" && i.due_date < today);
   const soon = planned.filter((i) => i.kind === "expense" && i.due_date >= today && i.due_date <= addDays(today, alertDays));
-  const sum = (rows: FinPlanned[]) => rows.reduce((a, r) => a + r.amount, 0);
+  const sum = (rows: { amount: number }[]) => rows.reduce((a, r) => a + r.amount, 0);
   const next30 = planned.filter((i) => i.due_date <= addDays(today, 30));
 
   const list = scoped.filter((i) => (filter === "all" ? i.status !== "cancelled" : i.status === filter)).sort((a, b) => (filter === "paid" ? b.due_date.localeCompare(a.due_date) : a.due_date.localeCompare(b.due_date)));
+
+  // Долги со сроком оплаты тоже уходят деньгами: «мы должны» — выплата, «должны нам» — приход.
+  // Долги без срока в прогноз не попадают (сроков нет — неизвестно когда).
+  const debtItems = useMemo(() => {
+    const out: { due_date: string; kind: "income" | "expense"; amount: number }[] = [];
+    for (const d of debts) {
+      if (!d.due_date) continue;
+      if (!(isAll || selected.includes(d.store) || (d.counterparty_store !== null && selected.includes(d.counterparty_store)))) continue;
+      const rem = debtRemaining(d, debtPayments);
+      const dir = debtDirection(d, isAll, selected);
+      // предоплата поставщику закрывается товаром, а не деньгами — в прогноз не входит
+      if (rem <= 0 || !dir || (d.kind === "supplier" && d.direction === "receivable")) continue;
+      out.push({ due_date: d.due_date, kind: dir === "payable" ? "expense" : "income", amount: rem });
+    }
+    return out;
+  }, [debts, debtPayments, isAll, selected]);
+  const cashItems = useMemo(() => [...planned.map((i) => ({ due_date: i.due_date, kind: i.kind, amount: i.amount })), ...debtItems], [planned, debtItems]);
 
   // прогноз остатка по неделям: сегодняшний остаток + плановые приходы − плановые расходы
   const forecast = useMemo(() => {
@@ -107,7 +137,7 @@ function Inner() {
       const from = addDays(today, w * 7);
       const to = addDays(today, w * 7 + 6);
       // просроченные платежи падают в первую неделю
-      const inWeek = planned.filter((i) => (w === 0 ? i.due_date <= to : i.due_date >= from && i.due_date <= to));
+      const inWeek = cashItems.filter((i) => (w === 0 ? i.due_date <= to : i.due_date >= from && i.due_date <= to));
       const income = sum(inWeek.filter((i) => i.kind === "income"));
       const expense = sum(inWeek.filter((i) => i.kind === "expense"));
       bal += income - expense;
@@ -115,7 +145,7 @@ function Inner() {
     }
     return { start: accounts.reduce((a, acc) => a + accountBalance(acc, ops, today), 0), weeks };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ref.accounts, ops, planned, isAll, selected, today]);
+  }, [ref.accounts, ops, cashItems, isAll, selected, today]);
   const firstGap = forecast.weeks.find((w) => w.end < 0);
 
   async function cancel(i: FinPlanned) {
@@ -183,7 +213,7 @@ function Inner() {
             </tbody>
           </table>
         </div>
-        <p className="text-[12px] text-muted mt-3">Прогноз не учитывает будущую выручку от продаж — только остаток на счетах и плановые платежи. Это «запас прочности» без новых продаж.</p>
+        <p className="text-[12px] text-muted mt-3">В прогноз входят остаток на счетах, плановые платежи и долги со сроком оплаты (мы должны — выплата, должны нам — приход). Будущая выручка от продаж не учитывается — это «запас прочности» без новых продаж.</p>
       </Card>
 
       <Card

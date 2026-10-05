@@ -9,7 +9,7 @@ import { getErrorMessage } from "@/lib/errors";
 
 type EditHistoryRow = {
   id: number;
-  table_name: "traffic_entries" | "extra_expenses" | "sales_plan_monthly" | "sales_plan_periods";
+  table_name: "traffic_entries" | "extra_expenses" | "sales_plan_monthly" | "sales_plan_periods" | "fin_operations" | "fin_debts";
   row_id: number;
   store: string | null;
   summary: string;
@@ -23,6 +23,8 @@ const TABLE_LABEL: Record<EditHistoryRow["table_name"], string> = {
   extra_expenses: "Доп. расходы",
   sales_plan_monthly: "План продаж",
   sales_plan_periods: "Периоды плана продаж",
+  fin_operations: "Финансы: операция ДДС",
+  fin_debts: "Финансы: долг",
 };
 
 function friendlyError(e: unknown): string {

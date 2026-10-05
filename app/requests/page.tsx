@@ -10,7 +10,7 @@ import { getErrorMessage } from "@/lib/errors";
 
 type EditRequest = {
   id: number;
-  table_name: "traffic_entries" | "extra_expenses" | "sales_plan_monthly" | "sales_plan_periods";
+  table_name: "traffic_entries" | "extra_expenses" | "sales_plan_monthly" | "sales_plan_periods" | "fin_operations" | "fin_debts";
   row_id: number | null;
   store: string | null;
   context: string | null;
@@ -26,6 +26,8 @@ const TABLE_LABEL: Record<EditRequest["table_name"], string> = {
   extra_expenses: "Доп. расходы",
   sales_plan_monthly: "План продаж",
   sales_plan_periods: "Периоды плана продаж",
+  fin_operations: "Финансы: операция ДДС",
+  fin_debts: "Финансы: долг",
 };
 
 const STATUS_LABEL: Record<EditRequest["status"], string> = {

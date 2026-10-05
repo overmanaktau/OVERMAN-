@@ -9,10 +9,15 @@ import {
   accountBalance,
   addDays,
   categoryPath,
+  createChangeRequest,
   fmtDate,
   fmtMoney,
+  fmtTime,
   isAutoCategory,
+  isUnlocked,
   loadAllOperations,
+  loadPendingRequestIds,
+  logChange,
   monthLabel,
   monthStart,
   monthsInRange,
@@ -33,6 +38,7 @@ import {
   Modal,
   PageTitle,
   PeriodTabs,
+  RequestModal,
   Tabs,
   btnDanger,
   btnGhost,
@@ -57,7 +63,8 @@ type View = "ops" | "report";
 
 function Inner() {
   const ref = useFinanceRef();
-  const { stores } = useAuth();
+  const { stores, fullName, email } = useAuth();
+  const byName = fullName || email || "—";
   const { selected, isAll } = useStoreSelection();
   const { canEdit } = useSection("finance.dds");
   const period = usePeriod("month");
@@ -71,12 +78,15 @@ function Inner() {
   const [kindFilter, setKindFilter] = useState("");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Partial<FinOperation> | null>(null);
+  const [pending, setPending] = useState<Set<number>>(new Set());
+  const [requesting, setRequesting] = useState<FinOperation | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       setOps(await loadAllOperations());
+      setPending(await loadPendingRequestIds("fin_operations"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось загрузить операции");
     } finally {
@@ -131,7 +141,13 @@ function Inner() {
     if (!confirm(`Удалить операцию от ${fmtDate(op.op_date)} на ${fmtMoney(op.amount)}?`)) return;
     const { error: e } = await supabase.from("fin_operations").delete().eq("id", op.id);
     if (e) setError(e.message);
+    else await logChange({ table: "fin_operations", rowId: op.id, store: op.store, summary: `Операция удалена: ${describeOp(op)}`, byName });
     load();
+  }
+
+  function describeOp(op: FinOperation): string {
+    const what = op.kind === "transfer" ? "Перевод" : categoryPath(ref.categories, op.category_id);
+    return `${fmtDate(op.op_date)} · ${fmtMoney(op.amount)} · ${what} · ${accountName(op.account_id)}`;
   }
 
   function exportExcel() {
@@ -248,12 +264,21 @@ function Inner() {
                         {fmtMoney(o.amount)}
                       </td>
                       <td className={`${tdCls} text-right whitespace-nowrap`}>
-                        {canEdit && (
-                          <div className="flex gap-1.5 justify-end">
-                            <button className={btnGhost} onClick={() => setEditing(o)}>Изменить</button>
-                            <button className={btnDanger} onClick={() => remove(o)}>×</button>
+                        {canEdit && o.debt_id !== null && <Chip tone="muted">из раздела «Долги»</Chip>}
+                        {canEdit && o.debt_id === null && isUnlocked(o) && (
+                          <div className="flex flex-col items-end gap-1">
+                            <div className="flex gap-1.5">
+                              <button className={btnGhost} onClick={() => setEditing(o)}>Изменить</button>
+                              <button className={btnDanger} onClick={() => remove(o)}>×</button>
+                            </div>
+                            <span className="text-[11px] text-accent">открыто до {fmtTime(o.unlock_expires_at)}</span>
                           </div>
                         )}
+                        {canEdit && o.debt_id === null && !isUnlocked(o) && (pending.has(o.id) ? (
+                          <Chip tone="warn">запрос отправлен</Chip>
+                        ) : (
+                          <button className={btnGhost} onClick={() => setRequesting(o)}>Запросить правку</button>
+                        ))}
                       </td>
                     </tr>
                   ))}
@@ -268,6 +293,23 @@ function Inner() {
         <DdsReport start={start} end={end} ops={scoped} categories={ref.categories} openingTotal={openingTotal} accounts={visibleAccounts} allOps={ops} />
       )}
 
+      {requesting && (
+        <RequestModal
+          title="Запрос на изменение или удаление"
+          summary={describeOp(requesting)}
+          onClose={() => setRequesting(null)}
+          onSend={async (reason) => {
+            const err = await createChangeRequest({
+              table: "fin_operations",
+              rowId: requesting.id,
+              store: requesting.store,
+              context: `Операция ДДС: ${describeOp(requesting)}. Причина: ${reason}. Заявитель: ${byName}`,
+            });
+            if (!err) setPending((prev) => new Set(prev).add(requesting.id));
+            return err;
+          }}
+        />
+      )}
       {editing && (
         <OperationModal
           initial={editing}
@@ -278,6 +320,18 @@ function Inner() {
           onSaved={() => {
             setEditing(null);
             load();
+          }}
+          onReload={load}
+          byName={byName}
+          describeChange={(before, after) => {
+            const parts: string[] = [];
+            if (before.op_date !== after.op_date) parts.push(`дата ${fmtDate(before.op_date)} → ${fmtDate(after.op_date)}`);
+            if (before.amount !== after.amount) parts.push(`сумма ${fmtMoney(before.amount)} → ${fmtMoney(after.amount)}`);
+            if (before.account_id !== after.account_id) parts.push(`счёт ${accountName(before.account_id)} → ${accountName(after.account_id)}`);
+            if (before.category_id !== after.category_id) parts.push(`статья ${categoryPath(ref.categories, before.category_id)} → ${categoryPath(ref.categories, after.category_id)}`);
+            if (before.store !== after.store) parts.push(`магазин ${before.store ?? "—"} → ${after.store ?? "—"}`);
+            if ((before.comment ?? "") !== (after.comment ?? "")) parts.push("комментарий");
+            return parts.length ? `Операция изменена (${describeOp(before)}): ${parts.join("; ")}` : "";
           }}
         />
       )}
@@ -449,6 +503,9 @@ function OperationModal({
   defaultStore,
   onClose,
   onSaved,
+  onReload,
+  byName,
+  describeChange,
 }: {
   initial: Partial<FinOperation>;
   ref_: ReturnType<typeof useFinanceRef>;
@@ -456,7 +513,11 @@ function OperationModal({
   defaultStore: string;
   onClose: () => void;
   onSaved: () => void;
+  onReload: () => void;
+  byName: string;
+  describeChange: (before: FinOperation, after: FinOperation) => string;
 }) {
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [kind, setKind] = useState<FinOperation["kind"]>(initial.kind ?? "expense");
   const [date, setDate] = useState(initial.op_date ?? todayYmd());
   const [amount, setAmount] = useState(initial.amount ? String(initial.amount) : "");
@@ -478,7 +539,8 @@ function OperationModal({
   );
   const tops = cats.filter((c) => c.parent_id === null);
 
-  async function save() {
+  async function save(more = false) {
+    setSavedMsg(null);
     const amt = Number(amount.replace(/\s/g, "").replace(",", "."));
     if (!Number.isFinite(amt) || amt <= 0) return setError("Сумма должна быть больше нуля");
     if (!accountId) return setError("Выберите счёт");
@@ -506,6 +568,18 @@ function OperationModal({
       : await supabase.from("fin_operations").insert(payload);
     setSaving(false);
     if (res.error) return setError(res.error.message);
+    if (initial.id) {
+      const summary = describeChange(initial as FinOperation, { ...(initial as FinOperation), ...payload });
+      if (summary) await logChange({ table: "fin_operations", rowId: initial.id, store: payload.store, summary, byName });
+    }
+    if (more && !initial.id) {
+      // дата, магазин, счёт и статья остаются — удобно вносить подряд однотипные операции
+      setAmount("");
+      setComment("");
+      setSavedMsg("Сохранено. Можно вносить следующую.");
+      onReload();
+      return;
+    }
     onSaved();
   }
 
@@ -567,9 +641,11 @@ function OperationModal({
         )}
         <Field label="Комментарий"><input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} /></Field>
         <ErrorBox message={error} />
-        <div className="flex gap-2 justify-end">
+        {savedMsg && <div className="text-[13px] text-accent">{savedMsg}</div>}
+        <div className="flex gap-2 justify-end flex-wrap">
           <button className={btnGhost} onClick={onClose}>Отмена</button>
-          <button className={btnPrimary} onClick={save} disabled={saving}>Сохранить</button>
+          {!initial.id && <button className={btnGhost} onClick={() => save(true)} disabled={saving}>Сохранить и добавить ещё</button>}
+          <button className={btnPrimary} onClick={() => save()} disabled={saving}>Сохранить</button>
         </div>
       </div>
     </Modal>

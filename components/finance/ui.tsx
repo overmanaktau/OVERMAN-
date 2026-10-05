@@ -216,6 +216,49 @@ export function CategorySelect({
   );
 }
 
+// Окно запроса на правку или удаление: коротко пишем причину, запрос уходит в «Запросы».
+export function RequestModal({
+  title,
+  summary,
+  onClose,
+  onSend,
+}: {
+  title: string;
+  summary: string;
+  onClose: () => void;
+  onSend: (reason: string) => Promise<string | null>;
+}) {
+  const [reason, setReason] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send() {
+    if (!reason.trim()) return setError("Напишите, что и почему нужно изменить");
+    setSending(true);
+    setError(null);
+    const err = await onSend(reason.trim());
+    setSending(false);
+    if (err) return setError(err);
+    onClose();
+  }
+
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="flex flex-col gap-3.5">
+        <div className="text-[13px] text-muted bg-paper border border-border rounded-md px-3 py-2">{summary}</div>
+        <Field label="Что изменить или почему удалить" hint="Запрос увидит владелец в разделе «Запросы». После одобрения запись открывается на 30 минут.">
+          <textarea className={`${inputCls} min-h-[84px]`} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+        </Field>
+        <ErrorBox message={error} />
+        <div className="flex gap-2 justify-end">
+          <button className={btnGhost} onClick={onClose}>Отмена</button>
+          <button className={btnPrimary} onClick={send} disabled={sending}>Отправить запрос</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
     <label className="flex flex-col gap-1.5">

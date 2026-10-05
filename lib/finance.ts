@@ -69,6 +69,7 @@ export type FinOperation = {
   partner_id: number | null;
   debt_id: number | null;
   comment: string | null;
+  unlock_expires_at: string | null; // окно правки по одобренному запросу
 };
 
 export const ACCOUNT_KIND_LABEL: Record<FinAccount["kind"], string> = {
@@ -649,6 +650,9 @@ export type FinDebt = {
   due_date: string | null;
   comment: string | null;
   closed: boolean;
+  doc_number: string | null;
+  operation_id: number | null;
+  unlock_expires_at: string | null;
 };
 export type FinDebtPayment = {
   id: number;
@@ -722,4 +726,58 @@ export function nextDueDate(due: string, repeat: "none" | "weekly" | "monthly"):
   const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
   next.setDate(Math.min(day, lastDay));
   return ymd(next);
+}
+
+// ── Правка по запросу ──────────────────────────────────────────────────────
+// Изменить или удалить операцию/долг можно, только пока открыто окно после
+// одобрения запроса (раздел «Запросы»).
+export function isUnlocked(row: { unlock_expires_at: string | null }): boolean {
+  return !!row.unlock_expires_at && new Date(row.unlock_expires_at) > new Date();
+}
+
+export function fmtTime(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
+
+// Номера строк, по которым уже есть запрос в ожидании (видны свои; админу — все).
+export async function loadPendingRequestIds(table: "fin_operations" | "fin_debts"): Promise<Set<number>> {
+  const { data, error } = await supabase.from("edit_requests").select("row_id").eq("table_name", table).eq("status", "pending");
+  if (error) return new Set();
+  return new Set(((data ?? []) as { row_id: number | null }[]).map((r) => r.row_id).filter((x): x is number => x !== null));
+}
+
+export async function createChangeRequest(input: { table: "fin_operations" | "fin_debts"; rowId: number; store: string | null; context: string }): Promise<string | null> {
+  const { data: userData } = await supabase.auth.getUser();
+  const uid = userData.user?.id;
+  if (!uid) return "Нет активной сессии.";
+  const { error } = await supabase.from("edit_requests").insert({
+    table_name: input.table,
+    row_id: input.rowId,
+    store: input.store,
+    context: input.context,
+    requested_by: uid,
+  });
+  return error ? error.message : null;
+}
+
+// Запись в «Историю» о правке или удалении.
+export async function logChange(input: { table: "fin_operations" | "fin_debts"; rowId: number; store: string | null; summary: string; byName: string }) {
+  const { data: userData } = await supabase.auth.getUser();
+  await supabase.from("edit_history").insert({
+    table_name: input.table,
+    row_id: input.rowId,
+    store: input.store,
+    summary: input.summary,
+    changed_by: userData.user?.id ?? null,
+    changed_by_name: input.byName,
+  });
+}
+
+export function findCategory(categories: FinCategory[], name: string, parentName?: string): FinCategory | undefined {
+  if (parentName) {
+    const parent = categories.find((c) => c.parent_id === null && c.name === parentName);
+    return parent ? categories.find((c) => c.parent_id === parent.id && c.name === name) : undefined;
+  }
+  return categories.find((c) => c.parent_id === null && c.name === name);
 }
