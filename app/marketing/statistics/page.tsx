@@ -518,6 +518,7 @@ export default function StatisticsPage() {
       ],
       sections: [
         {
+          title: "Статистика по дням",
           headers: t.headers,
           rows: t.rows.map((r) => r.map((c) => (c === "" ? "—" : c))),
           rowKinds: t.rows.map((_, i) => (i === last ? "total" : "normal")),

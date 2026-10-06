@@ -299,6 +299,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
               sections: [
                 {
                   headers: ["Дата / товар", "Документ", "Склад", "Принято, шт", "Себестоимость", "Продано", "Остаток", "Продано, %", "В день", "С прихода"],
+                  levelLabels: ["Только приходы", "+ товары в приходах"],
                   rows: rowsOut,
                   rowKinds: kinds,
                   indent,
@@ -855,12 +856,73 @@ export default function SuppliersPage() {
               ],
               sections: [
                 {
+                  title: stale ? "Зависшие по поставщикам" : "Остатки по поставщикам",
                   headers: stale
                     ? ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада", "Зависло у него", "Дней без продаж (макс.)"]
                     : ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада", "По цене продажи"],
                   rows: body,
                   rowKinds: body.map((_, i) => (i === body.length - 1 ? "total" : "normal")),
                   widths: stale ? [2.6, 1, 1, 1.7, 1.1, 1.1, 1.5] : [2.8, 1, 1, 1.7, 1.2, 1.7],
+                },
+                {
+                  title: "Товары каждого поставщика",
+                  hint: "Поставщик → артикул → размеры: сколько штук, на какую сумму. Можно оставить только нужные уровни и поставщиков.",
+                  optional: true,
+                  levelLabels: ["Только поставщики", "+ артикулы", "+ артикулы и размеры"],
+                  headers: ["Поставщик / артикул / размер", "Штук", "Себестоимость", "Цена прихода", stale ? "Дней без продаж" : "По цене продажи"],
+                  widths: [3.6, 0.9, 1.6, 1.3, 1.5],
+                  rows: [],
+                  load: async () => {
+                    type Raw = { product_ms_id: string; product_name: string; article: string; stock: number; money: number; sale_value: number; buy_price?: number | null; days_since_last_sale?: number | null };
+                    const names = rows.map((r) => r.supplier);
+                    const itemsBy = new Map<string, ItemRow[]>();
+                    let next = 0;
+                    const worker = async () => {
+                      while (next < names.length) {
+                        const name = names[next++];
+                        const raw = await fetchAllRows<Raw>((from, to) =>
+                          (stale
+                            ? supabase.rpc("stale_by_supplier_items", { p_stale_days: STALE_DAYS_QUERY, p_stores: tableStores, p_supplier: name })
+                            : supabase.rpc("stock_by_supplier_items", { p_stores: tableStores, p_supplier: name })
+                          ).range(from, to)
+                        );
+                        itemsBy.set(
+                          name,
+                          raw.map((r) => ({
+                            id: r.product_ms_id,
+                            name: r.product_name,
+                            article: r.article,
+                            stock: Number(r.stock),
+                            money: Number(r.money),
+                            saleValue: Number(r.sale_value),
+                            buyPrice: r.buy_price != null ? Number(r.buy_price) : null,
+                            days: r.days_since_last_sale ?? null,
+                          }))
+                        );
+                      }
+                    };
+                    await Promise.all([worker(), worker(), worker(), worker()]);
+                    const out: (string | number)[][] = [];
+                    const kinds: ("group" | "sub")[] = [];
+                    const indent: number[] = [];
+                    const last = (v: number | null) => (v === null ? "не продавался" : `${v} дн.`);
+                    for (const r of rows) {
+                      out.push([r.supplier, num(r.stock), money(r.money), "", stale ? (r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`) : money(r.saleValue)]);
+                      kinds.push("group");
+                      indent.push(0);
+                      for (const g of groupByArticle(itemsBy.get(r.supplier) ?? [])) {
+                        out.push([g.article, num(g.stock), money(g.money), "", stale ? last(g.maxDays) : money(g.saleValue)]);
+                        kinds.push("sub");
+                        indent.push(1);
+                        for (const it of [...g.items].sort((a, b) => b.stock - a.stock)) {
+                          out.push([it.name, num(it.stock), money(it.money), it.buyPrice !== null ? money(it.buyPrice) : "", stale ? last(it.days) : money(it.saleValue)]);
+                          kinds.push("sub");
+                          indent.push(2);
+                        }
+                      }
+                    }
+                    return { headers: [], rows: out, rowKinds: kinds, indent };
+                  },
                 },
               ],
             };

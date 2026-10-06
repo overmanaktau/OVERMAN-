@@ -830,6 +830,46 @@ export default function AbcXyzPage() {
                       DECISIONS[`${r.abc}${r.xyz}`] ?? "",
                     ]),
                   },
+                  {
+                    title: "Размеры каждой позиции",
+                    hint: `Артикул → размеры: выручка и штуки за период. Для ${filtered.length.toLocaleString("ru-RU")} позиций из текущей выборки — чем их меньше (фильтр), тем быстрее.`,
+                    optional: true,
+                    levelLabels: ["Только артикулы", "+ размеры"],
+                    headers: ["Артикул / размер", "Выручка", "Штук"],
+                    widths: [4, 1.5, 1],
+                    rows: [],
+                    load: async () => {
+                      const skus = new Map<string, (string | number)[][]>();
+                      let next = 0;
+                      const worker = async () => {
+                        while (next < filtered.length) {
+                          const a = filtered[next++];
+                          const raw = await fetchAllRows<{ product_name: string; revenue: number; quantity: number }>((from_, to_) =>
+                            supabase
+                              .rpc("product_sales_summary_by_sku", { p_from: range.from, p_to: range.to, p_stores: effectiveStores, p_article: a.id })
+                              .range(from_, to_)
+                          );
+                          raw.sort((x, y) => y.quantity - x.quantity);
+                          skus.set(a.id, raw.map((x) => [x.product_name, money(x.revenue), Number(x.quantity).toLocaleString("ru-RU")]));
+                        }
+                      };
+                      await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+                      const out: (string | number)[][] = [];
+                      const kinds: ("group" | "sub")[] = [];
+                      const indent: number[] = [];
+                      for (const a of filtered) {
+                        out.push([a.name, money(a.revenue), a.quantity.toLocaleString("ru-RU")]);
+                        kinds.push("group");
+                        indent.push(0);
+                        for (const r of skus.get(a.id) ?? []) {
+                          out.push(r);
+                          kinds.push("sub");
+                          indent.push(1);
+                        }
+                      }
+                      return { headers: [], rows: out, rowKinds: kinds, indent };
+                    },
+                  },
                 ],
               })}
             />

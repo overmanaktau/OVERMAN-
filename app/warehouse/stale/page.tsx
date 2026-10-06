@@ -618,6 +618,46 @@ export default function StaleInventoryPage() {
             const labels = effectiveStores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c);
             const toRows = (list: StaleRow[]) =>
               sortRows(bySearch(list), sortField).map((r) => [r.name, r.stock.toLocaleString("ru-RU"), money(r.money), money(r.saleValue), r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`]);
+            // размеры каждого артикула — отдельным блоком, подгружается только если выбран
+            const sizesSection = (title: string, list: StaleRow[], stores: string[], days: number): PdfDoc["sections"][number] => ({
+              title,
+              hint: "Артикул → размеры: остаток, деньги, сколько дней без продаж. Можно оставить только размеры или только артикулы.",
+              optional: true,
+              levelLabels: ["Только артикулы", "+ размеры"],
+              headers: ["Артикул / размер", "Остаток, шт", "Деньги (себестоимость)", "По цене продажи", "Без продаж"],
+              widths: [3.4, 1, 1.6, 1.6, 1.2],
+              rows: [],
+              load: async () => {
+                const arts = sortRows(bySearch(list), sortField);
+                const skus = new Map<string, (string | number)[][]>();
+                let next = 0;
+                const worker = async () => {
+                  while (next < arts.length) {
+                    const a = arts[next++];
+                    const raw = await fetchAllRows<{ product_name: string; stock: number; money: number; sale_value: number; days_since_last_sale: number | null }>((from_, to_) =>
+                      supabase.rpc("stale_inventory_by_sku", { p_stale_days: days, p_stores: stores, p_article: a.id }).range(from_, to_)
+                    );
+                    raw.sort((x, y) => y.stock - x.stock);
+                    skus.set(a.id, raw.map((x) => [x.product_name, Number(x.stock).toLocaleString("ru-RU"), money(x.money), money(x.sale_value), x.days_since_last_sale === null ? "не продавался" : `${x.days_since_last_sale} дн.`]));
+                  }
+                };
+                await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+                const out: (string | number)[][] = [];
+                const kinds: ("group" | "sub")[] = [];
+                const indent: number[] = [];
+                for (const a of arts) {
+                  out.push([a.name, a.stock.toLocaleString("ru-RU"), money(a.money), money(a.saleValue), a.daysSinceLastSale === null ? "не продавался" : `${a.daysSinceLastSale} дн.`]);
+                  kinds.push("group");
+                  indent.push(0);
+                  for (const r of skus.get(a.id) ?? []) {
+                    out.push(r);
+                    kinds.push("sub");
+                    indent.push(1);
+                  }
+                }
+                return { headers: [], rows: out, rowKinds: kinds, indent };
+              },
+            });
             const sections: PdfDoc["sections"] = [
               {
                 title: `Зависшие остатки — ${bySearch(rows).length} артикулов`,
@@ -625,6 +665,7 @@ export default function StaleInventoryPage() {
                 widths: [3.4, 1, 1.6, 1.6, 1.2],
                 rows: toRows(rows),
               },
+              sizesSection("Зависшие: артикулы с размерами", rows, effectiveStores, STALE_DAYS_QUERY),
             ];
             if (frozenRows.length > 0) {
               sections.push({
@@ -634,6 +675,7 @@ export default function StaleInventoryPage() {
                 widths: [3.4, 1, 1.6, 1.6, 1.2],
                 rows: toRows(frozenRows),
               });
+              sections.push(sizesSection("Заморозка: артикулы с размерами", frozenRows, ["frozen"], -1));
             }
             return {
               fileName: "Зависшие_остатки",

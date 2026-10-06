@@ -114,7 +114,7 @@ export function DataTableCard<T>({
           title,
           subtitle: query.trim() ? `Фильтр: «${query.trim()}»` : undefined,
           orientation: csvHeaders.length > 6 ? "landscape" : "portrait",
-          sections: [{ headers: csvHeaders, rows: filtered.map(toCsvRow) }],
+          sections: [{ title: "Таблица", headers: csvHeaders, rows: filtered.map(toCsvRow) }],
         })}
       />
       <button type="button" title="Скачать в Excel" onClick={handleDownload} className={`w-7 h-7 rounded-md flex items-center justify-center ${iconBtn}`}>
