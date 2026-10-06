@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { downloadExcel } from "@/lib/exportExcel";
 import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
+import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 
 // Склад → «По поставщикам». Поставщик — из карточки товара в МойСклад.
 // Вкладка «Остатки»: что сейчас лежит у каждого поставщика (штуки и себестоимость).
@@ -285,16 +286,7 @@ export default function SuppliersPage() {
   const canView = isAdmin || permissions["warehouse.stock"].canView;
 
   // склады, где сейчас есть товар (пустые в фильтрах не показываем)
-  const [stocked, setStocked] = useState<Set<string> | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    supabase.rpc("stock_warehouses").then(({ data }) => {
-      if (!cancelled && data) setStocked(new Set((data as { store: string }[]).map((r) => r.store)));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const stocked = useStockedWarehouses();
   const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes).filter((c) => !stocked || stocked.has(c));
   const frozenAvailable = !stocked || stocked.has("frozen");
   const [tab, setTab] = useState<Tab>("stock");

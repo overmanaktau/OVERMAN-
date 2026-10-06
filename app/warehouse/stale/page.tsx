@@ -6,6 +6,7 @@ import { useSiteVersion } from "@/components/SiteVersion";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
+import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 
 // Products currently in stock with zero recorded sales in this many days —
 // computed from our own synced sales history (moysklad_product_sales_daily),
@@ -485,7 +486,8 @@ export default function StaleInventoryPage() {
   // Independent of the city picker in the sidebar — that one drives every
   // other page; this page filters by real склад (not city) on its own, so
   // it can be narrowed here without touching the global selection.
-  const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes);
+  const stocked = useStockedWarehouses();
+  const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes).filter((c) => !stocked || stocked.has(c));
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
   const effectiveStores = storeFilter.length > 0 ? storeFilter : accessibleWarehouseCodes;
   const storeOptions = WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => ({ value: w.code, label: w.label }));
