@@ -284,7 +284,19 @@ export default function SuppliersPage() {
   const { isAdmin, permissions, accessibleStoreCodes } = useAuth();
   const canView = isAdmin || permissions["warehouse.stock"].canView;
 
-  const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes);
+  // склады, где сейчас есть товар (пустые в фильтрах не показываем)
+  const [stocked, setStocked] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    supabase.rpc("stock_warehouses").then(({ data }) => {
+      if (!cancelled && data) setStocked(new Set((data as { store: string }[]).map((r) => r.store)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes).filter((c) => !stocked || stocked.has(c));
+  const frozenAvailable = !stocked || stocked.has("frozen");
   const [tab, setTab] = useState<Tab>("stock");
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
   const [frozenStock, setFrozenStock] = useState(true); // для остатков заморозка входит в общий себес
@@ -292,8 +304,8 @@ export default function SuppliersPage() {
   const [search, setSearch] = useState("");
 
   const baseStores = storeFilter.length > 0 ? storeFilter : accessibleWarehouseCodes;
-  const stockStores = useMemo(() => (frozenStock ? [...baseStores, "frozen"] : baseStores), [baseStores, frozenStock]);
-  const staleStores = useMemo(() => (frozenStale ? [...baseStores, "frozen"] : baseStores), [baseStores, frozenStale]);
+  const stockStores = useMemo(() => (frozenStock && frozenAvailable ? [...baseStores, "frozen"] : baseStores), [baseStores, frozenStock, frozenAvailable]);
+  const staleStores = useMemo(() => (frozenStale && frozenAvailable ? [...baseStores, "frozen"] : baseStores), [baseStores, frozenStale, frozenAvailable]);
   const stockKey = stockStores.join(",");
   const staleKey = staleStores.join(",");
 
@@ -435,7 +447,7 @@ export default function SuppliersPage() {
                 {w.label}
               </label>
             ))}
-            {tab === "stock" ? (
+            {frozenAvailable && (tab === "stock" ? (
               <label className={checkbox}>
                 <input type="checkbox" className="accent-accent" checked={frozenStock} onChange={(e) => setFrozenStock(e.target.checked)} />
                 Заморозка
@@ -445,7 +457,7 @@ export default function SuppliersPage() {
                 <input type="checkbox" className="accent-accent" checked={frozenStale} onChange={(e) => setFrozenStale(e.target.checked)} />
                 Заморозка
               </label>
-            )}
+            ))}
           </div>
         </div>
         <label className="flex flex-col gap-1.5">
