@@ -442,7 +442,7 @@ function PartnersTab({ partners, canEdit, reload }: { partners: FinPartner[]; ca
       {partners.length === 0 ? (
         <Empty>Партнёров пока нет</Empty>
       ) : (
-        <table className="w-full border-collapse">
+        <div className="overflow-x-auto"><table className="w-full border-collapse">
           <thead><tr><th className={thCls}>Имя</th><th className={thCls}>Телефон</th><th className={thCls}>Заметка</th><th className={thCls} /></tr></thead>
           <tbody>
             {partners.map((p) => (
@@ -462,7 +462,7 @@ function PartnersTab({ partners, canEdit, reload }: { partners: FinPartner[]; ca
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
       {editing && <SimpleModal table="fin_partners" title={editing.id ? "Изменить партнёра" : "Новый партнёр"} initial={editing} withTerms={false} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </Card>
@@ -492,7 +492,7 @@ function SuppliersTab({ suppliers, canEdit, reload }: { suppliers: FinSupplier[]
       {suppliers.length === 0 ? (
         <Empty>Поставщиков пока нет</Empty>
       ) : (
-        <table className="w-full border-collapse">
+        <div className="overflow-x-auto"><table className="w-full border-collapse">
           <thead><tr><th className={thCls}>Название</th><th className={thCls}>БИН</th><th className={thCls}>Телефон</th><th className={thCls}>Отсрочка, дней</th><th className={thCls}>Заметка</th><th className={thCls} /></tr></thead>
           <tbody>
             {suppliers.map((s) => (
@@ -514,7 +514,7 @@ function SuppliersTab({ suppliers, canEdit, reload }: { suppliers: FinSupplier[]
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
       {editing && <SimpleModal table="fin_suppliers" title={editing.id ? "Изменить поставщика" : "Новый поставщик"} initial={editing} withTerms onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </Card>

@@ -411,7 +411,7 @@ export default function CompetitorAnalyticsPage() {
                   уже собранные данные останутся. Отдельного конкурента можно исключить галочкой ниже.
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <label className="flex items-center gap-1.5 text-[13px] text-muted">
                   Постов с аккаунта
                   <input

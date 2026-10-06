@@ -226,16 +226,18 @@ function SizeBreakdown({
   rows: SkuRow[] | undefined;
   openLightbox: (state: LightboxState) => void;
 }) {
-  if (loading) return <div className="text-[12.5px] text-muted py-2 pl-11">Загрузка размеров…</div>;
-  if (!rows || rows.length === 0) return <div className="text-[12.5px] text-mutedLight py-2 pl-11">Нет данных по размерам.</div>;
+  if (loading) return <div className="text-[12.5px] text-muted py-2 pl-3 sm:pl-11">Загрузка размеров…</div>;
+  if (!rows || rows.length === 0) return <div className="text-[12.5px] text-mutedLight py-2 pl-3 sm:pl-11">Нет данных по размерам.</div>;
   return (
-    <div className="flex flex-col gap-1.5 py-2 pl-11 pr-2">
+    <div className="flex flex-col gap-2 py-2 pl-3 sm:pl-11 pr-2">
       {rows.map((s) => (
-        <div key={s.id} className="flex items-center gap-2.5 text-[12.5px]">
+        <div key={s.id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12.5px]">
           <Thumb src={s.imageUrl} fullHref={s.imageFullHref} alt={s.name} onOpen={openLightbox} />
-          <div className="flex-1 min-w-0 break-words text-muted">{s.name}</div>
-          <div className="num flex-none">{s.quantity.toLocaleString("ru-RU")} шт</div>
-          <div className="num text-mutedLight flex-none w-24 text-right">{money(s.revenue)}</div>
+          <div className="flex-1 basis-[150px] min-w-[150px] break-words text-muted">{s.name}</div>
+          <div className="flex items-center gap-3 flex-none ml-auto">
+            <div className="num">{s.quantity.toLocaleString("ru-RU")} шт</div>
+            <div className="num text-mutedLight text-right">{money(s.revenue)}</div>
+          </div>
         </div>
       ))}
     </div>

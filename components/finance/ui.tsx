@@ -117,7 +117,7 @@ export function Card({ title, right, children, className }: { title?: string; ri
   return (
     <div className={`bg-surface border border-border rounded-card px-6 py-5 ${className ?? ""}`}>
       {(title || right) && (
-        <div className="flex items-center justify-between gap-3 mb-3.5">
+        <div className="flex items-center justify-between gap-3 mb-3.5 flex-wrap">
           <div className="text-[15px] font-bold text-ink">{title}</div>
           {right}
         </div>

@@ -617,7 +617,7 @@ function DebtModal({
             </Field>
           </>
         )}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="Сумма, ₸">
             <input className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
           </Field>

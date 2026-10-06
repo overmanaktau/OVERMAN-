@@ -320,7 +320,7 @@ function Inner() {
           </>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse min-w-[560px]">
+            <table className="w-full border-collapse min-w-[680px]">
               <thead>
                 <tr>
                   <th className={thCls}>Статья</th>
@@ -337,10 +337,10 @@ function Inner() {
                   return (
                     <tr key={row.key} className={rowStyle(row)}>
                       <td className={`${tdCls} whitespace-nowrap`}>{labelCell(row, depth)}</td>
-                      <td className={`${tdCls} text-right num`}>{row.plan ? fmtMoney(row.plan) : <span className="text-mutedLight">—</span>}</td>
-                      <td className={`${tdCls} text-right num`}>{fmtMoney(row.fact)}</td>
-                      <td className={`${tdCls} text-right num ${row.plan ? "" : "text-mutedLight"}`}>{row.plan ? `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${fmtMoney(Math.abs(diff))}` : "—"}</td>
-                      <td className={`${tdCls} text-right num font-bold ${tone(row)}`}>{fmtPct(p)}</td>
+                      <td className={`${tdCls} text-right num whitespace-nowrap`}>{row.plan ? fmtMoney(row.plan) : <span className="text-mutedLight">—</span>}</td>
+                      <td className={`${tdCls} text-right num whitespace-nowrap`}>{fmtMoney(row.fact)}</td>
+                      <td className={`${tdCls} text-right num whitespace-nowrap ${row.plan ? "" : "text-mutedLight"}`}>{row.plan ? `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${fmtMoney(Math.abs(diff))}` : "—"}</td>
+                      <td className={`${tdCls} text-right num whitespace-nowrap font-bold ${tone(row)}`}>{fmtPct(p)}</td>
                     </tr>
                   );
                 })}

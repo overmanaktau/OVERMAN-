@@ -231,18 +231,24 @@ function SizeBreakdown({
   rows: SkuRow[] | undefined;
   openLightbox: (state: LightboxState) => void;
 }) {
-  if (loading) return <div className="text-[12.5px] text-muted py-2 pl-11">Загрузка размеров…</div>;
-  if (!rows || rows.length === 0) return <div className="text-[12.5px] text-mutedLight py-2 pl-11">Нет данных по размерам.</div>;
+  if (loading) return <div className="text-[12.5px] text-muted py-2 pl-3 sm:pl-11">Загрузка размеров…</div>;
+  if (!rows || rows.length === 0) return <div className="text-[12.5px] text-mutedLight py-2 pl-3 sm:pl-11">Нет данных по размерам.</div>;
   return (
-    <div className="flex flex-col gap-1.5 py-2 pl-11 pr-2">
+    <div className="flex flex-col gap-2 py-2 pl-3 md:pl-0 pr-2 md:pr-0">
       {rows.map((s) => (
-        <div key={s.id} className="flex items-center gap-2.5 text-[12.5px]">
-          <Thumb src={s.imageUrl} fullHref={s.imageFullHref} alt={s.name} onOpen={openLightbox} />
-          <div className="flex-1 min-w-0 break-words text-muted">{s.name}</div>
-          <div className="num flex-none">{s.stock.toLocaleString("ru-RU")} шт</div>
-          <div className="num text-mutedLight flex-none w-24 text-right">{money(s.money)}</div>
-          <div className="num text-mutedLight flex-none w-20 text-right">
-            {s.daysSinceLastSale === null ? "не продавался" : `${s.daysSinceLastSale} дн.`}
+        <div
+          key={s.id}
+          className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12.5px] md:grid md:grid-cols-[1.6fr_0.6fr_0.9fr_0.9fr_1fr] md:gap-3"
+        >
+          <div className="flex items-center gap-2.5 flex-1 basis-[150px] min-w-[150px] md:min-w-0 md:pl-11">
+            <Thumb src={s.imageUrl} fullHref={s.imageFullHref} alt={s.name} onOpen={openLightbox} />
+            <div className="break-words text-muted min-w-0">{s.name}</div>
+          </div>
+          <div className="flex items-center gap-3 flex-none ml-auto md:contents">
+            <div className="num">{s.stock.toLocaleString("ru-RU")} шт</div>
+            <div className="num text-mutedLight">{money(s.money)}</div>
+            <div className="num text-mutedLight">{money(s.saleValue)}</div>
+            <div className="num text-mutedLight">{s.daysSinceLastSale === null ? "не продавался" : `${s.daysSinceLastSale} дн.`}</div>
           </div>
         </div>
       ))}
