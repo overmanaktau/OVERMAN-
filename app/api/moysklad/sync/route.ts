@@ -437,7 +437,36 @@ async function syncCatalogAndStock() {
     if (error) throw error;
   }
 
-  return { products: products.length, stockRows: stockRows.length, staleRemoved, supplyRows: supplyRows.length };
+  // Каждая строка каждой приёмки — для раздела «По поставщикам → Приёмки» (сколько из какого прихода продано)
+  const itemRows = supplies.flatMap((row) => {
+    const store = WAREHOUSE_STORE[row.warehouseId];
+    if (!store || !seenIds.has(row.productMsId) || !row.supplyId) return [];
+    return [
+      {
+        supply_id: row.supplyId,
+        line_no: row.line,
+        doc_name: row.docName,
+        doc_date: row.date,
+        store,
+        product_ms_id: row.productMsId,
+        quantity: row.quantity,
+        price: row.price,
+        agent_name: row.agentName,
+        synced_at: now,
+      },
+    ];
+  });
+  for (const batch of chunk(itemRows, 500)) {
+    const { error } = await supabaseAdmin.from("moysklad_supply_items").upsert(batch, { onConflict: "supply_id,line_no" });
+    if (error) throw error;
+  }
+  // удалённые или изменённые в МойСклад приёмки: всё, что не обновилось в этой синхронизации, убираем
+  if (itemRows.length > 0) {
+    const { error } = await supabaseAdmin.from("moysklad_supply_items").delete().lt("synced_at", now);
+    if (error) throw error;
+  }
+
+  return { products: products.length, stockRows: stockRows.length, staleRemoved, supplyRows: supplyRows.length, supplyItems: itemRows.length };
 }
 
 async function handle(request: Request) {

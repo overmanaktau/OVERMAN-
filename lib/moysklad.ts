@@ -637,6 +637,12 @@ export type SupplyRow = {
   productMsId: string;
   warehouseId: string;
   date: string; // YYYY-MM-DD
+  supplyId: string; // id документа приёмки
+  docName: string; // номер документа
+  line: number; // номер строки в документе
+  quantity: number;
+  price: number | null; // закупочная цена за штуку, тенге
+  agentName: string | null; // контрагент в документе
 };
 
 export async function fetchAllSupplies(): Promise<SupplyRow[]> {
@@ -651,14 +657,17 @@ export async function fetchAllSupplies(): Promise<SupplyRow[]> {
   const all: SupplyRow[] = [];
   for (;;) {
     const page = await moyskladFetch("/entity/supply", {
-      expand: "positions",
+      expand: "positions,agent",
       limit: String(limit),
       offset: String(offset),
     });
     type Raw = {
+      id?: string;
+      name?: string;
       moment?: string;
       store?: { meta?: { href?: string } };
-      positions?: { rows?: { assortment?: { meta?: { href?: string } } }[] };
+      agent?: { name?: string };
+      positions?: { rows?: { quantity?: number; price?: number; assortment?: { meta?: { href?: string } } }[] };
     };
     const rows: Raw[] = page.rows ?? [];
     for (const r of rows) {
@@ -666,11 +675,23 @@ export async function fetchAllSupplies(): Promise<SupplyRow[]> {
       const warehouseId = storeHref.split("/").pop()?.split("?")[0] ?? "";
       const date = (r.moment ?? "").slice(0, 10);
       if (!warehouseId || !date) continue;
+      let line = 0;
       for (const p of r.positions?.rows ?? []) {
+        line += 1;
         const href = p.assortment?.meta?.href ?? "";
         const productId = href.split("/").pop()?.split("?")[0] ?? "";
         if (!productId) continue;
-        all.push({ productMsId: productId, warehouseId, date });
+        all.push({
+          productMsId: productId,
+          warehouseId,
+          date,
+          supplyId: r.id ?? "",
+          docName: r.name ?? "",
+          line,
+          quantity: p.quantity ?? 0,
+          price: p.price != null ? p.price / 100 : null,
+          agentName: r.agent?.name ?? null,
+        });
       }
     }
     if (rows.length < limit) break;

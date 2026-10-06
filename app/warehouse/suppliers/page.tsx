@@ -85,6 +85,216 @@ function Chevron({ open }: { open: boolean }) {
   return <span className="text-mutedLight text-[10px] w-3 flex-none inline-block">{open ? "▾" : "▸"}</span>;
 }
 
+// ── Приёмки поставщика: каждый приход по датам и документам и сколько из него продано.
+// Продажи списываются с самого старого прихода (FIFO), поэтому остаток товара
+// считается «с конца»: в самых свежих приходах. Учитываются только документы «Приёмка».
+type ReceiptLine = {
+  supplyId: string;
+  docName: string;
+  date: string;
+  store: string;
+  lineNo: number;
+  productId: string;
+  productName: string;
+  quantity: number;
+  price: number | null;
+  remaining: number;
+};
+type ReceiptDoc = { supplyId: string; docName: string; date: string; store: string; lines: ReceiptLine[] };
+
+const DOCS_PAGE = 25;
+
+function fmtRuDate(iso: string) {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+function daysSince(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const then = new Date(y, m - 1, d).getTime();
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return Math.max(0, Math.round((today - then) / 86400000));
+}
+
+function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[] }) {
+  const [lines, setLines] = useState<ReceiptLine[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [openDocs, setOpenDocs] = useState<Set<string>>(new Set());
+  const [shown, setShown] = useState(DOCS_PAGE);
+  const storesKey = stores.join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLines(null);
+    setError(null);
+    (async () => {
+      try {
+        type Raw = {
+          supply_id: string;
+          doc_name: string | null;
+          doc_date: string;
+          store: string;
+          line_no: number;
+          product_ms_id: string;
+          product_name: string;
+          quantity: number;
+          price: number | null;
+          remaining: number;
+        };
+        const raw = await fetchAllRows<Raw>((from, to) => supabase.rpc("supplier_receipts", { p_supplier: supplier, p_stores: stores }).range(from, to));
+        if (cancelled) return;
+        setLines(
+          raw.map((r) => ({
+            supplyId: r.supply_id,
+            docName: r.doc_name ?? "",
+            date: r.doc_date,
+            store: r.store,
+            lineNo: r.line_no,
+            productId: r.product_ms_id,
+            productName: r.product_name,
+            quantity: Number(r.quantity),
+            price: r.price != null ? Number(r.price) : null,
+            remaining: Number(r.remaining),
+          }))
+        );
+      } catch (e) {
+        if (!cancelled) setError(getErrorMessage(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplier, storesKey]);
+
+  const q = query.trim().toLowerCase();
+  const docs = useMemo(() => {
+    if (!lines) return [];
+    const map = new Map<string, ReceiptDoc>();
+    for (const l of lines) {
+      if (q && !l.productName.toLowerCase().includes(q)) continue;
+      const d = map.get(l.supplyId) ?? { supplyId: l.supplyId, docName: l.docName, date: l.date, store: l.store, lines: [] };
+      d.lines.push(l);
+      map.set(l.supplyId, d);
+    }
+    return [...map.values()].sort((a, b) => b.date.localeCompare(a.date) || b.docName.localeCompare(a.docName));
+  }, [lines, q]);
+
+  const warehouseLabel = (code: string) => WAREHOUSES.find((w) => w.code === code)?.label ?? (code === "frozen" ? "Заморозка" : code);
+  const grid = "grid-cols-[0.8fr_1.1fr_1fr_0.7fr_1fr_0.7fr_0.7fr_1fr_0.8fr_0.7fr]";
+
+  function toggleDoc(id: string) {
+    setOpenDocs((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const sumOf = (ls: ReceiptLine[]) => {
+    const qty = ls.reduce((a, l) => a + l.quantity, 0);
+    const remaining = ls.reduce((a, l) => a + l.remaining, 0);
+    const cost = ls.reduce((a, l) => a + l.quantity * (l.price ?? 0), 0);
+    return { qty, remaining, sold: qty - remaining, cost };
+  };
+
+  function Cells({ qty, cost, sold, remaining, date }: { qty: number; cost: number; sold: number; remaining: number; date: string }) {
+    const days = daysSince(date);
+    return (
+      <>
+        <div className="num text-right">{num(qty)}</div>
+        <div className="num text-right">{money(cost)}</div>
+        <div className="num text-right">{num(sold)}</div>
+        <div className="num text-right">{num(remaining)}</div>
+        <div className="flex items-center justify-end gap-2">
+          <div className="w-14 h-1.5 bg-paper rounded-full overflow-hidden flex-none">
+            <div className="h-full bg-accent rounded-full" style={{ width: `${qty > 0 ? Math.min(100, (sold / qty) * 100) : 0}%` }} />
+          </div>
+          <span className="num w-10 text-right">{qty > 0 ? `${Math.round((sold / qty) * 100)}%` : "—"}</span>
+        </div>
+        <div className="num text-right text-muted">{sold > 0 ? (sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0"}</div>
+        <div className="num text-right text-muted">{days} дн.</div>
+      </>
+    );
+  }
+
+  return (
+    <div className="bg-paper/40 border-t border-borderSoft px-3 py-3 min-w-[980px]">
+      <div className="flex items-center gap-3 flex-wrap mb-2.5 pl-6">
+        <div className="text-[13px] font-bold">Приёмки поставщика {supplier}</div>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Найти товар…"
+          className="bg-paper border border-border rounded-lg px-3 py-1.5 text-[12.5px] w-[200px]"
+        />
+        <div className="text-[11.5px] text-mutedLight max-w-xl">
+          Продажи списываются с самого старого прихода. «В день» — продано ÷ дней с прихода. Только документы «Приёмка» (перемещения и оприходования не видны).
+        </div>
+      </div>
+
+      {error && <div className="text-[12.5px] text-[#A34B36] pl-6">{error}</div>}
+      {!lines && !error && <div className="text-[12.5px] text-muted pl-6 py-2">Загрузка приёмок…</div>}
+      {lines && docs.length === 0 && <div className="text-[12.5px] text-mutedLight pl-6 py-2">{q ? "Ничего не найдено." : "Приёмок нет."}</div>}
+
+      {docs.length > 0 && (
+        <>
+          <div className={`grid ${grid} gap-3 pb-2 pl-6 text-[10px] uppercase tracking-wide text-mutedLight border-b border-border`}>
+            <div>Дата</div>
+            <div>Документ</div>
+            <div>Склад</div>
+            <div className="text-right">Принято, шт</div>
+            <div className="text-right">Себестоимость</div>
+            <div className="text-right">Продано</div>
+            <div className="text-right">Остаток</div>
+            <div className="text-right">Продано, %</div>
+            <div className="text-right">В день</div>
+            <div className="text-right">С прихода</div>
+          </div>
+          {docs.slice(0, shown).map((d) => {
+            const isOpen = openDocs.has(d.supplyId) || (q.length > 0 && d.lines.length <= 12);
+            const t = sumOf(d.lines);
+            return (
+              <div key={d.supplyId} className="border-b border-borderSoft">
+                <div className={`grid ${grid} gap-3 py-2 pl-6 items-center text-[12.5px] cursor-pointer hover:bg-paper`} onClick={() => toggleDoc(d.supplyId)} title="Показать товары прихода">
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    <Chevron open={isOpen} />
+                    {fmtRuDate(d.date)}
+                  </div>
+                  <div className="break-words min-w-0">{d.docName || "—"}</div>
+                  <div className="text-muted">{warehouseLabel(d.store)}</div>
+                  <Cells qty={t.qty} cost={t.cost} sold={t.sold} remaining={t.remaining} date={d.date} />
+                </div>
+                {isOpen &&
+                  [...d.lines]
+                    .sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "ru"))
+                    .map((l) => (
+                      <div key={`${l.supplyId}-${l.lineNo}`} className={`grid ${grid} gap-3 py-1.5 pl-6 items-center text-[12px] text-muted`}>
+                        <div />
+                        <div className="col-span-2 break-words min-w-0" style={{ paddingLeft: 18 }}>
+                          {l.productName}
+                          {l.price !== null && <span className="text-mutedLight"> · {money(l.price)}/шт</span>}
+                        </div>
+                        <Cells qty={l.quantity} cost={l.quantity * (l.price ?? 0)} sold={l.quantity - l.remaining} remaining={l.remaining} date={l.date} />
+                      </div>
+                    ))}
+              </div>
+            );
+          })}
+          {docs.length > shown && (
+            <button type="button" onClick={() => setShown((n) => n + DOCS_PAGE)} className="mt-2 ml-6 text-[12.5px] font-semibold text-accent">
+              Показать ещё приёмки ({docs.length - shown})
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function SupplierTable({
   tab,
   rows,
@@ -100,6 +310,7 @@ function SupplierTable({
 }) {
   const [openSuppliers, setOpenSuppliers] = useState<Set<string>>(new Set());
   const [openArticles, setOpenArticles] = useState<Set<string>>(new Set());
+  const [openReceipts, setOpenReceipts] = useState<Set<string>>(new Set());
   const [cache, setCache] = useState<Record<string, ItemRow[]>>({});
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [itemError, setItemError] = useState<string | null>(null);
@@ -109,6 +320,7 @@ function SupplierTable({
   useEffect(() => {
     setOpenSuppliers(new Set());
     setOpenArticles(new Set());
+    setOpenReceipts(new Set());
     setCache({});
   }, [storesKey, tab]);
 
@@ -210,9 +422,24 @@ function SupplierTable({
         return (
           <div key={r.supplier} className={`${minW} border-b border-borderSoft`}>
             <div className={`grid ${grid} gap-3 py-3 items-center text-[13px] cursor-pointer hover:bg-paper`} onClick={() => toggleSupplier(r.supplier)}>
-              <div className="flex items-center gap-2 font-semibold min-w-0">
+              <div className="flex items-center gap-2 font-semibold min-w-0 flex-wrap">
                 <Chevron open={isOpen} />
                 <span className="break-words">{r.supplier}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenReceipts((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(r.supplier)) next.delete(r.supplier);
+                      else next.add(r.supplier);
+                      return next;
+                    });
+                  }}
+                  className={`text-[11.5px] font-semibold rounded-md border px-2 py-0.5 ${openReceipts.has(r.supplier) ? "bg-accent text-paper border-accent" : "text-accent border-border hover:bg-paper"}`}
+                >
+                  Приёмки
+                </button>
               </div>
               <div className="num text-right">{num(r.articles)}</div>
               <div className="num text-right">{num(r.stock)}</div>
@@ -223,6 +450,8 @@ function SupplierTable({
                 {stale ? (r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`) : money(r.saleValue)}
               </div>
             </div>
+
+            {openReceipts.has(r.supplier) && <ReceiptsPanel supplier={r.supplier} stores={stores} />}
 
             {isOpen && (
               <div className="pb-2 bg-paper/40">
