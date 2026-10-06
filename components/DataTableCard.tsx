@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { downloadExcel } from "@/lib/exportExcel";
+import PdfButton from "@/components/PdfButton";
 
 function IconEye() {
   return (
@@ -105,6 +106,17 @@ export function DataTableCard<T>({
       >
         {collapsed ? <IconEyeOff /> : <IconEye />}
       </button>
+      <PdfButton
+        label="PDF"
+        className={`h-7 px-1.5 rounded-md flex items-center justify-center text-[11px] font-bold tracking-wide ${iconBtn}`}
+        build={() => ({
+          fileName: csvFilename.replace(/\.(csv|xlsx)$/i, ""),
+          title,
+          subtitle: query.trim() ? `Фильтр: «${query.trim()}»` : undefined,
+          orientation: csvHeaders.length > 6 ? "landscape" : "portrait",
+          sections: [{ headers: csvHeaders, rows: filtered.map(toCsvRow) }],
+        })}
+      />
       <button type="button" title="Скачать в Excel" onClick={handleDownload} className={`w-7 h-7 rounded-md flex items-center justify-center ${iconBtn}`}>
         <IconDownload />
       </button>

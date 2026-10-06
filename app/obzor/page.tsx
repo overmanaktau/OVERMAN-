@@ -7,6 +7,8 @@ import { SalesPlanWindow, type PlanRange } from "@/components/SalesPlanWindow";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { warehousesForCities } from "@/lib/warehouses";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 3; // "С начала месяца"
@@ -491,6 +493,78 @@ export default function ObzorPage() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="flex justify-end -mt-2">
+        <PdfButton
+          disabled={loading || dayRows.length === 0}
+          build={(): PdfDoc => {
+            const ru = (d: Date) => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
+            const periodLabel = activeCustom ? "Свой период" : PERIODS[periodIndex];
+            const sections: PdfDoc["sections"] = [
+              {
+                title: "Продажи по дням",
+                headers: ["Дата", "Выручка", "Чеков", "Штук", "Средний чек", "Валовая прибыль"],
+                widths: [1.2, 1.6, 1, 1, 1.4, 1.6],
+                rows: [...dayRows]
+                  .sort((a, b) => (a.date < b.date ? -1 : 1))
+                  .map((r) => {
+                    const [y, m, d] = r.date.split("-");
+                    return [
+                      `${d}.${m}.${y}`,
+                      money(r.revenue),
+                      r.receipts,
+                      r.items,
+                      r.receipts > 0 ? money(r.revenue / r.receipts) : "—",
+                      r.cost !== null ? money(r.revenue - r.cost) : "—",
+                    ];
+                  })
+                  .concat([
+                    [
+                      "Итого",
+                      money(totalRevenue),
+                      totalReceipts,
+                      totalItems,
+                      totalReceipts > 0 ? money(avgCheck) : "—",
+                      margin !== null ? money(margin) : "—",
+                    ],
+                  ]),
+                rowKinds: [...dayRows.map(() => "normal" as const), "total" as const],
+              },
+            ];
+            if (turnoverByBucket.length > 0) {
+              const body: (string | number)[][] = turnoverByBucket.map((r) => [
+                r.label,
+                money(r.cogs),
+                money(r.stockValue),
+                r.stockValue > 0 ? `${((r.cogs / r.stockValue) * 100).toFixed(0)}%` : "—",
+              ]);
+              body.push(["Итого", money(turnoverCogsTotal), money(turnoverStockValueTotal), turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—"]);
+              sections.push({
+                title: "Оборачиваемость по категориям",
+                note: "Себестоимость продаж за период / себестоимость текущего остатка.",
+                headers: ["Категория", "Себестоимость продаж", "Себестоимость остатка", "Оборачиваемость"],
+                widths: [2, 1.6, 1.6, 1.4],
+                rows: body,
+                rowKinds: body.map((_, i) => (i === body.length - 1 ? "total" : "normal")),
+              });
+            }
+            return {
+              fileName: `Обзор_${ymd(range.start)}_${ymd(range.end)}`,
+              title: "Обзор продаж",
+              subtitle: `${periodLabel}: ${ru(range.start)} — ${ru(range.end)}`,
+              kpis: [
+                { label: "Выручка", value: money(totalRevenue) },
+                { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
+                { label: "Средний чек", value: totalReceipts > 0 ? money(avgCheck) : "—" },
+                { label: "Глубина чека", value: totalReceipts > 0 ? `${itemsPerReceipt.toFixed(1)} шт` : "—" },
+                { label: "Валовая прибыль", value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от выручки` : undefined },
+                { label: "Оборачиваемость склада", value: turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—" },
+              ],
+              sections,
+            };
+          }}
+        />
       </div>
 
       <SalesPlanWindow stores={selectedStores} range={planRange} />

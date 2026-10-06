@@ -50,6 +50,8 @@ import {
   useSection,
 } from "@/components/finance/ui";
 import KpiCard from "@/components/KpiCard";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 
 export default function DdsPage() {
   return (
@@ -149,6 +151,38 @@ function Inner() {
     return `${fmtDate(op.op_date)} · ${fmtMoney(op.amount)} · ${what} · ${accountName(op.account_id)}`;
   }
 
+  function buildOpsPdf(): PdfDoc {
+    const flow = income - expense;
+    return {
+      fileName: `ДДС_${start}_${end}`,
+      title: "ДДС — движение денег",
+      subtitle: `${fmtDate(start)} — ${fmtDate(end)} · ${isAll ? "все магазины" : selected.map(storeName).join(", ")}`,
+      orientation: "landscape",
+      kpis: [
+        { label: "Остаток на начало", value: fmtMoney(openingTotal) },
+        { label: "Поступления", value: fmtMoney(income) },
+        { label: "Выплаты", value: fmtMoney(expense) },
+        { label: "Остаток на конец", value: fmtMoney(closingTotal), note: `Поток: ${flow >= 0 ? "+" : "−"}${fmtMoney(Math.abs(flow))}` },
+      ],
+      sections: [
+        {
+          title: `Операции (${rows.length})`,
+          headers: ["Дата", "Счёт", "Статья", "Магазин", "Контрагент / комментарий", "Сумма"],
+          align: ["left", "left", "left", "left", "left", "right"],
+          widths: [1, 1.6, 2.4, 1.1, 2.6, 1.4],
+          rows: rows.map((o) => [
+            fmtDate(o.op_date),
+            o.kind === "transfer" ? `${accountName(o.account_id)} → ${accountName(o.to_account_id)}` : accountName(o.account_id),
+            o.kind === "transfer" ? "Перевод между счетами" : categoryPath(ref.categories, o.category_id),
+            storeName(o.store),
+            [supplierName(o.supplier_id), o.comment].filter(Boolean).join(" · "),
+            `${o.kind === "income" ? "+" : o.kind === "expense" ? "−" : ""}${fmtMoney(o.amount)}`,
+          ]),
+        },
+      ],
+    };
+  }
+
   function exportExcel() {
     downloadExcel(
       `ДДС_${start}_${end}`,
@@ -175,6 +209,7 @@ function Inner() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <PeriodTabs preset={period.preset} onPreset={period.setPreset} from={period.from} onFrom={period.setFrom} to={period.to} onTo={period.setTo} />
         <div className="flex items-center gap-2">
+          <PdfButton className={btnGhost} build={buildOpsPdf} />
           <button className={btnGhost} onClick={exportExcel}>Скачать Excel</button>
           {canEdit && (
             <button className={btnPrimary} onClick={() => setEditing({ op_date: todayYmd(), kind: "expense" })}>
@@ -419,6 +454,36 @@ function DdsReport({
   const num = (v: number) => (v === 0 ? <span className="text-mutedLight">—</span> : fmtMoney(v));
   const total = (cells: number[]) => cells.reduce((a, v) => a + v, 0);
 
+  function buildReportPdf(): PdfDoc {
+    const money = (v: number) => (v === 0 ? "—" : fmtMoney(v));
+    const rowsOut: (string | number)[][] = [];
+    const kinds: ("normal" | "group" | "sub" | "total")[] = [];
+    const indent: number[] = [];
+    const push = (cells: (string | number)[], kind: "normal" | "group" | "sub" | "total" = "normal", ind = 0) => {
+      rowsOut.push(cells);
+      kinds.push(kind);
+      indent.push(ind);
+    };
+    const blanks = months.map(() => "");
+    push(["Остаток на начало", ...opening.map(fmtMoney), ""], "sub");
+    push(["Поступления", ...blanks, ""], "group");
+    for (const l of data.income) push([l.label, ...l.cells.map(money), money(total(l.cells))], l.level ? "sub" : "normal", l.level);
+    push(["Итого поступлений", ...inc.map(fmtMoney), fmtMoney(total(inc))], "total");
+    push(["Выплаты", ...blanks, ""], "group");
+    for (const l of data.expense) push([l.label, ...l.cells.map(money), money(total(l.cells))], l.level ? "sub" : "normal", l.level);
+    push(["Итого выплат", ...exp.map(fmtMoney), fmtMoney(total(exp))], "total");
+    push(["Чистый поток", ...months.map((_, i) => fmtMoney(inc[i] - exp[i])), fmtMoney(total(inc) - total(exp))], "total");
+    push(["Остаток на конец", ...closing.map(fmtMoney), ""], "sub");
+    return {
+      fileName: `ДДС_отчёт_${start}_${end}`,
+      title: "Отчёт о движении денег по статьям",
+      subtitle: `${fmtDate(start)} — ${fmtDate(end)}`,
+      meta: ["Переводы между счетами не показаны — они меняют остатки по счетам, но не общую сумму денег"],
+      orientation: "landscape",
+      sections: [{ headers: ["Статья", ...months.map(monthLabel), "Итого"], rows: rowsOut, rowKinds: kinds, indent, widths: [2.6, ...months.map(() => 1.2), 1.3] }],
+    };
+  }
+
   function exportXls() {
     const body: (string | number)[][] = [];
     body.push(["Остаток на начало", ...opening, ""]);
@@ -458,7 +523,7 @@ function DdsReport({
   if (data.income.length === 0 && data.expense.length === 0) return <Card><Empty>За период нет операций с доходами или расходами</Empty></Card>;
 
   return (
-    <Card title="Отчёт о движении денег" right={<button className={btnGhost} onClick={exportXls}>Скачать Excel</button>}>
+    <Card title="Отчёт о движении денег" right={<div className="flex gap-2"><PdfButton className={btnGhost} build={buildReportPdf} /><button className={btnGhost} onClick={exportXls}>Скачать Excel</button></div>}>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse min-w-[560px]">
           <thead>

@@ -6,6 +6,8 @@ import { useSiteVersion } from "@/components/SiteVersion";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 5; // "Всё время"
@@ -784,8 +786,53 @@ export default function AbcXyzPage() {
             </label>
           </div>
 
-          <div className="text-sm text-muted">
-            Выбрано {filtered.length.toLocaleString("ru-RU")} позиций · выручка {money(totalFilteredRevenue)}
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="text-sm text-muted">
+              Выбрано {filtered.length.toLocaleString("ru-RU")} позиций · выручка {money(totalFilteredRevenue)}
+            </div>
+            <PdfButton
+              disabled={filtered.length === 0}
+              build={(): PdfDoc => ({
+                fileName: "АВС_XYZ_анализ",
+                title: "АВС/XYZ анализ",
+                subtitle: `Дней в периоде: ${windowDays} · склады: ${effectiveStores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c).join(", ")}`,
+                meta: ["АВС — доля в выручке: A — верхние 80 %, B — 15 %, C — 5 %", "XYZ — ровность спроса по дням с продажами"],
+                orientation: "landscape",
+                kpis: [
+                  { label: "Позиций в выборке", value: filtered.length.toLocaleString("ru-RU") },
+                  { label: "Выручка выборки", value: money(totalFilteredRevenue) },
+                ],
+                sections: [
+                  {
+                    title: "Матрица АВС/XYZ",
+                    headers: ["", "X — стабильно", "Y — неровно", "Z — редко"],
+                    align: ["left", "right", "right", "right"],
+                    widths: [0.6, 1.4, 1.4, 1.4],
+                    rows: ABC_OPTIONS.map((a) => [a.value, ...XYZ_OPTIONS.map((x) => {
+                      const cell = matrix[a.value as AbcKey][x.value as XyzKey];
+                      return `${cell.count} поз · ${money(cell.revenue)}`;
+                    })]),
+                  },
+                  {
+                    title: "Позиции",
+                    headers: ["Артикул", "Категория", "ABC", "XYZ", "Выручка", "Штук", "Дней", "Маржа %", "Решение"],
+                    align: ["left", "left", "center", "center", "right", "right", "right", "right", "left"],
+                    widths: [2.6, 1.5, 0.5, 0.5, 1.4, 0.8, 0.6, 0.9, 3.2],
+                    rows: filtered.map((r) => [
+                      r.name,
+                      r.category,
+                      r.abc,
+                      r.xyz,
+                      money(r.revenue),
+                      r.quantity.toLocaleString("ru-RU"),
+                      r.daysWithSales,
+                      `${(r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0).toFixed(0)}%`,
+                      DECISIONS[`${r.abc}${r.xyz}`] ?? "",
+                    ]),
+                  },
+                ],
+              })}
+            />
           </div>
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">

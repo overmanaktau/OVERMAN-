@@ -7,6 +7,8 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { downloadExcel } from "@/lib/exportExcel";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 3; // "С начала месяца"
@@ -444,8 +446,8 @@ export default function StatisticsPage() {
   }
   const maxChartValue = Math.max(1, ...chartDays.flatMap((d) => [d.plan, d.fact]));
 
-  function handleDownload() {
-    if (!range) return;
+  function buildTable() {
+    if (!range) return null;
     const byDate = new Map(current.map((r) => [r.entry_date, r]));
     const headers = [
       "Дата",
@@ -489,7 +491,40 @@ export default function StatisticsPage() {
       ...CHANNEL_DEFS.map((c) => Math.round(totals[c.key])),
       Math.round(channelTotal),
     ]);
-    downloadExcel(`statistika_${ymd(range.start)}_${ymd(range.end)}.csv`, headers, rows);
+    return { headers, rows };
+  }
+
+  function handleDownload() {
+    const t = buildTable();
+    if (!t || !range) return;
+    downloadExcel(`statistika_${ymd(range.start)}_${ymd(range.end)}.csv`, t.headers, t.rows);
+  }
+
+  function buildStatsPdf(): PdfDoc {
+    const t = buildTable();
+    if (!t || !range) throw new Error("Нет данных за период");
+    const ru = (d: Date) => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
+    const last = t.rows.length - 1;
+    return {
+      fileName: `Статистика_${ymd(range.start)}_${ymd(range.end)}`,
+      title: "Статистика маркетинга",
+      subtitle: `${ru(range.start)} — ${ru(range.end)}`,
+      orientation: "landscape",
+      kpis: [
+        { label: "Трафик, факт", value: Math.round(totals.fact).toLocaleString("ru-RU"), note: `план ${Math.round(totals.plan).toLocaleString("ru-RU")}` },
+        { label: "Чеков", value: salesTotals.receipts.toLocaleString("ru-RU") },
+        { label: "Конверсия", value: conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—" },
+        { label: "Средний чек", value: avgCheck !== null ? `${Math.round(avgCheck).toLocaleString("ru-RU")} ₸` : "—" },
+      ],
+      sections: [
+        {
+          headers: t.headers,
+          rows: t.rows.map((r) => r.map((c) => (c === "" ? "—" : c))),
+          rowKinds: t.rows.map((_, i) => (i === last ? "total" : "normal")),
+          align: t.headers.map((_, i) => (i === 0 ? "left" : "right")),
+        },
+      ],
+    };
   }
 
   return (
@@ -498,6 +533,12 @@ export default function StatisticsPage() {
         <div className="text-xs text-mutedLight">Маркетинг</div>
         <div className="flex items-center gap-2.5 justify-between">
           <h1 className="font-serif text-[28px] font-semibold m-0">Статистика</h1>
+          <div className="flex items-center gap-2">
+          <PdfButton
+            disabled={loading || !range || current.length === 0}
+            build={buildStatsPdf}
+            className="text-[13px] font-semibold text-muted border border-border rounded-md px-3 py-2 hover:bg-paper disabled:opacity-50"
+          />
           <button
             type="button"
             onClick={handleDownload}
@@ -512,6 +553,7 @@ export default function StatisticsPage() {
             </svg>
             Скачать
           </button>
+          </div>
         </div>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">

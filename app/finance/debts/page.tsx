@@ -6,6 +6,8 @@ import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { downloadExcel } from "@/lib/exportExcel";
 import KpiCard from "@/components/KpiCard";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 import {
   addDays,
   createChangeRequest,
@@ -217,6 +219,50 @@ function Inner() {
     load();
   }
 
+  function buildDebtsPdf(): PdfDoc {
+    const sections = (["supplier", "store_store"] as Kind[]).flatMap((k) => {
+      const list = withRemaining
+        .filter((x) => x.rem > 0 && x.d.kind === k)
+        .sort((a, b) => counterpartyName(a.d).localeCompare(counterpartyName(b.d), "ru") || (a.d.due_date ?? "9999").localeCompare(b.d.due_date ?? "9999"));
+      if (list.length === 0) return [];
+      const sum = list.reduce((a, x) => a + x.rem, 0);
+      const rowsOut: (string | number)[][] = list.map(({ d, rem }) => [
+        k === "store_store" ? directionLabel(d) : counterpartyName(d),
+        k === "store_store" ? "" : directionLabel(d),
+        d.doc_number ?? "",
+        fmtDate(d.debt_date),
+        d.due_date ? fmtDate(d.due_date) + (d.due_date < today ? " · просрочен" : "") : "—",
+        `${ageDays(d, today)} дн.`,
+        fmtMoney(d.amount),
+        fmtMoney(rem),
+      ]);
+      rowsOut.push(["Итого", "", "", "", "", "", "", fmtMoney(sum)]);
+      return [
+        {
+          title: KIND_LABEL[k],
+          headers: ["Контрагент / долг", "Вид", "№ накладной", "Дата долга", "Срок", "Возраст", "Сумма", "Остаток"],
+          align: ["left", "left", "left", "left", "left", "right", "right", "right"] as ("left" | "right")[],
+          widths: [2.6, 1.8, 1.1, 1, 1.5, 0.9, 1.2, 1.3],
+          rows: rowsOut,
+          rowKinds: rowsOut.map((_, i) => (i === rowsOut.length - 1 ? "total" : "normal")) as ("normal" | "total")[],
+        },
+      ];
+    });
+    return {
+      fileName: `Долги_${today}`,
+      title: "Долги",
+      subtitle: `На ${fmtDate(today)} · ${isAll ? "все магазины" : selected.map(storeName).join(", ")}`,
+      orientation: "landscape",
+      kpis: [
+        { label: "Мы должны", value: fmtMoney(weOwe) },
+        { label: "Нам должны", value: fmtMoney(owedToUs) },
+        { label: "Просрочено нами", value: fmtMoney(overduePayable) },
+        { label: "Просрочено нам", value: fmtMoney(overdueReceivable) },
+      ],
+      sections,
+    };
+  }
+
   function exportXls() {
     downloadExcel(
       "Долги",
@@ -264,6 +310,7 @@ function Inner() {
             <label className="flex items-center gap-2 text-[12px] text-muted">
               <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} /> показывать закрытые
             </label>
+            <PdfButton className={btnGhost} build={buildDebtsPdf} />
             <button className={btnGhost} onClick={exportXls}>Скачать Excel</button>
             {canEdit && (
               <button className={btnPrimary} onClick={() => setEditing({ kind, direction: "payable" })}>

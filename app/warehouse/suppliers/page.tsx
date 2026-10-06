@@ -7,6 +7,8 @@ import { getErrorMessage } from "@/lib/errors";
 import { downloadExcel } from "@/lib/exportExcel";
 import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 
 // Склад → «По поставщикам». Поставщик — из карточки товара в МойСклад.
 // Вкладка «Остатки»: что сейчас лежит у каждого поставщика (штуки и себестоимость).
@@ -230,6 +232,53 @@ function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Найти товар…"
           className="bg-paper border border-border rounded-lg px-3 py-1.5 text-[12.5px] w-[200px]"
+        />
+        <PdfButton
+          label="Скачать PDF"
+          disabled={docs.length === 0}
+          className="text-[12px] font-semibold text-accent bg-surface border border-border rounded-md px-3 py-1.5 hover:bg-paper disabled:opacity-50"
+          build={(): PdfDoc => {
+            const all = sumOf(docs.flatMap((d) => d.lines));
+            const rowsOut: (string | number)[][] = [];
+            const kinds: ("group" | "sub")[] = [];
+            const indent: number[] = [];
+            for (const d of docs) {
+              const t = sumOf(d.lines);
+              const days = daysSince(d.date);
+              rowsOut.push([fmtRuDate(d.date), d.docName || "—", warehouseLabel(d.store), num(t.qty), money(t.cost), num(t.sold), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", t.sold > 0 ? (t.sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0", `${days} дн.`]);
+              kinds.push("group");
+              indent.push(0);
+              for (const l of [...d.lines].sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "ru"))) {
+                const sold = l.quantity - l.remaining;
+                rowsOut.push([l.productName + (l.price !== null ? ` · ${money(l.price)}/шт` : ""), "", "", num(l.quantity), money(l.quantity * (l.price ?? 0)), num(sold), num(l.remaining), l.quantity > 0 ? `${Math.round((sold / l.quantity) * 100)}%` : "—", sold > 0 ? (sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0", ""]);
+                kinds.push("sub");
+                indent.push(1);
+              }
+            }
+            return {
+              fileName: `Приёмки_${supplier}`,
+              title: `Приёмки поставщика ${supplier}`,
+              subtitle: `${stores.map(warehouseLabel).join(", ")}${q ? ` · товар: «${query.trim()}»` : ""}`,
+              meta: ["Продажи списываются с самого старого прихода (FIFO).", "Учтены только документы «Приёмка»."],
+              orientation: "landscape",
+              kpis: [
+                { label: "Приходов", value: String(docs.length) },
+                { label: "Принято, шт", value: num(all.qty) },
+                { label: "Себестоимость", value: money(all.cost) },
+                { label: "Продано", value: all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", note: `${num(all.sold)} из ${num(all.qty)} шт` },
+              ],
+              sections: [
+                {
+                  headers: ["Дата / товар", "Документ", "Склад", "Принято, шт", "Себестоимость", "Продано", "Остаток", "Продано, %", "В день", "С прихода"],
+                  rows: rowsOut,
+                  rowKinds: kinds,
+                  indent,
+                  align: ["left", "left", "left", "right", "right", "right", "right", "right", "right", "right"],
+                  widths: [3.2, 1.2, 1.5, 1, 1.5, 0.9, 0.9, 1, 0.8, 1],
+                },
+              ],
+            };
+          }}
         />
         <div className="text-[11.5px] text-mutedLight max-w-xl">
           Продажи списываются с самого старого прихода. «В день» — продано ÷ дней с прихода. Только документы «Приёмка» (перемещения и оприходования не видны).
@@ -705,6 +754,50 @@ export default function SuppliersPage() {
             className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px] w-[220px]"
           />
         </label>
+        <PdfButton
+          disabled={rows.length === 0}
+          build={(): PdfDoc => {
+            const stale = tab === "stale";
+            const labels = tableStores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? (c === "frozen" ? "Заморозка" : c));
+            const supplierStock = (r: SupplierRow) => (stale ? stockTotalsForStale.get(r.supplier) ?? 0 : r.money);
+            const sumSupplierStock = rows.reduce((a, r) => a + supplierStock(r), 0);
+            const body: (string | number)[][] = rows.map((r) =>
+              stale
+                ? [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(supplierStock(r), warehouseTotal), pct(r.money, supplierStock(r)), r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`]
+                : [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(r.money, warehouseTotal), money(r.saleValue)]
+            );
+            const sumArticles = rows.reduce((a, r) => a + r.articles, 0);
+            body.push(
+              stale
+                ? ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(sumSupplierStock, warehouseTotal), pct(totalMoney, sumSupplierStock), ""]
+                : ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(totalMoney, warehouseTotal), money(totalSale)]
+            );
+            return {
+              fileName: stale ? "Зависшие_по_поставщикам" : "Остатки_по_поставщикам",
+              title: stale ? "Зависшие остатки по поставщикам" : "Остатки по поставщикам",
+              subtitle: `Склады: ${labels.join(", ")}${search.trim() ? ` · поставщик: «${search.trim()}»` : ""}`,
+              meta: stale
+                ? [`Зависшим считается товар без продаж и приходов дольше ${STALE_DAYS} дней`, "«Доля склада» — доля поставщика в себестоимости всего склада", "«Зависло у него» — какая часть остатков самого поставщика зависла"]
+                : ["«Доля склада» — доля поставщика в себестоимости всего склада", "Поставщик — из карточки товара в МойСклад"],
+              kpis: [
+                { label: "Поставщиков", value: String(rows.length) },
+                { label: "Штук", value: num(totalStock) },
+                { label: stale ? "Себестоимость зависшего" : "Себестоимость", value: money(totalMoney) },
+                { label: "По цене продажи", value: money(totalSale) },
+              ],
+              sections: [
+                {
+                  headers: stale
+                    ? ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада", "Зависло у него", "Дней без продаж (макс.)"]
+                    : ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада", "По цене продажи"],
+                  rows: body,
+                  rowKinds: body.map((_, i) => (i === body.length - 1 ? "total" : "normal")),
+                  widths: stale ? [2.6, 1, 1, 1.7, 1.1, 1.1, 1.5] : [2.8, 1, 1, 1.7, 1.2, 1.7],
+                },
+              ],
+            };
+          }}
+        />
         <button type="button" onClick={exportXls} className="text-[13px] font-semibold text-accent bg-surface border border-border rounded-md px-3.5 py-2 hover:bg-paper">
           Скачать Excel
         </button>

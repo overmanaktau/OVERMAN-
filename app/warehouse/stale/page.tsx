@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 
 // Products currently in stock with zero recorded sales in this many days —
 // computed from our own synced sales history (moysklad_product_sales_daily),
@@ -610,6 +612,42 @@ export default function StaleInventoryPage() {
             className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px] w-[220px]"
           />
         </label>
+        <PdfButton
+          disabled={loading || rows.length === 0}
+          build={(): PdfDoc => {
+            const labels = effectiveStores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c);
+            const toRows = (list: StaleRow[]) =>
+              sortRows(bySearch(list), sortField).map((r) => [r.name, r.stock.toLocaleString("ru-RU"), money(r.money), money(r.saleValue), r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`]);
+            const sections: PdfDoc["sections"] = [
+              {
+                title: `Зависшие остатки — ${bySearch(rows).length} артикулов`,
+                headers: ["Артикул", "Остаток, шт", "Деньги (себестоимость)", "По цене продажи", "Без продаж"],
+                widths: [3.4, 1, 1.6, 1.6, 1.2],
+                rows: toRows(rows),
+              },
+            ];
+            if (frozenRows.length > 0) {
+              sections.push({
+                title: `Заморозка — ${bySearch(frozenRows).length} артикулов`,
+                note: "Товар на складах заморозки — отдельно от городов, ждёт следующего сезона.",
+                headers: ["Артикул", "Остаток, шт", "Деньги (себестоимость)", "По цене продажи", "Без продаж"],
+                widths: [3.4, 1, 1.6, 1.6, 1.2],
+                rows: toRows(frozenRows),
+              });
+            }
+            return {
+              fileName: "Зависшие_остатки",
+              title: "Зависшие остатки",
+              subtitle: `Склады: ${labels.join(", ")} · товар не продавался ${STALE_DAYS}+ дней${search.trim() ? ` · поиск: «${search.trim()}»` : ""}`,
+              kpis: [
+                { label: "Зависло дольше " + STALE_DAYS + " дней", value: `${rows.length.toLocaleString("ru-RU")} артикулов` },
+                { label: "Денег в них (себестоимость)", value: money(rows.reduce((a, r) => a + r.money, 0)) },
+                { label: "По цене продажи", value: money(rows.reduce((a, r) => a + r.saleValue, 0)) },
+              ],
+              sections,
+            };
+          }}
+        />
       </div>
 
       {loading ? (

@@ -6,6 +6,8 @@ import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { downloadExcel } from "@/lib/exportExcel";
 import KpiCard from "@/components/KpiCard";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 import {
   computePnl,
   EXPENSE_INDICATORS,
@@ -199,6 +201,62 @@ function Inner() {
     return near ? "text-[#B8752E]" : "text-[#A34B36]";
   }
 
+  function buildOpiuPdf(): PdfDoc {
+    const ruDate = (iso: string) => iso.split("-").reverse().join(".");
+    const items = total ? flat(total.rows) : [];
+    const kinds = items.map(({ row, depth }) => (row.type === "total" ? "total" : row.type === "subtotal" ? "group" : depth > 0 ? "sub" : "normal") as "total" | "group" | "sub" | "normal");
+    const indent = items.map(({ depth }) => depth);
+    const kpis = [
+      { label: "Выручка", value: revenue ? fmtMoney(revenue.fact) : "—" },
+      { label: "Валовая прибыль", value: gross ? fmtMoney(gross.fact) : "—", note: marginPct === null ? undefined : `маржа ${marginPct.toFixed(1)}%` },
+      { label: "Расходы", value: total ? fmtMoney(total.expenses.fact) : "—", note: expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от выручки` },
+      { label: "Рентабельность", value: net ? fmtMoney(net.fact) : "—", note: netPct === null ? undefined : `${netPct.toFixed(1)}% от выручки` },
+    ];
+    const common = { subtitle: `${ruDate(start)} — ${ruDate(end)} · отчёт ${storeScope}`, kpis, orientation: "landscape" as const };
+    if (view === "months") {
+      return {
+        ...common,
+        fileName: `ОПИУ_по_месяцам_${start}_${end}`,
+        title: "ОПИУ — прибыли и убытки по месяцам",
+        meta: ["В каждой ячейке: сумма и процент от выручки месяца. У себестоимости по категории — процент от выручки этой категории."],
+        sections: [
+          {
+            headers: ["Статья", ...columns.map((c) => monthLabel(c.month)), "Итого"],
+            rows: items.map(({ row }) => [
+              row.label,
+              ...columns.map((c) => {
+                const cell = c.cells.get(row.key);
+                return cell && cell.fact !== 0 ? `${fmtNum(cell.fact)}\n${pctText(cell.pct)}` : "—";
+              }),
+              (totalCells.get(row.key)?.fact ?? 0) !== 0 ? `${fmtNum(totalCells.get(row.key)!.fact)}\n${pctText(totalCells.get(row.key)!.pct)}` : "—",
+            ]),
+            rowKinds: kinds,
+            indent,
+            widths: [2.8, ...columns.map(() => 1.25), 1.4],
+          },
+        ],
+      };
+    }
+    return {
+      ...common,
+      fileName: `ОПИУ_план_факт_${start}_${end}`,
+      title: "ОПИУ — план и факт",
+      meta: ["План считается на дату: по неоконченному периоду берётся часть плана до сегодняшнего дня."],
+      sections: [
+        {
+          headers: ["Статья", "План", "Факт", "Отклонение", "% плана"],
+          rows: items.map(({ row }) => {
+            const diff = row.fact - row.plan;
+            return [row.label, row.plan ? fmtMoney(row.plan) : "—", fmtMoney(row.fact), row.plan ? `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${fmtMoney(Math.abs(diff))}` : "—", row.plan > 0 ? `${Math.round((row.fact / row.plan) * 100)}%` : "—"];
+          }),
+          rowKinds: kinds,
+          indent,
+          widths: [3, 1.4, 1.4, 1.4, 0.9],
+        },
+      ],
+    };
+  }
+
   function exportXls() {
     if (!total) return;
     if (view === "months") {
@@ -258,6 +316,7 @@ function Inner() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <PeriodTabs preset={period.preset} onPreset={period.setPreset} from={period.from} onFrom={period.setFrom} to={period.to} onTo={period.setTo} />
         <div className="flex items-center gap-2">
+          <PdfButton className={btnGhost} build={buildOpiuPdf} disabled={!total} />
           <button className={btnGhost} onClick={exportXls} disabled={!total}>Скачать Excel</button>
           {canEdit && <button className={btnPrimary} onClick={() => setPlanOpen(true)}>Внести план</button>}
         </div>

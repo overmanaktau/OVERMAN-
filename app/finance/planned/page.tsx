@@ -6,6 +6,8 @@ import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { downloadExcel } from "@/lib/exportExcel";
 import KpiCard from "@/components/KpiCard";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 import {
   accountBalance,
   debtDirection,
@@ -160,6 +162,45 @@ function Inner() {
     load();
   }
 
+  function buildPlannedPdf(): PdfDoc {
+    return {
+      fileName: `Плановые_платежи_${today}`,
+      title: "Плановые платежи",
+      subtitle: `На ${fmtDate(today)} · ${isAll ? "все магазины" : selected.map(storeName).join(", ")}`,
+      meta: ["В прогноз входят остаток на счетах, плановые платежи и долги со сроком оплаты. Будущая выручка от продаж не учитывается."],
+      orientation: "landscape",
+      kpis: [
+        { label: "Просрочено", value: fmtMoney(sum(overdue)), note: `${overdue.length} шт.` },
+        { label: `Ближайшие ${alertDays} дн.`, value: fmtMoney(sum(soon)), note: `${soon.length} шт.` },
+        { label: "Платежей на 30 дней", value: fmtMoney(sum(next30.filter((i) => i.kind === "expense"))), note: `ожидаем прихода: ${fmtMoney(sum(next30.filter((i) => i.kind === "income")))}` },
+        { label: "Кассовый разрыв", value: firstGap ? `с ${fmtDate(firstGap.from)}` : "не ожидается", note: firstGap ? `остаток ${fmtMoney(firstGap.end)}` : "на 8 недель вперёд" },
+      ],
+      sections: [
+        {
+          title: "Прогноз остатка денег на 8 недель",
+          note: `Сейчас на счетах: ${fmtMoney(forecast.start)}`,
+          headers: ["Неделя", "Приход", "Выплаты", "Остаток на конец"],
+          widths: [2.4, 1.3, 1.3, 1.5],
+          rows: forecast.weeks.map((w) => [`${fmtDate(w.from)} — ${fmtDate(w.to)}`, w.income ? fmtMoney(w.income) : "—", w.expense ? fmtMoney(w.expense) : "—", fmtMoney(w.end)]),
+        },
+        {
+          title: "Платежи",
+          headers: ["Срок", "Статья", "Магазин", "Контрагент / комментарий", "Повтор", "Сумма"],
+          align: ["left", "left", "left", "left", "left", "right"],
+          widths: [1.1, 2.2, 1.1, 2.4, 1.3, 1.3],
+          rows: list.map((i) => [
+            fmtDate(i.due_date) + (i.status === "paid" ? " · оплачен" : i.due_date < today ? " · просрочен" : ""),
+            categoryPath(ref.categories, i.category_id),
+            storeName(i.store),
+            [supplierName(i.supplier_id), i.comment].filter(Boolean).join(" · "),
+            REPEAT_LABEL[i.repeat],
+            `${i.kind === "income" ? "+" : "−"}${fmtMoney(i.amount)}`,
+          ]),
+        },
+      ],
+    };
+  }
+
   function exportXls() {
     downloadExcel(
       "Плановые_платежи",
@@ -224,6 +265,7 @@ function Inner() {
                 <button key={k} onClick={() => setFilter(k)} className={`text-[12px] rounded px-3 py-1 ${filter === k ? "bg-accent text-paper font-bold" : "text-muted font-medium"}`}>{l}</button>
               ))}
             </div>
+            <PdfButton className={btnGhost} build={buildPlannedPdf} />
             <button className={btnGhost} onClick={exportXls}>Скачать Excel</button>
             {canEdit && <button className={btnPrimary} onClick={() => setEditing({ due_date: addDays(today, 1), kind: "expense", repeat: "none" })}>+ Платёж</button>}
           </div>

@@ -8,6 +8,8 @@ import { SalesPlanWindow, type PlanRange } from "@/components/SalesPlanWindow";
 import { SalesPlanEntry } from "@/components/SalesPlanEntry";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
+import PdfButton from "@/components/PdfButton";
+import type { PdfDoc } from "@/lib/downloadPdf";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 3; // "С начала месяца"
@@ -656,6 +658,105 @@ export default function SalesPage() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="flex justify-end -mt-2">
+        <PdfButton
+          disabled={loading || registerSales.length === 0}
+          build={(): PdfDoc => {
+            const r = activeCustom
+              ? { start: parseYmd(activeCustom.start), end: parseYmd(activeCustom.end) }
+              : getPeriodRange(periodIndex, new Date());
+            const ru = (d: Date) => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
+            const periodLabel = activeCustom ? "Свой период" : PERIODS[periodIndex];
+            const profitText = (revenue: number, cost: number | null) => {
+              if (cost === null) return "—";
+              const profit = revenue - cost;
+              return `${money(profit)} (${(revenue !== 0 ? (profit / revenue) * 100 : 0).toFixed(1)}%)`;
+            };
+            const avg = (revenue: number, receipts: number) => (receipts > 0 ? money(revenue / receipts) : "—");
+            const depth = (items: number, receipts: number) => (receipts > 0 ? (items / receipts).toFixed(1) : "—");
+
+            // Кассы по городам, с итогом города и общим итогом
+            const regRows: (string | number)[][] = [];
+            const regKinds: ("normal" | "group" | "total")[] = [];
+            for (const g of visibleGroups) {
+              const active = g.rows.filter((x) => !hiddenRegisterIds.has(x.registerId));
+              regRows.push([g.label, "", "", "", "", "", "", ""]);
+              regKinds.push("group");
+              for (const x of active) {
+                const d = displayed(x);
+                regRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), returnSummary(x), profitText(d.revenue, x.cost)]);
+                regKinds.push("normal");
+              }
+              const gRev = active.reduce((a, x) => a + displayed(x).revenue, 0);
+              const gRec = active.reduce((a, x) => a + displayed(x).receipts, 0);
+              const gItems = active.reduce((a, x) => a + displayed(x).items, 0);
+              const gRet = {
+                returnedAmount: active.reduce((a, x) => a + x.returnedAmount, 0),
+                returnedReceipts: active.reduce((a, x) => a + x.returnedReceipts, 0),
+                returnedItems: active.reduce((a, x) => a + x.returnedItems, 0),
+              };
+              regRows.push([`Итого: ${g.label}`, money(gRev), gRec, gItems, avg(gRev, gRec), depth(gItems, gRec), returnSummary(gRet), profitText(gRev, sumCost(active))]);
+              regKinds.push("total");
+            }
+            regRows.push(["Итого", money(totalRevenue), totalReceipts, totalItems, avg(totalRevenue, totalReceipts), depth(totalItems, totalReceipts), returnSummary(totalReturned), profitText(totalRevenue, totalCost)]);
+            regKinds.push("total");
+
+            // Сотрудники по городам
+            const empRows: (string | number)[][] = [];
+            const empKinds: ("normal" | "group" | "total")[] = [];
+            for (const g of visibleEmployeeGroups) {
+              const gt = groupTotals(g.rows);
+              const traffic = [...new Set(g.rows.map((x) => x.store ?? ""))].reduce((a, c) => a + (trafficByStore.get(c) ?? 0), 0);
+              empRows.push([g.label, "", "", "", "", "", "", ""]);
+              empKinds.push("group");
+              for (const x of g.rows) {
+                const d = displayed(x);
+                empRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), conversionLabel(d.receipts, trafficByStore.get(x.store ?? "") ?? 0), profitText(d.revenue, x.cost)]);
+                empKinds.push("normal");
+              }
+              empRows.push([`Итого: ${g.label}`, money(gt.revenue), gt.receipts, gt.items, avg(gt.revenue, gt.receipts), depth(gt.items, gt.receipts), conversionLabel(gt.receipts, traffic), profitText(gt.revenue, gt.cost)]);
+              empKinds.push("total");
+            }
+
+            const sections: PdfDoc["sections"] = [
+              {
+                title: "Продажи по кассам",
+                note: showGross ? "Суммы без учёта возвратов." : "Суммы с учётом возвратов (возврат вычтен из дня, когда он произошёл).",
+                headers: ["Касса", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Возврат", "Валовая прибыль"],
+                align: ["left", "right", "right", "right", "right", "right", "right", "right"],
+                widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.8, 2],
+                rows: regRows,
+                rowKinds: regKinds,
+              },
+            ];
+            if (empRows.length > 0) {
+              sections.push({
+                title: "Продажи по сотрудникам",
+                note: "Конверсия — доля трафика города, обращённая в чеки сотрудника.",
+                headers: ["Сотрудник", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Конверсия", "Валовая прибыль"],
+                align: ["left", "right", "right", "right", "right", "right", "right", "right"],
+                widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.2, 2],
+                rows: empRows,
+                rowKinds: empKinds,
+              });
+            }
+            return {
+              fileName: `Продажа_${ymd(r.start)}_${ymd(r.end)}`,
+              title: "Продажи по кассам и сотрудникам",
+              subtitle: `${periodLabel}: ${ru(r.start)} — ${ru(r.end)}`,
+              orientation: "landscape",
+              kpis: [
+                { label: "Выручка", value: money(totalRevenue) },
+                { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
+                { label: "Средний чек", value: avg(totalRevenue, totalReceipts) },
+                { label: "Конверсия", value: overallConversionPct !== null ? `${overallConversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${totalTraffic.toLocaleString("ru-RU")} посетителей` : undefined },
+              ],
+              sections,
+            };
+          }}
+        />
       </div>
 
       <SalesPlanWindow stores={selectedStores} refreshKey={planVersion} range={planRange} />
