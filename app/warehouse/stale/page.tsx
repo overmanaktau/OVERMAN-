@@ -621,14 +621,14 @@ export default function StaleInventoryPage() {
             // размеры каждого артикула — отдельным блоком, подгружается только если выбран
             const sizesSection = (title: string, list: StaleRow[], stores: string[], days: number): PdfDoc["sections"][number] => ({
               title,
-              hint: "Артикул → размеры: остаток, деньги, сколько дней без продаж. Можно оставить только размеры или только артикулы.",
-              optional: true,
+              hint: "Как на сайте: артикул → размеры с остатком, деньгами и днями без продаж. Можно выбрать нужные артикулы и уровни.",
+              units: sortRows(bySearch(list), sortField).map((r) => r.name),
               levelLabels: ["Только артикулы", "+ размеры"],
               headers: ["Артикул / размер", "Остаток, шт", "Деньги (себестоимость)", "По цене продажи", "Без продаж"],
               widths: [3.4, 1, 1.6, 1.6, 1.2],
               rows: [],
-              load: async () => {
-                const arts = sortRows(bySearch(list), sortField);
+              load: async ({ skip }) => {
+                const arts = sortRows(bySearch(list), sortField).filter((_, i) => !skip.has(i));
                 const skus = new Map<string, (string | number)[][]>();
                 let next = 0;
                 const worker = async () => {
@@ -660,22 +660,26 @@ export default function StaleInventoryPage() {
             });
             const sections: PdfDoc["sections"] = [
               {
-                title: `Зависшие остатки — ${bySearch(rows).length} артикулов`,
+                title: `Краткая сводка: зависшие — ${bySearch(rows).length} артикулов`,
+                hint: "Только артикулы, без размеров.",
+                optional: true,
                 headers: ["Артикул", "Остаток, шт", "Деньги (себестоимость)", "По цене продажи", "Без продаж"],
                 widths: [3.4, 1, 1.6, 1.6, 1.2],
                 rows: toRows(rows),
               },
-              sizesSection("Зависшие: артикулы с размерами", rows, effectiveStores, STALE_DAYS_QUERY),
+              sizesSection(`Зависшие остатки — ${bySearch(rows).length} артикулов, с размерами`, rows, effectiveStores, STALE_DAYS_QUERY),
             ];
             if (frozenRows.length > 0) {
               sections.push({
-                title: `Заморозка — ${bySearch(frozenRows).length} артикулов`,
+                title: `Краткая сводка: заморозка — ${bySearch(frozenRows).length} артикулов`,
+                hint: "Только артикулы, без размеров.",
+                optional: true,
                 note: "Товар на складах заморозки — отдельно от городов, ждёт следующего сезона.",
                 headers: ["Артикул", "Остаток, шт", "Деньги (себестоимость)", "По цене продажи", "Без продаж"],
                 widths: [3.4, 1, 1.6, 1.6, 1.2],
                 rows: toRows(frozenRows),
               });
-              sections.push(sizesSection("Заморозка: артикулы с размерами", frozenRows, ["frozen"], -1));
+              sections.push(sizesSection(`Заморозка — ${bySearch(frozenRows).length} артикулов, с размерами`, frozenRows, ["frozen"], -1));
             }
             return {
               fileName: "Зависшие_остатки",

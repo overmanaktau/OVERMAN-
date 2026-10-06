@@ -856,7 +856,9 @@ export default function SuppliersPage() {
               ],
               sections: [
                 {
-                  title: stale ? "Зависшие по поставщикам" : "Остатки по поставщикам",
+                  title: stale ? "Краткая сводка: зависшие по поставщикам" : "Краткая сводка: остатки по поставщикам",
+                  hint: "Только строки поставщиков, без артикулов и размеров.",
+                  optional: true,
                   headers: stale
                     ? ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада", "Зависло у него", "Дней без продаж (макс.)"]
                     : ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада", "По цене продажи"],
@@ -865,21 +867,23 @@ export default function SuppliersPage() {
                   widths: stale ? [2.6, 1, 1, 1.7, 1.1, 1.1, 1.5] : [2.8, 1, 1, 1.7, 1.2, 1.7],
                 },
                 {
-                  title: "Товары каждого поставщика",
-                  hint: "Поставщик → артикул → размеры: сколько штук, на какую сумму. Можно оставить только нужные уровни и поставщиков.",
-                  optional: true,
+                  title: stale ? "Зависшие по поставщикам — с артикулами и размерами" : "Остатки по поставщикам — с артикулами и размерами",
+                  hint: "Как на сайте: поставщик → артикул → размеры, с долей склада и суммами. Можно оставить только нужных поставщиков и нужные уровни.",
+                  units: rows.map((r) => r.supplier),
                   levelLabels: ["Только поставщики", "+ артикулы", "+ артикулы и размеры"],
-                  headers: ["Поставщик / артикул / размер", "Штук", "Себестоимость", "Цена прихода", stale ? "Дней без продаж" : "По цене продажи"],
-                  widths: [3.6, 0.9, 1.6, 1.3, 1.5],
+                  headers: stale
+                    ? ["Поставщик / артикул / размер", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада", "Зависло у него", "Дней без продаж (макс.)"]
+                    : ["Поставщик / артикул / размер", "Артикулов", "Штук", "Себестоимость", "Доля склада", "По цене продажи"],
+                  widths: stale ? [3.4, 0.9, 0.9, 1.6, 1.1, 1.1, 1.5] : [3.6, 0.9, 0.9, 1.6, 1.2, 1.6],
                   rows: [],
-                  load: async () => {
+                  load: async ({ skip }) => {
                     type Raw = { product_ms_id: string; product_name: string; article: string; stock: number; money: number; sale_value: number; buy_price?: number | null; days_since_last_sale?: number | null };
-                    const names = rows.map((r) => r.supplier);
+                    const chosen = rows.filter((_, i) => !skip.has(i));
                     const itemsBy = new Map<string, ItemRow[]>();
                     let next = 0;
                     const worker = async () => {
-                      while (next < names.length) {
-                        const name = names[next++];
+                      while (next < chosen.length) {
+                        const name = chosen[next++].supplier;
                         const raw = await fetchAllRows<Raw>((from, to) =>
                           (stale
                             ? supabase.rpc("stale_by_supplier_items", { p_stale_days: STALE_DAYS_QUERY, p_stores: tableStores, p_supplier: name })
@@ -903,23 +907,46 @@ export default function SuppliersPage() {
                     };
                     await Promise.all([worker(), worker(), worker(), worker()]);
                     const out: (string | number)[][] = [];
-                    const kinds: ("group" | "sub")[] = [];
+                    const kinds: ("group" | "sub" | "total")[] = [];
                     const indent: number[] = [];
                     const last = (v: number | null) => (v === null ? "не продавался" : `${v} дн.`);
-                    for (const r of rows) {
-                      out.push([r.supplier, num(r.stock), money(r.money), "", stale ? (r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`) : money(r.saleValue)]);
+                    for (const r of chosen) {
+                      const own = supplierStock(r);
+                      out.push(
+                        stale
+                          ? [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(own, warehouseTotal), pct(r.money, own), last(r.maxDays)]
+                          : [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(r.money, warehouseTotal), money(r.saleValue)]
+                      );
                       kinds.push("group");
                       indent.push(0);
                       for (const g of groupByArticle(itemsBy.get(r.supplier) ?? [])) {
-                        out.push([g.article, num(g.stock), money(g.money), "", stale ? last(g.maxDays) : money(g.saleValue)]);
+                        out.push(
+                          stale
+                            ? [g.article, "", num(g.stock), money(g.money), pct(g.money, warehouseTotal), "", last(g.maxDays)]
+                            : [g.article, "", num(g.stock), money(g.money), pct(g.money, warehouseTotal), money(g.saleValue)]
+                        );
                         kinds.push("sub");
                         indent.push(1);
                         for (const it of [...g.items].sort((a, b) => b.stock - a.stock)) {
-                          out.push([it.name, num(it.stock), money(it.money), it.buyPrice !== null ? money(it.buyPrice) : "", stale ? last(it.days) : money(it.saleValue)]);
+                          const name = it.name + (it.buyPrice !== null ? ` · ${money(it.buyPrice)}/шт` : "");
+                          out.push(
+                            stale
+                              ? [name, "", num(it.stock), money(it.money), pct(it.money, warehouseTotal), "", last(it.days)]
+                              : [name, "", num(it.stock), money(it.money), pct(it.money, warehouseTotal), money(it.saleValue)]
+                          );
                           kinds.push("sub");
                           indent.push(2);
                         }
                       }
+                    }
+                    if (chosen.length === rows.length) {
+                      out.push(
+                        stale
+                          ? ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(sumSupplierStock, warehouseTotal), pct(totalMoney, sumSupplierStock), ""]
+                          : ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(totalMoney, warehouseTotal), money(totalSale)]
+                      );
+                      kinds.push("total");
+                      indent.push(0);
                     }
                     return { headers: [], rows: out, rowKinds: kinds, indent };
                   },

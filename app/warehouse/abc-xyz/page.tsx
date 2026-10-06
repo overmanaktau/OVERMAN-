@@ -357,6 +357,9 @@ function MultiSelectFilter({
   );
 }
 
+// до скольки позиций размеры подгружаются в PDF по умолчанию (больше — по запросу, это сотни запросов)
+const ROWS_WITH_SIZES_BY_DEFAULT = 300;
+
 export default function AbcXyzPage() {
   const { isAdmin, permissions, accessibleStoreCodes } = useAuth();
   const { mobileLayout } = useSiteVersion();
@@ -815,6 +818,8 @@ export default function AbcXyzPage() {
                   },
                   {
                     title: "Позиции",
+                    hint: filtered.length <= ROWS_WITH_SIZES_BY_DEFAULT ? "Без размеров (подробная версия — ниже)." : undefined,
+                    optional: filtered.length <= ROWS_WITH_SIZES_BY_DEFAULT,
                     headers: ["Артикул", "Категория", "ABC", "XYZ", "Выручка", "Штук", "Дней", "Маржа %", "Решение"],
                     align: ["left", "left", "center", "center", "right", "right", "right", "right", "left"],
                     widths: [2.6, 1.5, 0.5, 0.5, 1.4, 0.8, 0.6, 0.9, 3.2],
@@ -831,38 +836,53 @@ export default function AbcXyzPage() {
                     ]),
                   },
                   {
-                    title: "Размеры каждой позиции",
-                    hint: `Артикул → размеры: выручка и штуки за период. Для ${filtered.length.toLocaleString("ru-RU")} позиций из текущей выборки — чем их меньше (фильтр), тем быстрее.`,
-                    optional: true,
+                    title: `Позиции с размерами — ${filtered.length.toLocaleString("ru-RU")}`,
+                    hint: filtered.length > ROWS_WITH_SIZES_BY_DEFAULT
+                      ? "Как на сайте: артикул → размеры. Позиций много, подгрузка размеров займёт время — по умолчанию выключено; можно выбрать нужные позиции."
+                      : "Как на сайте: артикул → размеры (выручка и штуки за период). Можно выбрать нужные позиции и уровни.",
+                    optional: filtered.length > ROWS_WITH_SIZES_BY_DEFAULT,
+                    units: filtered.map((r) => r.name),
                     levelLabels: ["Только артикулы", "+ размеры"],
-                    headers: ["Артикул / размер", "Выручка", "Штук"],
-                    widths: [4, 1.5, 1],
+                    headers: ["Артикул / размер", "Категория", "ABC", "XYZ", "Выручка", "Штук", "Дней", "Маржа %", "Решение"],
+                    align: ["left", "left", "center", "center", "right", "right", "right", "right", "left"],
+                    widths: [2.6, 1.5, 0.5, 0.5, 1.4, 0.8, 0.6, 0.9, 3.2],
                     rows: [],
-                    load: async () => {
+                    load: async ({ skip }) => {
+                      const arts = filtered.filter((_, i) => !skip.has(i));
                       const skus = new Map<string, (string | number)[][]>();
                       let next = 0;
                       const worker = async () => {
-                        while (next < filtered.length) {
-                          const a = filtered[next++];
+                        while (next < arts.length) {
+                          const a = arts[next++];
                           const raw = await fetchAllRows<{ product_name: string; revenue: number; quantity: number }>((from_, to_) =>
                             supabase
                               .rpc("product_sales_summary_by_sku", { p_from: range.from, p_to: range.to, p_stores: effectiveStores, p_article: a.id })
                               .range(from_, to_)
                           );
                           raw.sort((x, y) => y.quantity - x.quantity);
-                          skus.set(a.id, raw.map((x) => [x.product_name, money(x.revenue), Number(x.quantity).toLocaleString("ru-RU")]));
+                          skus.set(a.id, raw.map((x) => [x.product_name, "", "", "", money(x.revenue), Number(x.quantity).toLocaleString("ru-RU"), "", "", ""]));
                         }
                       };
                       await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
                       const out: (string | number)[][] = [];
                       const kinds: ("group" | "sub")[] = [];
                       const indent: number[] = [];
-                      for (const a of filtered) {
-                        out.push([a.name, money(a.revenue), a.quantity.toLocaleString("ru-RU")]);
+                      for (const r of arts) {
+                        out.push([
+                          r.name,
+                          r.category,
+                          r.abc,
+                          r.xyz,
+                          money(r.revenue),
+                          r.quantity.toLocaleString("ru-RU"),
+                          r.daysWithSales,
+                          `${(r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0).toFixed(0)}%`,
+                          DECISIONS[`${r.abc}${r.xyz}`] ?? "",
+                        ]);
                         kinds.push("group");
                         indent.push(0);
-                        for (const r of skus.get(a.id) ?? []) {
-                          out.push(r);
+                        for (const x of skus.get(r.id) ?? []) {
+                          out.push(x);
                           kinds.push("sub");
                           indent.push(1);
                         }

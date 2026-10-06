@@ -226,17 +226,32 @@ function Inner() {
         .sort((a, b) => counterpartyName(a.d).localeCompare(counterpartyName(b.d), "ru") || (a.d.due_date ?? "9999").localeCompare(b.d.due_date ?? "9999"));
       if (list.length === 0) return [];
       const sum = list.reduce((a, x) => a + x.rem, 0);
-      const rowsOut: (string | number)[][] = list.map(({ d, rem }) => [
-        k === "store_store" ? directionLabel(d) : counterpartyName(d),
-        k === "store_store" ? "" : directionLabel(d),
-        d.doc_number ?? "",
-        fmtDate(d.debt_date),
-        d.due_date ? fmtDate(d.due_date) + (d.due_date < today ? " · просрочен" : "") : "—",
-        `${ageDays(d, today)} дн.`,
-        fmtMoney(d.amount),
-        fmtMoney(rem),
-      ]);
+      const rowsOut: (string | number)[][] = [];
+      const kindsOut: ("normal" | "sub" | "total")[] = [];
+      const indentOut: number[] = [];
+      for (const { d, rem } of list) {
+        rowsOut.push([
+          k === "store_store" ? directionLabel(d) : counterpartyName(d),
+          k === "store_store" ? "" : directionLabel(d),
+          d.doc_number ?? "",
+          fmtDate(d.debt_date),
+          d.due_date ? fmtDate(d.due_date) + (d.due_date < today ? " · просрочен" : "") : "—",
+          `${ageDays(d, today)} дн.`,
+          fmtMoney(d.amount),
+          fmtMoney(rem),
+        ]);
+        kindsOut.push("normal");
+        indentOut.push(0);
+        // погашения этого долга — как в раскрытой строке на сайте
+        for (const pm of payments.filter((x) => x.debt_id === d.id)) {
+          rowsOut.push([`Погашение${pm.comment ? ` · ${pm.comment}` : ""}${pm.operation_id ? " · проведено в ДДС" : ""}`, "", "", fmtDate(pm.pay_date), "", "", fmtMoney(pm.amount), ""]);
+          kindsOut.push("sub");
+          indentOut.push(1);
+        }
+      }
       rowsOut.push(["Итого", "", "", "", "", "", "", fmtMoney(sum)]);
+      kindsOut.push("total");
+      indentOut.push(0);
       return [
         {
           title: KIND_LABEL[k],
@@ -244,7 +259,9 @@ function Inner() {
           align: ["left", "left", "left", "left", "left", "right", "right", "right"] as ("left" | "right")[],
           widths: [2.6, 1.8, 1.1, 1, 1.5, 0.9, 1.2, 1.3],
           rows: rowsOut,
-          rowKinds: rowsOut.map((_, i) => (i === rowsOut.length - 1 ? "total" : "normal")) as ("normal" | "total")[],
+          rowKinds: kindsOut,
+          indent: indentOut,
+          levelLabels: ["Только долги", "+ погашения"],
         },
       ];
     });

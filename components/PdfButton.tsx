@@ -79,7 +79,7 @@ function shapeOf(sec: PdfSection): Shape {
   });
   // у подгружаемого блока строк ещё нет — уровни берём из названий уровней
   const maxLevel = sec.load ? Math.max(0, (sec.levelLabels?.length ?? 1) - 1) : levels.reduce((a, b) => Math.max(a, b), 0);
-  return { levels, unitOf, unitLabels, maxLevel };
+  return { levels, unitOf, unitLabels: sec.load ? sec.units ?? [] : unitLabels, maxLevel };
 }
 
 type SecCfg = {
@@ -161,7 +161,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
         let sec = doc.sections[i];
         if (sec.load) {
           setProgress(`Подгружаем: ${sec.title ?? "таблица"}…`);
-          const loaded = await sec.load();
+          const loaded = await sec.load({ skip: cfg.excluded });
           sec = {
             ...sec,
             ...loaded,
@@ -173,7 +173,8 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
           };
         }
         // колонки/уровень настроены по заготовке, у подгруженного блока колонок столько же
-        sections.push(applyCfg(sec, cfg.cols.length === sec.headers.length ? cfg : { ...cfg, cols: sec.headers.map(() => true) }, notes));
+        // у подгруженного блока снятые строки уже не загружались — повторно не вычитаем
+        sections.push(applyCfg(sec, { ...cfg, excluded: sec.rows === doc.sections[i].rows ? cfg.excluded : new Set() }, notes));
       }
       setProgress("Собираем PDF…");
       await downloadPdf({
@@ -239,7 +240,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
                   <input type="checkbox" className={`${box} mt-0.5`} checked={cfg.on} onChange={(e) => setCfg(i, { on: e.target.checked })} />
                   <span className="min-w-0">
                     <span className="font-bold">{sec.title ?? `Таблица ${i + 1}`}</span>
-                    <span className="text-mutedLight"> {lazy ? "· подгрузится при скачивании" : `· ${shape.unitLabels.length || sec.rows.length} строк`}</span>
+                    <span className="text-mutedLight"> {lazy ? `· ${shape.unitLabels.length > 0 ? `${shape.unitLabels.length} строк, ` : ""}подгрузится при скачивании` : `· ${shape.unitLabels.length || sec.rows.length} строк`}</span>
                     {sec.hint && <span className="block text-[12px] text-muted font-normal">{sec.hint}</span>}
                   </span>
                 </label>
@@ -285,7 +286,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
                       )}
                     </div>
 
-                    {!lazy && shape.unitLabels.length > 1 && (
+                    {shape.unitLabels.length > 1 && (
                       <div className="flex flex-col gap-1.5">
                         <button type="button" className={`${linkBtn} text-left w-fit`} onClick={() => toggleOpen(`r${i}`)}>
                           {rowsOpen ? "▾" : "▸"} Строки: {shape.unitLabels.length - cfg.excluded.size} из {shape.unitLabels.length}
