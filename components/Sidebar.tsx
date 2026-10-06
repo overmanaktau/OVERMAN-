@@ -214,21 +214,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Меню спрятано и открывается одной кнопкой. На телефоне — верхняя панель
-          с кнопкой, на компьютере — одна плавающая кнопка в углу. */}
-      {!mobileLayout && (
-        <button
-          type="button"
-          aria-label="Открыть меню"
-          onClick={() => setMobileOpen(true)}
-          className="fixed top-4 left-4 z-40 w-11 h-11 rounded-lg bg-sidebar text-sidebarText border border-[#3A362E] shadow-md flex items-center justify-center hover:opacity-90"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M3 6h18M3 12h18M3 18h18" />
-          </svg>
-        </button>
-      )}
-      {mobileLayout && (
+      {/* Меню спрятано и открывается одной кнопкой в верхней панели (на любом экране). */}
         <div className="fixed top-0 left-0 right-0 h-14 bg-sidebar border-b border-[#3A362E] z-40 flex items-center px-4 gap-3">
           <button
             type="button"
@@ -242,7 +228,6 @@ export default function Sidebar() {
           </button>
           <div className="font-serif text-lg font-semibold tracking-wide text-sidebarText">OVERMAN</div>
         </div>
-      )}
 
       {mobileOpen && <div className="fixed inset-0 bg-black/50 z-40" onClick={closeMobile} />}
 

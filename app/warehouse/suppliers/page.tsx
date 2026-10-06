@@ -215,49 +215,50 @@ function SupplierTable({
             </div>
 
             {isOpen && (
-              <div className="pl-7 pr-2 pb-3">
-                {loading.has(r.supplier) && <div className="text-[12.5px] text-muted py-2">Загрузка товаров…</div>}
-                {itemError && !items && <div className="text-[12.5px] text-[#A34B36] py-2">{itemError}</div>}
-                {items && groups.length === 0 && <div className="text-[12.5px] text-mutedLight py-2">Нет товаров.</div>}
+              <div className="pb-2 bg-paper/40">
+                {loading.has(r.supplier) && <div className="text-[12.5px] text-muted py-2 pl-9">Загрузка товаров…</div>}
+                {itemError && !items && <div className="text-[12.5px] text-[#A34B36] py-2 pl-9">{itemError}</div>}
+                {items && groups.length === 0 && <div className="text-[12.5px] text-mutedLight py-2 pl-9">Нет товаров.</div>}
                 {groups.map((g) => {
                   const key = `${r.supplier}|${g.article}`;
                   const articleOpen = openArticles.has(key);
                   return (
                     <div key={key} className="border-t border-borderSoft">
                       <div
-                        className="grid grid-cols-[1.7fr_0.6fr_1fr_1fr] gap-3 py-2 items-center text-[12.5px] cursor-pointer hover:bg-paper"
+                        className={`grid ${grid} gap-3 py-2 items-center text-[12.5px] cursor-pointer hover:bg-paper`}
                         onClick={() => toggleArticle(key)}
                         title="Показать размеры"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0" style={{ paddingLeft: 24 }}>
                           <Chevron open={articleOpen} />
                           <span className="break-words">{g.article}</span>
                         </div>
-                        <div className="num text-right">{num(g.stock)} шт</div>
+                        <div />
+                        <div className="num text-right">{num(g.stock)}</div>
                         <div className="num text-right">{money(g.money)}</div>
+                        <div className="num text-right text-muted">{pct(g.money, r.money)}</div>
                         <div className="num text-right text-muted">
                           {tab === "stale" ? (g.maxDays === null ? "не продавался" : `${g.maxDays} дн.`) : money(g.saleValue)}
                         </div>
                       </div>
-                      {articleOpen && (
-                        <div className="pl-7 pb-1.5">
-                          {g.items
-                            .sort((a, b) => b.stock - a.stock)
-                            .map((it) => (
-                              <div key={it.id} className="grid grid-cols-[1.7fr_0.6fr_1fr_1fr] gap-3 py-1 items-center text-[12px] text-muted">
-                                <div className="break-words">{it.name}</div>
-                                <div className="num text-right">{num(it.stock)} шт</div>
-                                <div className="num text-right">
-                                  {money(it.money)}
-                                  {it.buyPrice !== null && <span className="text-mutedLight"> · {money(it.buyPrice)}/шт</span>}
-                                </div>
-                                <div className="num text-right text-mutedLight">
-                                  {tab === "stale" ? (it.days === null ? "не продавался" : `${it.days} дн.`) : money(it.saleValue)}
-                                </div>
+                      {articleOpen &&
+                        [...g.items]
+                          .sort((a, b) => b.stock - a.stock)
+                          .map((it) => (
+                            <div key={it.id} className={`grid ${grid} gap-3 py-1.5 items-center text-[12px] text-muted`}>
+                              <div className="break-words min-w-0" style={{ paddingLeft: 56 }}>
+                                {it.name}
+                                {it.buyPrice !== null && <span className="text-mutedLight"> · {money(it.buyPrice)}/шт</span>}
                               </div>
-                            ))}
-                        </div>
-                      )}
+                              <div />
+                              <div className="num text-right">{num(it.stock)}</div>
+                              <div className="num text-right">{money(it.money)}</div>
+                              <div className="num text-right text-mutedLight">{pct(it.money, r.money)}</div>
+                              <div className="num text-right text-mutedLight">
+                                {tab === "stale" ? (it.days === null ? "не продавался" : `${it.days} дн.`) : money(it.saleValue)}
+                              </div>
+                            </div>
+                          ))}
                     </div>
                   );
                 })}
