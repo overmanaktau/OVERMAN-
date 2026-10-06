@@ -118,18 +118,31 @@ function daysSince(iso: string) {
   return Math.max(0, Math.round((today - then) / 86400000));
 }
 
-function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[] }) {
+// приёмки одного поставщика не меняются, пока открыта страница, — повторно не грузим
+const receiptsCache = new Map<string, ReceiptLine[]>();
+
+// productIds — показать приходы только этих товаров (кнопка «Приёмки» у товара или размера);
+// без него — все приходы поставщика
+function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: string; stores: string[]; productIds?: string[]; title?: string }) {
   const [lines, setLines] = useState<ReceiptLine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [openDocs, setOpenDocs] = useState<Set<string>>(new Set());
+  const [allOpen, setAllOpen] = useState(!!productIds);
   const [shown, setShown] = useState(DOCS_PAGE);
   const storesKey = stores.join(",");
+  const productKey = productIds ? productIds.join(",") : "";
 
   useEffect(() => {
     let cancelled = false;
-    setLines(null);
+    const cacheKey = `${supplier}|${storesKey}`;
+    const cached = receiptsCache.get(cacheKey);
     setError(null);
+    if (cached) {
+      setLines(cached);
+      return;
+    }
+    setLines(null);
     (async () => {
       try {
         type Raw = {
@@ -146,8 +159,7 @@ function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[
         };
         const raw = await fetchAllRows<Raw>((from, to) => supabase.rpc("supplier_receipts", { p_supplier: supplier, p_stores: stores }).range(from, to));
         if (cancelled) return;
-        setLines(
-          raw.map((r) => ({
+        const mapped = raw.map((r) => ({
             supplyId: r.supply_id,
             docName: r.doc_name ?? "",
             date: r.doc_date,
@@ -158,8 +170,9 @@ function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[
             quantity: Number(r.quantity),
             price: r.price != null ? Number(r.price) : null,
             remaining: Number(r.remaining),
-          }))
-        );
+          }));
+        receiptsCache.set(cacheKey, mapped);
+        setLines(mapped);
       } catch (e) {
         if (!cancelled) setError(getErrorMessage(e));
       }
@@ -174,14 +187,17 @@ function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[
   const docs = useMemo(() => {
     if (!lines) return [];
     const map = new Map<string, ReceiptDoc>();
+    const only = productIds ? new Set(productIds) : null;
     for (const l of lines) {
+      if (only && !only.has(l.productId)) continue;
       if (q && !l.productName.toLowerCase().includes(q)) continue;
       const d = map.get(l.supplyId) ?? { supplyId: l.supplyId, docName: l.docName, date: l.date, store: l.store, lines: [] };
       d.lines.push(l);
       map.set(l.supplyId, d);
     }
     return [...map.values()].sort((a, b) => b.date.localeCompare(a.date) || b.docName.localeCompare(a.docName));
-  }, [lines, q]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, q, productKey]);
 
   const warehouseLabel = (code: string) => WAREHOUSES.find((w) => w.code === code)?.label ?? (code === "frozen" ? "Заморозка" : code);
   const grid = "grid-cols-[0.8fr_1.1fr_1fr_0.7fr_1fr_0.7fr_0.7fr_1fr_0.8fr_0.7fr]";
@@ -225,14 +241,27 @@ function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[
   return (
     <div className="bg-paper/40 border-t border-borderSoft px-3 py-3 min-w-[980px]">
       <div className="flex items-center gap-3 flex-wrap mb-2.5 pl-6">
-        <div className="text-[13px] font-bold">Приёмки поставщика {supplier}</div>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Найти товар…"
-          className="bg-paper border border-border rounded-lg px-3 py-1.5 text-[12.5px] w-[200px]"
-        />
+        <div className="text-[13px] font-bold">{title ? `Приёмки: ${title}` : `Приёмки поставщика ${supplier}`}</div>
+        {!productIds && (
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Найти товар…"
+            className="bg-paper border border-border rounded-lg px-3 py-1.5 text-[12.5px] w-[200px]"
+          />
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setAllOpen((v) => !v);
+            setOpenDocs(new Set());
+          }}
+          disabled={docs.length === 0}
+          className="text-[12px] font-semibold text-accent bg-surface border border-border rounded-md px-3 py-1.5 hover:bg-paper disabled:opacity-50"
+        >
+          {allOpen ? "Свернуть все приходы" : "Раскрыть все приходы"}
+        </button>
         <PdfButton
           label="Скачать PDF"
           disabled={docs.length === 0}
@@ -256,9 +285,9 @@ function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[
               }
             }
             return {
-              fileName: `Приёмки_${supplier}`,
-              title: `Приёмки поставщика ${supplier}`,
-              subtitle: `${stores.map(warehouseLabel).join(", ")}${q ? ` · товар: «${query.trim()}»` : ""}`,
+              fileName: title ? `Приёмки_${title}` : `Приёмки_${supplier}`,
+              title: title ? `Приёмки: ${title}` : `Приёмки поставщика ${supplier}`,
+              subtitle: `${title ? `Поставщик ${supplier} · ` : ""}${stores.map(warehouseLabel).join(", ")}${q ? ` · товар: «${query.trim()}»` : ""}`,
               meta: ["Продажи списываются с самого старого прихода (FIFO).", "Учтены только документы «Приёмка»."],
               orientation: "landscape",
               kpis: [
@@ -304,7 +333,7 @@ function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[
             <div className="text-right">С прихода</div>
           </div>
           {docs.slice(0, shown).map((d) => {
-            const isOpen = openDocs.has(d.supplyId) || (q.length > 0 && d.lines.length <= 12);
+            const isOpen = allOpen ? !openDocs.has(d.supplyId) : openDocs.has(d.supplyId) || (q.length > 0 && d.lines.length <= 12);
             const t = sumOf(d.lines);
             return (
               <div key={d.supplyId} className="border-b border-borderSoft">
@@ -344,6 +373,21 @@ function ReceiptsPanel({ supplier, stores }: { supplier: string; stores: string[
   );
 }
 
+function ReceiptsButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={`text-[11px] font-semibold rounded-md border px-2 py-0.5 flex-none ${active ? "bg-accent text-paper border-accent" : "text-accent border-border hover:bg-paper"}`}
+    >
+      Приёмки
+    </button>
+  );
+}
+
 function SupplierTable({
   tab,
   rows,
@@ -360,6 +404,8 @@ function SupplierTable({
   const [openSuppliers, setOpenSuppliers] = useState<Set<string>>(new Set());
   const [openArticles, setOpenArticles] = useState<Set<string>>(new Set());
   const [openReceipts, setOpenReceipts] = useState<Set<string>>(new Set());
+  // раскрытые приходы отдельного товара (ключ — артикул или id товара)
+  const [openItemReceipts, setOpenItemReceipts] = useState<Set<string>>(new Set());
   const [cache, setCache] = useState<Record<string, ItemRow[]>>({});
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [itemError, setItemError] = useState<string | null>(null);
@@ -370,6 +416,7 @@ function SupplierTable({
     setOpenSuppliers(new Set());
     setOpenArticles(new Set());
     setOpenReceipts(new Set());
+    setOpenItemReceipts(new Set());
     setCache({});
   }, [storesKey, tab]);
 
@@ -423,6 +470,15 @@ function SupplierTable({
         return next;
       });
     }
+  }
+
+  function toggleItemReceipts(key: string) {
+    setOpenItemReceipts((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   function toggleArticle(key: string) {
@@ -520,6 +576,7 @@ function SupplierTable({
                         <div className="flex items-center gap-2 min-w-0" style={{ paddingLeft: 24 }}>
                           <Chevron open={articleOpen} />
                           <span className="break-words">{g.article}</span>
+                          <ReceiptsButton active={openItemReceipts.has(key)} onClick={() => toggleItemReceipts(key)} />
                         </div>
                         <div />
                         <div className="num text-right">{num(g.stock)}</div>
@@ -530,14 +587,21 @@ function SupplierTable({
                           {stale ? (g.maxDays === null ? "не продавался" : `${g.maxDays} дн.`) : money(g.saleValue)}
                         </div>
                       </div>
+                      {openItemReceipts.has(key) && (
+                        <ReceiptsPanel supplier={r.supplier} stores={stores} productIds={g.items.map((x) => x.id)} title={g.article} />
+                      )}
                       {articleOpen &&
                         [...g.items]
                           .sort((a, b) => b.stock - a.stock)
                           .map((it) => (
-                            <div key={it.id} className={`grid ${grid} gap-3 py-1.5 items-center text-[12px] text-muted`}>
-                              <div className="break-words min-w-0" style={{ paddingLeft: 56 }}>
-                                {it.name}
-                                {it.buyPrice !== null && <span className="text-mutedLight"> · {money(it.buyPrice)}/шт</span>}
+                            <div key={it.id}>
+                            <div className={`grid ${grid} gap-3 py-1.5 items-center text-[12px] text-muted`}>
+                              <div className="break-words min-w-0 flex items-center gap-2 flex-wrap" style={{ paddingLeft: 56 }}>
+                                <span>
+                                  {it.name}
+                                  {it.buyPrice !== null && <span className="text-mutedLight"> · {money(it.buyPrice)}/шт</span>}
+                                </span>
+                                <ReceiptsButton active={openItemReceipts.has(it.id)} onClick={() => toggleItemReceipts(it.id)} />
                               </div>
                               <div />
                               <div className="num text-right">{num(it.stock)}</div>
@@ -547,6 +611,10 @@ function SupplierTable({
                               <div className="num text-right text-mutedLight">
                                 {stale ? (it.days === null ? "не продавался" : `${it.days} дн.`) : money(it.saleValue)}
                               </div>
+                            </div>
+                            {openItemReceipts.has(it.id) && (
+                              <ReceiptsPanel supplier={r.supplier} stores={stores} productIds={[it.id]} title={it.name} />
+                            )}
                             </div>
                           ))}
                     </div>
