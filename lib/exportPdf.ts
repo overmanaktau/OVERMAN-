@@ -22,7 +22,8 @@ export type PdfSection = {
   hint?: string; // пояснение под названием в окне выбора
   levelLabels?: string[]; // названия уровней детализации: «Только поставщики», «+ артикулы», …
   units?: string[]; // для load: названия основных строк (чтобы в окне можно было выбрать нужные)
-  load?: (opts: { skip: Set<number> }) => Promise<PdfSection>; // подгрузить строки, только если блок выбран; skip — номера снятых основных строк
+  filters?: { dates?: boolean; query?: string }; // для load: поля «с даты / по дату» и поиск (query — подпись поля)
+  load?: (opts: { skip: Set<number>; from?: string; to?: string; query?: string }) => Promise<PdfSection>; // подгрузить строки, только если блок выбран; skip — номера снятых основных строк
 };
 
 export type PdfDoc = {

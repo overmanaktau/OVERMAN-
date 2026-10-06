@@ -89,10 +89,13 @@ type SecCfg = {
   excluded: Set<number>;
   manual: boolean;
   search: string;
+  from: string;
+  to: string;
+  query: string;
 };
 
 function initialCfg(sec: PdfSection): SecCfg {
-  return { on: !sec.optional, cols: sec.headers.map(() => true), level: shapeOf(sec).maxLevel, excluded: new Set(), manual: false, search: "" };
+  return { on: !sec.optional, cols: sec.headers.map(() => true), level: shapeOf(sec).maxLevel, excluded: new Set(), manual: false, search: "", from: "", to: "", query: "" };
 }
 
 function applyCfg(sec: PdfSection, cfg: SecCfg, withNotes: boolean): PdfSection {
@@ -161,7 +164,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
         let sec = doc.sections[i];
         if (sec.load) {
           setProgress(`Подгружаем: ${sec.title ?? "таблица"}…`);
-          const loaded = await sec.load({ skip: cfg.excluded });
+          const loaded = await sec.load({ skip: cfg.excluded, from: cfg.from || undefined, to: cfg.to || undefined, query: cfg.query.trim() || undefined });
           sec = {
             ...sec,
             ...loaded,
@@ -169,7 +172,13 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
             widths: loaded.widths ?? sec.widths,
             align: loaded.align ?? sec.align,
             title: loaded.title ?? sec.title,
-            note: loaded.note ?? sec.note,
+            note: [
+              loaded.note ?? sec.note,
+              cfg.from || cfg.to ? `Дата прихода: ${cfg.from ? `с ${cfg.from.split("-").reverse().join(".")}` : ""}${cfg.from && cfg.to ? " " : ""}${cfg.to ? `по ${cfg.to.split("-").reverse().join(".")}` : ""}` : "",
+              cfg.query.trim() ? `Поиск: «${cfg.query.trim()}»` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined,
           };
         }
         // колонки/уровень настроены по заготовке, у подгруженного блока колонок столько же
@@ -247,6 +256,32 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
 
                 {cfg.on && (
                   <div className="pl-6 flex flex-col gap-2">
+                    {sec.filters && (
+                      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
+                        {sec.filters.dates && (
+                          <>
+                            <span className="text-muted text-[12.5px]">Дата прихода:</span>
+                            <input type="date" value={cfg.from} max={cfg.to || undefined} onChange={(e) => setCfg(i, { from: e.target.value })} className="bg-paper border border-border rounded-md px-2 py-1 text-[12.5px]" />
+                            <span className="text-muted">—</span>
+                            <input type="date" value={cfg.to} min={cfg.from || undefined} onChange={(e) => setCfg(i, { to: e.target.value })} className="bg-paper border border-border rounded-md px-2 py-1 text-[12.5px]" />
+                            {(cfg.from || cfg.to) && (
+                              <button type="button" className={linkBtn} onClick={() => setCfg(i, { from: "", to: "" })}>
+                                сбросить
+                              </button>
+                            )}
+                          </>
+                        )}
+                        {sec.filters.query && (
+                          <input
+                            type="text"
+                            value={cfg.query}
+                            onChange={(e) => setCfg(i, { query: e.target.value })}
+                            placeholder={sec.filters.query}
+                            className="bg-paper border border-border rounded-md px-2 py-1 text-[12.5px] w-[220px]"
+                          />
+                        )}
+                      </div>
+                    )}
                     {shape.maxLevel > 0 && (
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-muted text-[12.5px]">Детализация:</span>

@@ -121,6 +121,88 @@ function daysSince(iso: string) {
 // приёмки одного поставщика не меняются, пока открыта страница, — повторно не грузим
 const receiptsCache = new Map<string, ReceiptLine[]>();
 
+async function fetchReceiptLines(supplier: string, stores: string[]): Promise<ReceiptLine[]> {
+  const cacheKey = `${supplier}|${stores.join(",")}`;
+  const cached = receiptsCache.get(cacheKey);
+  if (cached) return cached;
+  type Raw = {
+    supply_id: string;
+    doc_name: string | null;
+    doc_date: string;
+    store: string;
+    line_no: number;
+    product_ms_id: string;
+    product_name: string;
+    quantity: number;
+    price: number | null;
+    remaining: number;
+  };
+  const raw = await fetchAllRows<Raw>((from, to) => supabase.rpc("supplier_receipts", { p_supplier: supplier, p_stores: stores }).range(from, to));
+  const mapped = raw.map((r) => ({
+    supplyId: r.supply_id,
+    docName: r.doc_name ?? "",
+    date: r.doc_date,
+    store: r.store,
+    lineNo: r.line_no,
+    productId: r.product_ms_id,
+    productName: r.product_name,
+    quantity: Number(r.quantity),
+    price: r.price != null ? Number(r.price) : null,
+    remaining: Number(r.remaining),
+  }));
+  receiptsCache.set(cacheKey, mapped);
+  return mapped;
+}
+
+function groupDocs(lines: ReceiptLine[]): ReceiptDoc[] {
+  const map = new Map<string, ReceiptDoc>();
+  for (const l of lines) {
+    const d = map.get(l.supplyId) ?? { supplyId: l.supplyId, docName: l.docName, date: l.date, store: l.store, lines: [] };
+    d.lines.push(l);
+    map.set(l.supplyId, d);
+  }
+  return [...map.values()].sort((a, b) => b.date.localeCompare(a.date) || b.docName.localeCompare(a.docName));
+}
+
+const sumLines = (ls: ReceiptLine[]) => {
+  const qty = ls.reduce((a, l) => a + l.quantity, 0);
+  const remaining = ls.reduce((a, l) => a + l.remaining, 0);
+  const cost = ls.reduce((a, l) => a + l.quantity * (l.price ?? 0), 0);
+  return { qty, remaining, sold: qty - remaining, cost };
+};
+
+// «с даты / по дату» и поиск по накладной или товару для PDF
+function filterDocs(docs: ReceiptDoc[], f: { from?: string; to?: string; query?: string }): ReceiptDoc[] {
+  const q = (f.query ?? "").trim().toLowerCase();
+  return docs
+    .filter((d) => (!f.from || d.date >= f.from) && (!f.to || d.date <= f.to))
+    .map((d) => (q && !d.docName.toLowerCase().includes(q) ? { ...d, lines: d.lines.filter((l) => l.productName.toLowerCase().includes(q)) } : d))
+    .filter((d) => d.lines.length > 0);
+}
+
+const RECEIPT_HEADERS = ["Накладная / товар", "Дата", "Склад", "Принято, шт", "Себестоимость", "Продано", "Остаток", "Продано, %", "В день", "С прихода"];
+const RECEIPT_ALIGN: ("left" | "right")[] = ["left", "left", "left", "right", "right", "right", "right", "right", "right", "right"];
+const RECEIPT_WIDTHS = [3.4, 1.1, 1.5, 1, 1.5, 0.9, 0.9, 1, 0.8, 1];
+
+function receiptStats(t: { qty: number; sold: number; remaining: number; cost: number }, days: number): (string | number)[] {
+  return [num(t.qty), money(t.cost), num(t.sold), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", t.sold > 0 ? (t.sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0", `${days} дн.`];
+}
+
+// накладная и её товары; baseIndent — уровень накладной (0 у приёмок одного поставщика, 1 под поставщиком)
+function pushDocRows(out: { rows: (string | number)[][]; kinds: ("group" | "sub" | "total")[]; indent: number[] }, d: ReceiptDoc, baseIndent: number) {
+  const wh = WAREHOUSES.find((w) => w.code === d.store)?.label ?? (d.store === "frozen" ? "Заморозка" : d.store);
+  const days = daysSince(d.date);
+  out.rows.push([d.docName || "без номера", fmtRuDate(d.date), wh, ...receiptStats(sumLines(d.lines), days)]);
+  out.kinds.push(baseIndent === 0 ? "group" : "sub");
+  out.indent.push(baseIndent);
+  for (const l of [...d.lines].sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "ru"))) {
+    const sold = l.quantity - l.remaining;
+    out.rows.push([l.productName + (l.price !== null ? ` · ${money(l.price)}/шт` : ""), "", "", ...receiptStats({ qty: l.quantity, cost: l.quantity * (l.price ?? 0), sold, remaining: l.remaining }, days)]);
+    out.kinds.push("sub");
+    out.indent.push(baseIndent + 1);
+  }
+}
+
 // productIds — показать приходы только этих товаров (кнопка «Приёмки» у товара или размера);
 // без него — все приходы поставщика
 function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: string; stores: string[]; productIds?: string[]; title?: string }) {
@@ -135,48 +217,15 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
 
   useEffect(() => {
     let cancelled = false;
-    const cacheKey = `${supplier}|${storesKey}`;
-    const cached = receiptsCache.get(cacheKey);
     setError(null);
-    if (cached) {
-      setLines(cached);
-      return;
-    }
-    setLines(null);
-    (async () => {
-      try {
-        type Raw = {
-          supply_id: string;
-          doc_name: string | null;
-          doc_date: string;
-          store: string;
-          line_no: number;
-          product_ms_id: string;
-          product_name: string;
-          quantity: number;
-          price: number | null;
-          remaining: number;
-        };
-        const raw = await fetchAllRows<Raw>((from, to) => supabase.rpc("supplier_receipts", { p_supplier: supplier, p_stores: stores }).range(from, to));
-        if (cancelled) return;
-        const mapped = raw.map((r) => ({
-            supplyId: r.supply_id,
-            docName: r.doc_name ?? "",
-            date: r.doc_date,
-            store: r.store,
-            lineNo: r.line_no,
-            productId: r.product_ms_id,
-            productName: r.product_name,
-            quantity: Number(r.quantity),
-            price: r.price != null ? Number(r.price) : null,
-            remaining: Number(r.remaining),
-          }));
-        receiptsCache.set(cacheKey, mapped);
-        setLines(mapped);
-      } catch (e) {
+    setLines(receiptsCache.get(`${supplier}|${storesKey}`) ?? null);
+    fetchReceiptLines(supplier, stores)
+      .then((l) => {
+        if (!cancelled) setLines(l);
+      })
+      .catch((e) => {
         if (!cancelled) setError(getErrorMessage(e));
-      }
-    })();
+      });
     return () => {
       cancelled = true;
     };
@@ -186,16 +235,8 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
   const q = query.trim().toLowerCase();
   const docs = useMemo(() => {
     if (!lines) return [];
-    const map = new Map<string, ReceiptDoc>();
     const only = productIds ? new Set(productIds) : null;
-    for (const l of lines) {
-      if (only && !only.has(l.productId)) continue;
-      if (q && !l.productName.toLowerCase().includes(q)) continue;
-      const d = map.get(l.supplyId) ?? { supplyId: l.supplyId, docName: l.docName, date: l.date, store: l.store, lines: [] };
-      d.lines.push(l);
-      map.set(l.supplyId, d);
-    }
-    return [...map.values()].sort((a, b) => b.date.localeCompare(a.date) || b.docName.localeCompare(a.docName));
+    return groupDocs(lines.filter((l) => (!only || only.has(l.productId)) && (!q || l.productName.toLowerCase().includes(q))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lines, q, productKey]);
 
@@ -211,12 +252,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
     });
   }
 
-  const sumOf = (ls: ReceiptLine[]) => {
-    const qty = ls.reduce((a, l) => a + l.quantity, 0);
-    const remaining = ls.reduce((a, l) => a + l.remaining, 0);
-    const cost = ls.reduce((a, l) => a + l.quantity * (l.price ?? 0), 0);
-    return { qty, remaining, sold: qty - remaining, cost };
-  };
+  const sumOf = sumLines;
 
   function Cells({ qty, cost, sold, remaining, date }: { qty: number; cost: number; sold: number; remaining: number; date: string }) {
     const days = daysSince(date);
@@ -266,49 +302,36 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
           label="Скачать PDF"
           disabled={docs.length === 0}
           className="text-[12px] font-semibold text-accent bg-surface border border-border rounded-md px-3 py-1.5 hover:bg-paper disabled:opacity-50"
-          build={(): PdfDoc => {
-            const all = sumOf(docs.flatMap((d) => d.lines));
-            const rowsOut: (string | number)[][] = [];
-            const kinds: ("group" | "sub")[] = [];
-            const indent: number[] = [];
-            for (const d of docs) {
-              const t = sumOf(d.lines);
-              const days = daysSince(d.date);
-              rowsOut.push([fmtRuDate(d.date), d.docName || "—", warehouseLabel(d.store), num(t.qty), money(t.cost), num(t.sold), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", t.sold > 0 ? (t.sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0", `${days} дн.`]);
-              kinds.push("group");
-              indent.push(0);
-              for (const l of [...d.lines].sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "ru"))) {
-                const sold = l.quantity - l.remaining;
-                rowsOut.push([l.productName + (l.price !== null ? ` · ${money(l.price)}/шт` : ""), "", "", num(l.quantity), money(l.quantity * (l.price ?? 0)), num(sold), num(l.remaining), l.quantity > 0 ? `${Math.round((sold / l.quantity) * 100)}%` : "—", sold > 0 ? (sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0", ""]);
-                kinds.push("sub");
-                indent.push(1);
-              }
-            }
-            return {
-              fileName: title ? `Приёмки_${title}` : `Приёмки_${supplier}`,
-              title: title ? `Приёмки: ${title}` : `Приёмки поставщика ${supplier}`,
-              subtitle: `${title ? `Поставщик ${supplier} · ` : ""}${stores.map(warehouseLabel).join(", ")}${q ? ` · товар: «${query.trim()}»` : ""}`,
-              meta: ["Продажи списываются с самого старого прихода (FIFO).", "Учтены только документы «Приёмка»."],
-              orientation: "landscape",
-              kpis: [
-                { label: "Приходов", value: String(docs.length) },
-                { label: "Принято, шт", value: num(all.qty) },
-                { label: "Себестоимость", value: money(all.cost) },
-                { label: "Продано", value: all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", note: `${num(all.sold)} из ${num(all.qty)} шт` },
-              ],
-              sections: [
-                {
-                  headers: ["Дата / товар", "Документ", "Склад", "Принято, шт", "Себестоимость", "Продано", "Остаток", "Продано, %", "В день", "С прихода"],
-                  levelLabels: ["Только приходы", "+ товары в приходах"],
-                  rows: rowsOut,
-                  rowKinds: kinds,
-                  indent,
-                  align: ["left", "left", "left", "right", "right", "right", "right", "right", "right", "right"],
-                  widths: [3.2, 1.2, 1.5, 1, 1.5, 0.9, 0.9, 1, 0.8, 1],
+          build={(): PdfDoc => ({
+            fileName: title ? `Приёмки_${title}` : `Приёмки_${supplier}`,
+            title: title ? `Приёмки: ${title}` : `Приёмки поставщика ${supplier}`,
+            subtitle: `${title ? `Поставщик ${supplier} · ` : ""}${stores.map(warehouseLabel).join(", ")}${q ? ` · товар: «${query.trim()}»` : ""}`,
+            meta: ["Продажи списываются с самого старого прихода (FIFO).", "Учтены только документы «Приёмка»."],
+            orientation: "landscape",
+            sections: [
+              {
+                title: "Приходы по накладным",
+                hint: "Каждый приход: дата, накладная, сколько принято, продано и осталось. Можно выбрать период, накладные и товары.",
+                units: docs.map((d) => `${fmtRuDate(d.date)} · ${d.docName || "без номера"} · ${warehouseLabel(d.store)}`),
+                levelLabels: ["Только накладные", "+ товары в накладных"],
+                filters: { dates: true, query: "Накладная или товар" },
+                headers: RECEIPT_HEADERS,
+                align: RECEIPT_ALIGN,
+                widths: RECEIPT_WIDTHS,
+                rows: [],
+                load: async ({ skip, from, to, query: fq }) => {
+                  const picked = filterDocs(docs.filter((_, i) => !skip.has(i)), { from, to, query: fq });
+                  const out = { rows: [] as (string | number)[][], kinds: [] as ("group" | "sub" | "total")[], indent: [] as number[] };
+                  for (const d of picked) pushDocRows(out, d, 0);
+                  const all = sumOf(picked.flatMap((d) => d.lines));
+                  out.rows.push(["Итого по выбранным приходам", "", "", num(all.qty), money(all.cost), num(all.sold), num(all.remaining), all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", "", ""]);
+                  out.kinds.push("total");
+                  out.indent.push(0);
+                  return { headers: [], rows: out.rows, rowKinds: out.kinds, indent: out.indent };
                 },
-              ],
-            };
-          }}
+              },
+            ],
+          })}
         />
         <div className="text-[11.5px] text-mutedLight max-w-xl">
           Продажи списываются с самого старого прихода. «В день» — продано ÷ дней с прихода. Только документы «Приёмка» (перемещения и оприходования не видны).
@@ -855,6 +878,48 @@ export default function SuppliersPage() {
                 { label: "По цене продажи", value: money(totalSale) },
               ],
               sections: [
+                {
+                  title: "Приёмки по накладным",
+                  hint: "Каждый приход каждого поставщика: дата, накладная, сколько принято, продано и осталось (продажи списываются с самого старого прихода). Выберите поставщиков, период и накладные.",
+                  optional: true,
+                  units: rows.map((r) => r.supplier),
+                  levelLabels: ["Только поставщики", "+ накладные", "+ накладные и товары"],
+                  filters: { dates: true, query: "Накладная или товар" },
+                  headers: ["Поставщик / накладная / товар", "Дата", "Склад", "Принято, шт", "Себестоимость", "Продано", "Остаток", "Продано, %", "В день", "С прихода"],
+                  align: RECEIPT_ALIGN,
+                  widths: RECEIPT_WIDTHS,
+                  rows: [],
+                  load: async ({ skip, from, to, query: fq }) => {
+                    const chosen = rows.filter((_, i) => !skip.has(i));
+                    const linesBy = new Map<string, ReceiptLine[]>();
+                    let next = 0;
+                    const worker = async () => {
+                      while (next < chosen.length) {
+                        const name = chosen[next++].supplier;
+                        linesBy.set(name, await fetchReceiptLines(name, tableStores));
+                      }
+                    };
+                    await Promise.all([worker(), worker(), worker(), worker()]);
+                    const out = { rows: [] as (string | number)[][], kinds: [] as ("group" | "sub" | "total")[], indent: [] as number[] };
+                    const everything: ReceiptLine[] = [];
+                    for (const r of chosen) {
+                      const docs = filterDocs(groupDocs(linesBy.get(r.supplier) ?? []), { from, to, query: fq });
+                      if (docs.length === 0) continue;
+                      const ls = docs.flatMap((d) => d.lines);
+                      everything.push(...ls);
+                      const t = sumLines(ls);
+                      out.rows.push([r.supplier, `${docs.length} накл.`, "", num(t.qty), money(t.cost), num(t.sold), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", "", ""]);
+                      out.kinds.push("group");
+                      out.indent.push(0);
+                      for (const d of docs) pushDocRows(out, d, 1);
+                    }
+                    const all = sumLines(everything);
+                    out.rows.push(["Итого по выбранным приходам", "", "", num(all.qty), money(all.cost), num(all.sold), num(all.remaining), all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", "", ""]);
+                    out.kinds.push("total");
+                    out.indent.push(0);
+                    return { headers: [], rows: out.rows, rowKinds: out.kinds, indent: out.indent };
+                  },
+                },
                 {
                   title: stale ? "Краткая сводка: зависшие по поставщикам" : "Краткая сводка: остатки по поставщикам",
                   hint: "Только строки поставщиков, без артикулов и размеров.",
