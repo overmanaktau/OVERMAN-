@@ -339,6 +339,7 @@ async function syncCatalogAndStock() {
         image_url: infoById.get(p.id)?.imageUrl ?? null,
         image_full_href: infoById.get(p.id)?.imageFullHref ?? null,
         article: deriveArticle(p.name),
+        supplier: p.supplier,
         synced_at: now,
       })),
       { onConflict: "id" }

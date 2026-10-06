@@ -15,6 +15,7 @@ import type { SectionKey } from "@/lib/permissions";
 const WAREHOUSE_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "АВС/XYZ анализ", href: "/warehouse/abc-xyz", section: "warehouse.stock" },
   { label: "Зависшие остатки", href: "/warehouse/stale", section: "warehouse.stock" },
+  { label: "По поставщикам", href: "/warehouse/suppliers", section: "warehouse.stock" },
 ];
 
 const MARKETING_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
@@ -189,9 +190,19 @@ export default function Sidebar() {
   }));
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // Меню — выезжающая панель на любом экране: закрывается само при переходе на страницу
+  // (и по Escape, и по клику на затемнение).
   useEffect(() => {
-    if (!mobileLayout) setMobileOpen(false);
-  }, [mobileLayout]);
+    setMobileOpen(false);
+  }, [pathname]);
+  useEffect(() => {
+    if (!mobileOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMobileOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen]);
 
   function toggleGroup(key: string) {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -203,9 +214,20 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile top bar: when mobileLayout is on, the sidebar below is
-          off-canvas, so this is the only nav chrome visible until the
-          hamburger opens it. */}
+      {/* Меню спрятано и открывается одной кнопкой. На телефоне — верхняя панель
+          с кнопкой, на компьютере — одна плавающая кнопка в углу. */}
+      {!mobileLayout && (
+        <button
+          type="button"
+          aria-label="Открыть меню"
+          onClick={() => setMobileOpen(true)}
+          className="fixed top-4 left-4 z-40 w-11 h-11 rounded-lg bg-sidebar text-sidebarText border border-[#3A362E] shadow-md flex items-center justify-center hover:opacity-90"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 6h18M3 12h18M3 18h18" />
+          </svg>
+        </button>
+      )}
       {mobileLayout && (
         <div className="fixed top-0 left-0 right-0 h-14 bg-sidebar border-b border-[#3A362E] z-40 flex items-center px-4 gap-3">
           <button
@@ -222,9 +244,7 @@ export default function Sidebar() {
         </div>
       )}
 
-      {mobileLayout && mobileOpen && (
-        <div className="fixed inset-0 bg-black/50 z-40" onClick={closeMobile} />
-      )}
+      {mobileOpen && <div className="fixed inset-0 bg-black/50 z-40" onClick={closeMobile} />}
 
       {/* Rendered outside the (transformed) drawer div on purpose: a
           `transform` on an ancestor makes it the containing block for any
@@ -236,12 +256,8 @@ export default function Sidebar() {
       </div>
 
       <div
-        className={`w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6 overflow-y-auto ${
-          mobileLayout
-            ? `fixed inset-y-0 left-0 z-50 transition-transform duration-200 ${
-                mobileOpen ? "translate-x-0" : "-translate-x-full"
-              }`
-            : "static translate-x-0"
+        className={`w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6 overflow-y-auto fixed inset-y-0 left-0 z-50 transition-transform duration-200 ${
+          mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
         }`}
       >
       <div className="flex flex-col gap-0.5 px-2">

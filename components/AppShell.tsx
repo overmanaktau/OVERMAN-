@@ -23,11 +23,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 function ShellBody({ children }: { children: React.ReactNode }) {
   const { mobileLayout } = useSiteVersion();
   return (
-    <div className={`min-h-screen flex bg-paper text-ink ${mobileLayout ? "flex-col" : "flex-row"}`}>
+    <div className="min-h-screen flex flex-col bg-paper text-ink">
       <Sidebar />
       <div
         className={`flex-1 box-border flex flex-col gap-6 min-w-0 pb-14 ${
-          mobileLayout ? "px-4 sm:px-8 pt-20" : "px-12 pt-10"
+          mobileLayout ? "px-4 sm:px-8 pt-20" : "px-12 pt-16"
         }`}
       >
         {children}

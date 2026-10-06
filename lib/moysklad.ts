@@ -353,6 +353,8 @@ export type ProductCatalogRow = {
   topCategory: string | null;
   buyPrice: number | null; // tenge (already /100 from kopecks)
   archived: boolean;
+  supplierId: string | null; // контрагент-поставщик из карточки товара
+  supplier: string | null; // его название (подставляется в fetchAllProducts)
 };
 
 type FolderInfo = { name: string; top: string };
@@ -406,6 +408,7 @@ async function fetchProductPage(archived: boolean, folders: Map<string, FolderIn
       name: string;
       archived?: boolean;
       productFolder?: { meta?: { href?: string } };
+      supplier?: { meta?: { href?: string } };
       buyPrice?: Money;
     };
     const rows: Raw[] = page.rows ?? [];
@@ -420,6 +423,8 @@ async function fetchProductPage(archived: boolean, folders: Map<string, FolderIn
         topCategory: folder?.top ?? null,
         buyPrice: p.buyPrice?.value != null ? p.buyPrice.value / 100 : null,
         archived: p.archived ?? false,
+        supplierId: p.supplier?.meta?.href?.split("/").pop()?.split("?")[0] ?? null,
+        supplier: null,
       });
     }
     if (rows.length < limit) break;
@@ -431,7 +436,25 @@ async function fetchProductPage(archived: boolean, folders: Map<string, FolderIn
 export async function fetchAllProducts(): Promise<ProductCatalogRow[]> {
   const { byId } = await fetchProductFolders();
   const [active, archived] = await Promise.all([fetchProductPage(false, byId), fetchProductPage(true, byId)]);
-  return [...active, ...archived];
+  const all = [...active, ...archived];
+  // Поставщик в списке товаров приходит ссылкой без названия; поставщиков всего пара
+  // десятков, поэтому названия берём по одному, а не раздуваем выборку товаров через expand.
+  const names = await fetchCounterpartyNames([...new Set(all.map((p) => p.supplierId).filter((x): x is string => !!x))]);
+  for (const p of all) p.supplier = p.supplierId ? names.get(p.supplierId) ?? null : null;
+  return all;
+}
+
+async function fetchCounterpartyNames(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const id of ids) {
+    try {
+      const c = await moyskladFetch(`/entity/counterparty/${id}`);
+      if (c?.name) out.set(id, String(c.name));
+    } catch {
+      // один недоступный контрагент не должен ронять всю синхронизацию каталога
+    }
+  }
+  return out;
 }
 
 // Current stock snapshot — МойСклад's own /report/stock/all, which already
