@@ -88,14 +88,14 @@ function Chevron({ open }: { open: boolean }) {
 function SupplierTable({
   tab,
   rows,
-  totalMoney,
+  warehouseTotal,
   stockTotals,
   stores,
 }: {
   tab: Tab;
   rows: SupplierRow[];
-  totalMoney: number;
-  stockTotals: Map<string, number>; // себестоимость остатков поставщика — для доли зависшего
+  warehouseTotal: number; // себестоимость всего склада (без учёта поиска) — знаменатель доли
+  stockTotals: Map<string, number>; // себестоимость всех остатков поставщика (для вкладки «Зависшие»)
   stores: string[];
 }) {
   const [openSuppliers, setOpenSuppliers] = useState<Set<string>>(new Set());
@@ -177,7 +177,12 @@ function SupplierTable({
     return <div className="text-sm text-muted py-4">{tab === "stale" ? "Зависших остатков у поставщиков нет." : "Остатков нет."}</div>;
   }
 
-  const grid = "grid-cols-[1.7fr_0.6fr_0.6fr_1fr_0.7fr_1fr]";
+  const stale = tab === "stale";
+  // на «Зависших» лишняя колонка: какая часть остатков поставщика зависла
+  const grid = stale ? "grid-cols-[1.6fr_0.55fr_0.55fr_1fr_0.7fr_0.8fr_0.95fr]" : "grid-cols-[1.7fr_0.6fr_0.6fr_1fr_0.7fr_1fr]";
+  const minW = stale ? "min-w-[980px]" : "min-w-[860px]";
+  const supplierStock = (supplier: string, money: number) => (stale ? stockTotals.get(supplier) ?? 0 : money);
+  const sumSupplierStock = rows.reduce((a, r) => a + supplierStock(r.supplier, r.money), 0);
   const sumStock = rows.reduce((a, r) => a + r.stock, 0);
   const sumMoney = rows.reduce((a, r) => a + r.money, 0);
   const sumSale = rows.reduce((a, r) => a + r.saleValue, 0);
@@ -185,22 +190,25 @@ function SupplierTable({
 
   return (
     <div className="overflow-x-auto">
-      <div className={`min-w-[860px] grid ${grid} gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border`}>
+      <div className={`${minW} grid ${grid} gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border`}>
         <div>Поставщик</div>
         <div className="text-right">Артикулов</div>
         <div className="text-right">Штук</div>
-        <div className="text-right">{tab === "stale" ? "Себестоимость зависшего" : "Себестоимость"}</div>
-        <div className="text-right">{tab === "stale" ? "Доля от остатков" : "Доля"}</div>
-        <div className="text-right">{tab === "stale" ? "Дней без продаж (макс.)" : "По цене продажи"}</div>
+        <div className="text-right">{stale ? "Себестоимость зависшего" : "Себестоимость"}</div>
+        <div className="text-right">Доля склада</div>
+        {stale && <div className="text-right">Зависло у него</div>}
+        <div className="text-right">{stale ? "Дней без продаж (макс.)" : "По цене продажи"}</div>
       </div>
 
       {rows.map((r) => {
         const isOpen = openSuppliers.has(r.supplier);
         const items = cache[r.supplier];
         const groups = items ? groupByArticle(items) : [];
-        const share = tab === "stale" ? pct(r.money, stockTotals.get(r.supplier) ?? 0) : pct(r.money, totalMoney);
+        const ownStock = supplierStock(r.supplier, r.money);
+        // доля поставщика в складе — по ВСЕМУ его остатку, а не только по зависшему
+        const share = pct(ownStock, warehouseTotal);
         return (
-          <div key={r.supplier} className="min-w-[860px] border-b border-borderSoft">
+          <div key={r.supplier} className={`${minW} border-b border-borderSoft`}>
             <div className={`grid ${grid} gap-3 py-3 items-center text-[13px] cursor-pointer hover:bg-paper`} onClick={() => toggleSupplier(r.supplier)}>
               <div className="flex items-center gap-2 font-semibold min-w-0">
                 <Chevron open={isOpen} />
@@ -210,8 +218,9 @@ function SupplierTable({
               <div className="num text-right">{num(r.stock)}</div>
               <div className="num text-right font-semibold">{money(r.money)}</div>
               <div className="num text-right text-muted">{share}</div>
+              {stale && <div className="num text-right text-muted">{pct(r.money, ownStock)}</div>}
               <div className="num text-right text-muted">
-                {tab === "stale" ? (r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`) : money(r.saleValue)}
+                {stale ? (r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`) : money(r.saleValue)}
               </div>
             </div>
 
@@ -237,9 +246,10 @@ function SupplierTable({
                         <div />
                         <div className="num text-right">{num(g.stock)}</div>
                         <div className="num text-right">{money(g.money)}</div>
-                        <div className="num text-right text-muted">{pct(g.money, r.money)}</div>
+                        <div className="num text-right text-muted">{pct(g.money, warehouseTotal)}</div>
+                        {stale && <div />}
                         <div className="num text-right text-muted">
-                          {tab === "stale" ? (g.maxDays === null ? "не продавался" : `${g.maxDays} дн.`) : money(g.saleValue)}
+                          {stale ? (g.maxDays === null ? "не продавался" : `${g.maxDays} дн.`) : money(g.saleValue)}
                         </div>
                       </div>
                       {articleOpen &&
@@ -254,9 +264,10 @@ function SupplierTable({
                               <div />
                               <div className="num text-right">{num(it.stock)}</div>
                               <div className="num text-right">{money(it.money)}</div>
-                              <div className="num text-right text-mutedLight">{pct(it.money, r.money)}</div>
+                              <div className="num text-right text-mutedLight">{pct(it.money, warehouseTotal)}</div>
+                              {stale && <div />}
                               <div className="num text-right text-mutedLight">
-                                {tab === "stale" ? (it.days === null ? "не продавался" : `${it.days} дн.`) : money(it.saleValue)}
+                                {stale ? (it.days === null ? "не продавался" : `${it.days} дн.`) : money(it.saleValue)}
                               </div>
                             </div>
                           ))}
@@ -269,13 +280,14 @@ function SupplierTable({
         );
       })}
 
-      <div className={`min-w-[860px] grid ${grid} gap-3 py-3 items-center text-[13px] font-bold bg-paper`}>
+      <div className={`${minW} grid ${grid} gap-3 py-3 items-center text-[13px] font-bold bg-paper`}>
         <div className="pl-5">Итого</div>
         <div className="num text-right">{num(sumArticles)}</div>
         <div className="num text-right">{num(sumStock)}</div>
         <div className="num text-right">{money(sumMoney)}</div>
-        <div className="num text-right text-muted">{tab === "stale" ? pct(sumMoney, Array.from(stockTotals.values()).reduce((a, v) => a + v, 0)) : "100%"}</div>
-        <div className="num text-right text-muted">{tab === "stale" ? "" : money(sumSale)}</div>
+        <div className="num text-right text-muted">{pct(sumSupplierStock, warehouseTotal)}</div>
+        {stale && <div className="num text-right text-muted">{pct(sumMoney, sumSupplierStock)}</div>}
+        <div className="num text-right text-muted">{stale ? "" : money(sumSale)}</div>
       </div>
     </div>
   );
@@ -358,6 +370,8 @@ export default function SuppliersPage() {
   const q = search.trim().toLowerCase();
   const rows = (tab === "stock" ? stockRows : staleRows).filter((r) => !q || r.supplier.toLowerCase().includes(q));
   const totalMoney = rows.reduce((a, r) => a + r.money, 0);
+  // себестоимость всего склада на выбранных складах — для «доли склада» (поиск по поставщику её не меняет)
+  const warehouseTotal = tab === "stock" ? stockRows.reduce((a, r) => a + r.money, 0) : Array.from(stockTotalsForStale.values()).reduce((a, v) => a + v, 0);
   const totalStock = rows.reduce((a, r) => a + r.stock, 0);
   const totalSale = rows.reduce((a, r) => a + r.saleValue, 0);
   const tableStores = tab === "stock" ? stockStores : staleStores;
@@ -370,16 +384,16 @@ export default function SuppliersPage() {
     if (tab === "stock") {
       downloadExcel(
         "Остатки_по_поставщикам",
-        ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля, %", "По цене продажи"],
-        rows.map((r) => [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), totalMoney > 0 ? Math.round((r.money / totalMoney) * 1000) / 10 : 0, Math.round(r.saleValue)])
+        ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада, %", "По цене продажи"],
+        rows.map((r) => [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((r.money / warehouseTotal) * 1000) / 10 : 0, Math.round(r.saleValue)])
       );
     } else {
       downloadExcel(
         "Зависшие_по_поставщикам",
-        ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля от остатков поставщика, %", "Дней без продаж (макс.)"],
+        ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада, %", "Зависло от остатков поставщика, %", "Дней без продаж (макс.)"],
         rows.map((r) => {
           const total = stockTotalsForStale.get(r.supplier) ?? 0;
-          return [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), total > 0 ? Math.round((r.money / total) * 1000) / 10 : 0, r.maxDays ?? "не продавался"];
+          return [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((total / warehouseTotal) * 1000) / 10 : 0, total > 0 ? Math.round((r.money / total) * 1000) / 10 : 0, r.maxDays ?? "не продавался"];
         })
       );
     }
@@ -470,7 +484,7 @@ export default function SuppliersPage() {
       {tab === "stale" && (
         <p className="text-[12.5px] text-muted max-w-2xl -mt-2">
           Зависшим считается товар, который не продавался и не приходил на склад дольше {STALE_DAYS} дней (то же правило, что на странице «Зависшие остатки»).
-          Доля — какая часть себестоимости остатков поставщика зависла.
+          «Доля склада» — какую часть всего склада по себестоимости занимает этот поставщик. «Зависло у него» — какая часть остатков самого поставщика зависла.
         </p>
       )}
 
@@ -498,7 +512,7 @@ export default function SuppliersPage() {
           </div>
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <SupplierTable tab={tab} rows={rows} totalMoney={totalMoney} stockTotals={stockTotalsForStale} stores={tableStores} />
+            <SupplierTable tab={tab} rows={rows} warehouseTotal={warehouseTotal} stockTotals={stockTotalsForStale} stores={tableStores} />
           </div>
         </>
       )}
