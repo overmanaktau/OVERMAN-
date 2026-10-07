@@ -680,14 +680,17 @@ export default function SalesPage() {
             // Кассы по городам, с итогом города и общим итогом
             const regRows: (string | number)[][] = [];
             const regKinds: ("normal" | "group" | "total")[] = [];
+            const regPick: string[] = [];
             for (const g of visibleGroups) {
               const active = g.rows.filter((x) => !hiddenRegisterIds.has(x.registerId));
               regRows.push([`Город: ${g.label}`, "", "", "", "", "", "", ""]);
               regKinds.push("group");
+              regPick.push(`Город «${g.label}» — строка-заголовок`);
               for (const x of active) {
                 const d = displayed(x);
                 regRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), returnSummary(x), profitText(d.revenue, x.cost)]);
                 regKinds.push("normal");
+                regPick.push(`Касса «${x.name}» (город ${g.label})`);
               }
               const gRev = active.reduce((a, x) => a + displayed(x).revenue, 0);
               const gRec = active.reduce((a, x) => a + displayed(x).receipts, 0);
@@ -699,25 +702,31 @@ export default function SalesPage() {
               };
               regRows.push([`Итого: ${g.label}`, money(gRev), gRec, gItems, avg(gRev, gRec), depth(gItems, gRec), returnSummary(gRet), profitText(gRev, sumCost(active))]);
               regKinds.push("total");
+              regPick.push(`Итого по городу ${g.label}`);
             }
             regRows.push(["Итого", money(totalRevenue), totalReceipts, totalItems, avg(totalRevenue, totalReceipts), depth(totalItems, totalReceipts), returnSummary(totalReturned), profitText(totalRevenue, totalCost)]);
             regKinds.push("total");
+            regPick.push("Общий итог");
 
             // Сотрудники по городам
             const empRows: (string | number)[][] = [];
             const empKinds: ("normal" | "group" | "total")[] = [];
+            const empPick: string[] = [];
             for (const g of visibleEmployeeGroups) {
               const gt = groupTotals(g.rows);
               const traffic = [...new Set(g.rows.map((x) => x.store ?? ""))].reduce((a, c) => a + (trafficByStore.get(c) ?? 0), 0);
               empRows.push([`Город: ${g.label}`, "", "", "", "", "", "", ""]);
               empKinds.push("group");
+              empPick.push(`Город «${g.label}» — строка-заголовок`);
               for (const x of g.rows) {
                 const d = displayed(x);
                 empRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), conversionLabel(d.receipts, trafficByStore.get(x.store ?? "") ?? 0), profitText(d.revenue, x.cost)]);
                 empKinds.push("normal");
+                empPick.push(`Сотрудник ${x.name} (город ${g.label})`);
               }
               empRows.push([`Итого: ${g.label}`, money(gt.revenue), gt.receipts, gt.items, avg(gt.revenue, gt.receipts), depth(gt.items, gt.receipts), conversionLabel(gt.receipts, traffic), profitText(gt.revenue, gt.cost)]);
               empKinds.push("total");
+              empPick.push(`Итого по городу ${g.label}`);
             }
 
             const sections: PdfDoc["sections"] = [
@@ -729,6 +738,7 @@ export default function SalesPage() {
                 widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.8, 2],
                 rows: regRows,
                 rowKinds: regKinds,
+                pickLabels: regPick,
               },
             ];
             if (empRows.length > 0) {
@@ -740,6 +750,7 @@ export default function SalesPage() {
                 widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.2, 2],
                 rows: empRows,
                 rowKinds: empKinds,
+                pickLabels: empPick,
               });
             }
             return {

@@ -73,7 +73,7 @@ function shapeOf(sec: PdfSection): Shape {
     }
     if (level === 0 || current < 0) {
       current = unitLabels.length;
-      unitLabels.push(String(row[0] ?? "").trim() || "—");
+      unitLabels.push(sec.pickLabels?.[i] ?? (String(row[0] ?? "").trim() || "—"));
     }
     unitOf.push(current);
   });
@@ -328,6 +328,9 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
                         </button>
                         {rowsOpen && (
                           <div className="pl-3 flex flex-col gap-1.5">
+                            <div className="text-[12px] text-muted max-w-md">
+                              С галочкой — строка будет в PDF, без галочки — её в PDF не будет. Остальные строки это не меняет.
+                            </div>
                             <div className="flex items-center gap-3 flex-wrap">
                               <input
                                 type="text"
@@ -382,7 +385,17 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
                               )}
                             </div>
                             {cfg.excluded.size > 0 && (
-                              <div className="text-[12px] text-mutedLight">Итоговые строки не печатаются, когда выбраны не все строки.</div>
+                              <div className="text-[12px] text-muted flex flex-col gap-0.5">
+                                <div>
+                                  <b>Не попадут в PDF:</b>{" "}
+                                  {[...cfg.excluded]
+                                    .slice(0, 6)
+                                    .map((u) => shape.unitLabels[u])
+                                    .join(", ")}
+                                  {cfg.excluded.size > 6 ? ` и ещё ${cfg.excluded.size - 6}` : ""}
+                                </div>
+                                <div className="text-mutedLight">Строки «Итого» тогда не печатаются: их суммы считались по всем строкам, а в файле будут не все.</div>
+                              </div>
                             )}
                           </div>
                         )}
