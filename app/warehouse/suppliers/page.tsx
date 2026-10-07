@@ -196,6 +196,22 @@ const sumLines = (ls: ReceiptLine[]) => {
   return { qty, remaining, moved, sold: Math.max(0, qty - remaining - moved), cost };
 };
 
+// Итоговая строка по нескольким приходам (поставщик целиком или все выбранные документы).
+// «Пришло» — только от поставщика (приёмки и оприходования): перемещение между складами
+// не закупка, иначе одни и те же штуки посчитались бы дважды (на складе-отправителе и на получателе).
+// «Перемещено» — чистое: сколько ушло за пределы выбранных складов; минус — поступило
+// перемещением с других складов. Всегда сходится: Пришло = Продано + Перемещено + Остаток.
+function aggregateCells(ls: ReceiptLine[]): (string | number)[] {
+  const ext = ls.filter((l) => l.docType !== "move_in");
+  const qty = ext.reduce((a, l) => a + l.quantity, 0);
+  const cost = ext.reduce((a, l) => a + l.quantity * (l.price ?? 0), 0);
+  const all = sumLines(ls);
+  const movedIn = ls.filter((l) => l.docType === "move_in").reduce((a, l) => a + l.quantity, 0);
+  const movedNet = Math.round(all.moved - movedIn);
+  const pctSold = all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—";
+  return [num(qty), money(cost), num(all.sold), movedNet < 0 ? `−${num(-movedNet)}` : num(movedNet), num(all.remaining), pctSold];
+}
+
 // «с даты / по дату» и поиск по накладной или товару для PDF
 function filterDocs(docs: ReceiptDoc[], f: { from?: string; to?: string; query?: string }): ReceiptDoc[] {
   const q = (f.query ?? "").trim().toLowerCase();
@@ -332,7 +348,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
             fileName: title ? `Приходы_${title}` : `Приходы_${supplier}`,
             title: title ? `Приходы: ${title}` : `Приходы поставщика ${supplier}`,
             subtitle: `${title ? `Поставщик ${supplier} · ` : ""}${stores.map(warehouseLabel).join(", ")}${q ? ` · товар: «${query.trim()}»` : ""}`,
-            meta: ["Приход — приёмка от поставщика, оприходование или перемещение на склад.", "Продажи и перемещения на другой склад списываются с самого старого прихода (FIFO); перемещённое показано отдельно и продажей не считается."],
+            meta: ["Приход — приёмка от поставщика, оприходование или перемещение на склад.", "Продажи и перемещения на другой склад списываются с самого старого прихода (FIFO); перемещённое показано отдельно и продажей не считается.", "В итоговых строках «Пришло» — только от поставщика (перемещения между складами не считаются закупкой); «Перемещено» — чистое: минус значит, что товар поступил перемещением с других складов."],
             orientation: "landscape",
             sections: [
               {
@@ -349,8 +365,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
                   const picked = filterDocs(docs.filter((_, i) => !skip.has(i)), { from, to, query: fq });
                   const out = { rows: [] as (string | number)[][], kinds: [] as ("group" | "sub" | "total")[], indent: [] as number[] };
                   for (const d of picked) pushDocRows(out, d, 0);
-                  const all = sumOf(picked.flatMap((d) => d.lines));
-                  out.rows.push(["Итого по выбранным приходам", "", "", num(all.qty), money(all.cost), num(all.sold), num(all.moved), num(all.remaining), all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", "", ""]);
+                  out.rows.push(["Итого по выбранным приходам", "", "", ...aggregateCells(picked.flatMap((d) => d.lines)), "", ""]);
                   out.kinds.push("total");
                   out.indent.push(0);
                   return { headers: [], rows: out.rows, rowKinds: out.kinds, indent: out.indent };
@@ -935,14 +950,12 @@ export default function SuppliersPage() {
                       if (docs.length === 0) continue;
                       const ls = docs.flatMap((d) => d.lines);
                       everything.push(...ls);
-                      const t = sumLines(ls);
-                      out.rows.push([r.supplier, `${docs.length} док.`, "", num(t.qty), money(t.cost), num(t.sold), num(t.moved), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", "", ""]);
+                      out.rows.push([r.supplier, `${docs.length} док.`, "", ...aggregateCells(ls), "", ""]);
                       out.kinds.push("group");
                       out.indent.push(0);
                       for (const d of docs) pushDocRows(out, d, 1);
                     }
-                    const all = sumLines(everything);
-                    out.rows.push(["Итого по выбранным приходам", "", "", num(all.qty), money(all.cost), num(all.sold), num(all.moved), num(all.remaining), all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", "", ""]);
+                    out.rows.push(["Итого по выбранным приходам", "", "", ...aggregateCells(everything), "", ""]);
                     out.kinds.push("total");
                     out.indent.push(0);
                     return { headers: [], rows: out.rows, rowKinds: out.kinds, indent: out.indent };
