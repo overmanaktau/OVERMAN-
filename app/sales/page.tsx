@@ -682,7 +682,7 @@ export default function SalesPage() {
             const regKinds: ("normal" | "group" | "total")[] = [];
             for (const g of visibleGroups) {
               const active = g.rows.filter((x) => !hiddenRegisterIds.has(x.registerId));
-              regRows.push([g.label, "", "", "", "", "", "", ""]);
+              regRows.push([`Город: ${g.label}`, "", "", "", "", "", "", ""]);
               regKinds.push("group");
               for (const x of active) {
                 const d = displayed(x);
@@ -709,7 +709,7 @@ export default function SalesPage() {
             for (const g of visibleEmployeeGroups) {
               const gt = groupTotals(g.rows);
               const traffic = [...new Set(g.rows.map((x) => x.store ?? ""))].reduce((a, c) => a + (trafficByStore.get(c) ?? 0), 0);
-              empRows.push([g.label, "", "", "", "", "", "", ""]);
+              empRows.push([`Город: ${g.label}`, "", "", "", "", "", "", ""]);
               empKinds.push("group");
               for (const x of g.rows) {
                 const d = displayed(x);
