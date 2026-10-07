@@ -1,6 +1,6 @@
 import type { PdfDoc } from "@/lib/exportPdf";
 
-export type { PdfDoc, PdfSection, PdfRowKind } from "@/lib/exportPdf";
+export type { PdfDoc, PdfSection, PdfRowKind, PdfGroup } from "@/lib/exportPdf";
 
 // Библиотека PDF тяжёлая — подгружаем её только в момент нажатия кнопки,
 // чтобы она не раздувала загрузку страниц.

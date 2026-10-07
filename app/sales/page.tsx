@@ -674,6 +674,7 @@ export default function SalesPage() {
               const profit = revenue - cost;
               return `${money(profit)} (${(revenue !== 0 ? (profit / revenue) * 100 : 0).toFixed(1)}%)`;
             };
+            const costText = (cost: number | null) => (cost === null ? "—" : money(cost));
             const avg = (revenue: number, receipts: number) => (receipts > 0 ? money(revenue / receipts) : "—");
             const depth = (items: number, receipts: number) => (receipts > 0 ? (items / receipts).toFixed(1) : "—");
 
@@ -683,12 +684,12 @@ export default function SalesPage() {
             const regPick: string[] = [];
             for (const g of visibleGroups) {
               const active = g.rows.filter((x) => !hiddenRegisterIds.has(x.registerId));
-              regRows.push([`Город: ${g.label}`, "", "", "", "", "", "", ""]);
+              regRows.push([`Город: ${g.label}`, "", "", "", "", "", "", "", ""]);
               regKinds.push("group");
               regPick.push(`Город «${g.label}» — строка-заголовок`);
               for (const x of active) {
                 const d = displayed(x);
-                regRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), returnSummary(x), profitText(d.revenue, x.cost)]);
+                regRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), returnSummary(x), costText(x.cost), profitText(d.revenue, x.cost)]);
                 regKinds.push("normal");
                 regPick.push(`Касса «${x.name}» (город ${g.label})`);
               }
@@ -700,11 +701,11 @@ export default function SalesPage() {
                 returnedReceipts: active.reduce((a, x) => a + x.returnedReceipts, 0),
                 returnedItems: active.reduce((a, x) => a + x.returnedItems, 0),
               };
-              regRows.push([`Итого: ${g.label}`, money(gRev), gRec, gItems, avg(gRev, gRec), depth(gItems, gRec), returnSummary(gRet), profitText(gRev, sumCost(active))]);
+              regRows.push([`Итого: ${g.label}`, money(gRev), gRec, gItems, avg(gRev, gRec), depth(gItems, gRec), returnSummary(gRet), costText(sumCost(active)), profitText(gRev, sumCost(active))]);
               regKinds.push("total");
               regPick.push(`Итого по городу ${g.label}`);
             }
-            regRows.push(["Итого", money(totalRevenue), totalReceipts, totalItems, avg(totalRevenue, totalReceipts), depth(totalItems, totalReceipts), returnSummary(totalReturned), profitText(totalRevenue, totalCost)]);
+            regRows.push(["Итого", money(totalRevenue), totalReceipts, totalItems, avg(totalRevenue, totalReceipts), depth(totalItems, totalReceipts), returnSummary(totalReturned), costText(totalCost), profitText(totalRevenue, totalCost)]);
             regKinds.push("total");
             regPick.push("Общий итог");
 
@@ -715,16 +716,16 @@ export default function SalesPage() {
             for (const g of visibleEmployeeGroups) {
               const gt = groupTotals(g.rows);
               const traffic = [...new Set(g.rows.map((x) => x.store ?? ""))].reduce((a, c) => a + (trafficByStore.get(c) ?? 0), 0);
-              empRows.push([`Город: ${g.label}`, "", "", "", "", "", "", ""]);
+              empRows.push([`Город: ${g.label}`, "", "", "", "", "", "", "", ""]);
               empKinds.push("group");
               empPick.push(`Город «${g.label}» — строка-заголовок`);
               for (const x of g.rows) {
                 const d = displayed(x);
-                empRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), conversionLabel(d.receipts, trafficByStore.get(x.store ?? "") ?? 0), profitText(d.revenue, x.cost)]);
+                empRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), conversionLabel(d.receipts, trafficByStore.get(x.store ?? "") ?? 0), costText(x.cost), profitText(d.revenue, x.cost)]);
                 empKinds.push("normal");
                 empPick.push(`Сотрудник ${x.name} (город ${g.label})`);
               }
-              empRows.push([`Итого: ${g.label}`, money(gt.revenue), gt.receipts, gt.items, avg(gt.revenue, gt.receipts), depth(gt.items, gt.receipts), conversionLabel(gt.receipts, traffic), profitText(gt.revenue, gt.cost)]);
+              empRows.push([`Итого: ${g.label}`, money(gt.revenue), gt.receipts, gt.items, avg(gt.revenue, gt.receipts), depth(gt.items, gt.receipts), conversionLabel(gt.receipts, traffic), costText(gt.cost), profitText(gt.revenue, gt.cost)]);
               empKinds.push("total");
               empPick.push(`Итого по городу ${g.label}`);
             }
@@ -733,9 +734,10 @@ export default function SalesPage() {
               {
                 title: "Продажи по кассам",
                 note: showGross ? "Суммы без учёта возвратов." : "Суммы с учётом возвратов (возврат вычтен из дня, когда он произошёл).",
-                headers: ["Касса", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Возврат", "Валовая прибыль"],
-                align: ["left", "right", "right", "right", "right", "right", "right", "right"],
-                widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.8, 2],
+                headers: ["Касса", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Возврат", "Себестоимость", "Валовая прибыль"],
+                groupCols: { cost: [7, 8] },
+                align: ["left", "right", "right", "right", "right", "right", "right", "right", "right"],
+                widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.8, 1.5, 2],
                 rows: regRows,
                 rowKinds: regKinds,
                 pickLabels: regPick,
@@ -745,9 +747,10 @@ export default function SalesPage() {
               sections.push({
                 title: "Продажи по сотрудникам",
                 note: "Конверсия — доля трафика города, обращённая в чеки сотрудника.",
-                headers: ["Сотрудник", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Конверсия", "Валовая прибыль"],
-                align: ["left", "right", "right", "right", "right", "right", "right", "right"],
-                widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.2, 2],
+                headers: ["Сотрудник", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Конверсия", "Себестоимость", "Валовая прибыль"],
+                groupCols: { cost: [7, 8], conversion: [6] },
+                align: ["left", "right", "right", "right", "right", "right", "right", "right", "right"],
+                widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.2, 1.5, 2],
                 rows: empRows,
                 rowKinds: empKinds,
                 pickLabels: empPick,
@@ -762,7 +765,7 @@ export default function SalesPage() {
                 { label: "Выручка", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: avg(totalRevenue, totalReceipts) },
-                { label: "Конверсия", value: overallConversionPct !== null ? `${overallConversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${totalTraffic.toLocaleString("ru-RU")} посетителей` : undefined },
+                { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${totalTraffic.toLocaleString("ru-RU")} посетителей` : undefined },
               ],
               sections,
             };

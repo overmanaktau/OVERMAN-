@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
-import { downloadPdf, type PdfDoc, type PdfSection } from "@/lib/downloadPdf";
+import { downloadPdf, type PdfDoc, type PdfGroup, type PdfSection } from "@/lib/downloadPdf";
 
 // Кнопка «Скачать PDF»: страница отдаёт описание документа (заголовок, показатели,
 // таблицы), оформление и сам файл делает lib/exportPdf. По нажатию открывается окно
@@ -98,9 +98,16 @@ function initialCfg(sec: PdfSection): SecCfg {
   return { on: !sec.optional, cols: sec.headers.map(() => true), level: shapeOf(sec).maxLevel, excluded: new Set(), manual: false, search: "", from: "", to: "", query: "" };
 }
 
-function applyCfg(sec: PdfSection, cfg: SecCfg, withNotes: boolean): PdfSection {
+function hiddenColsOf(sec: PdfSection, show: Record<PdfGroup, boolean>): Set<number> {
+  const out = new Set<number>();
+  for (const g of Object.keys(sec.groupCols ?? {}) as PdfGroup[]) if (!show[g]) for (const c of sec.groupCols![g] ?? []) out.add(c);
+  return out;
+}
+
+function applyCfg(sec: PdfSection, cfg: SecCfg, withNotes: boolean, show: Record<PdfGroup, boolean>): PdfSection {
   const shape = shapeOf(sec);
-  const keepCols = cfg.cols.map((v, i) => v || i === 0);
+  const hiddenCols = hiddenColsOf(sec, show);
+  const keepCols = cfg.cols.map((v, i) => i === 0 || (v && !hiddenCols.has(i)));
   const rowsIdx: number[] = [];
   const partial = cfg.excluded.size > 0;
   sec.rows.forEach((_, i) => {
@@ -136,6 +143,10 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
   const [kpiOn, setKpiOn] = useState<boolean[]>(() => (doc.kpis ?? []).map(() => true));
   const [cfgs, setCfgs] = useState<SecCfg[]>(() => doc.sections.map(initialCfg));
   const [notes, setNotes] = useState(true);
+  const [show, setShow] = useState<Record<PdfGroup, boolean>>({ cost: true, conversion: true });
+  const groupsPresent = (["cost", "conversion"] as PdfGroup[]).filter(
+    (g) => doc.kpis?.some((k) => k.group === g) || doc.sections.some((x) => x.group === g || (x.groupCols?.[g]?.length ?? 0) > 0)
+  );
   const [orientation, setOrientation] = useState<"portrait" | "landscape">(doc.orientation ?? "landscape");
   const [fileName, setFileName] = useState(doc.fileName);
   const [open, setOpen] = useState<Set<string>>(new Set()); // раскрытые «Колонки» / «Строки»
@@ -152,7 +163,12 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
       return next;
     });
 
-  const anything = kpiOn.some(Boolean) || cfgs.some((c) => c.on);
+  const kpiHidden = (k: { group?: PdfGroup }) => !!k.group && !show[k.group];
+  const sectionHidden = (i: number) => {
+    const g = doc.sections[i].group;
+    return !!g && !show[g];
+  };
+  const anything = kpiOn.some((v, i) => v && !kpiHidden(doc.kpis![i])) || cfgs.some((c, i) => c.on && !sectionHidden(i));
 
   async function download() {
     setBusy(true);
@@ -160,7 +176,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
       const sections: PdfSection[] = [];
       for (let i = 0; i < doc.sections.length; i++) {
         const cfg = cfgs[i];
-        if (!cfg.on) continue;
+        if (!cfg.on || sectionHidden(i)) continue;
         let sec = doc.sections[i];
         if (sec.load) {
           setProgress(`Подгружаем: ${sec.title ?? "таблица"}…`);
@@ -183,7 +199,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
         }
         // колонки/уровень настроены по заготовке, у подгруженного блока колонок столько же
         // у подгруженного блока снятые строки уже не загружались — повторно не вычитаем
-        sections.push(applyCfg(sec, { ...cfg, excluded: sec.rows === doc.sections[i].rows ? cfg.excluded : new Set() }, notes));
+        sections.push(applyCfg(sec, { ...cfg, excluded: sec.rows === doc.sections[i].rows ? cfg.excluded : new Set() }, notes, show));
       }
       setProgress("Собираем PDF…");
       await downloadPdf({
@@ -192,7 +208,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
         orientation,
         author: doc.author ?? author,
         meta: notes ? doc.meta : undefined,
-        kpis: doc.kpis?.filter((_, i) => kpiOn[i]),
+        kpis: doc.kpis?.filter((k, i) => kpiOn[i] && !kpiHidden(k)),
         sections,
       });
       onClose();
@@ -216,6 +232,23 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
         </div>
 
         <div className="overflow-y-auto px-5 py-3 flex flex-col gap-4 text-[13px]">
+          {groupsPresent.length > 0 && (
+            <div className="rounded-lg bg-paper px-3 py-2.5 flex flex-col gap-2">
+              {groupsPresent.map((g) => (
+                <label key={g} className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" className={`${box} mt-0.5`} checked={show[g]} onChange={(e) => setShow((p) => ({ ...p, [g]: e.target.checked }))} />
+                  <span>
+                    <span className="font-bold">{g === "cost" ? "Себестоимость и прибыль" : "Конверсия (чек / посетитель)"}</span>
+                    <span className="block text-[12px] text-muted">
+                      {g === "cost"
+                        ? "Без галочки в PDF не будет карточек, колонок и таблиц с себестоимостью и прибылью — можно отдавать файл тем, кому эти цифры показывать нельзя."
+                        : "Без галочки в PDF не будет карточки и колонок с конверсией."}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
           {doc.kpis && doc.kpis.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center gap-3">
@@ -224,17 +257,19 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
                 <button type="button" className={linkBtn} onClick={() => setKpiOn(kpiOn.map(() => false))}>никакие</button>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                {doc.kpis.map((k, i) => (
+                {doc.kpis.map((k, i) => (kpiHidden(k) ? null : (
                   <label key={i} className="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" className={box} checked={kpiOn[i]} onChange={(e) => setKpiOn((p) => p.map((v, j) => (j === i ? e.target.checked : v)))} />
                     {k.label}
                   </label>
-                ))}
+                )))}
               </div>
             </div>
           )}
 
           {doc.sections.map((sec, i) => {
+            if (sectionHidden(i)) return null;
+            const hiddenCols = hiddenColsOf(sec, show);
             const cfg = cfgs[i];
             const shape = shapes[i];
             const lazy = !!sec.load;
@@ -301,11 +336,11 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
 
                     <div className="flex flex-col gap-1.5">
                       <button type="button" className={`${linkBtn} text-left w-fit`} onClick={() => toggleOpen(`c${i}`)}>
-                        {colsOpen ? "▾" : "▸"} Колонки: {cfg.cols.filter(Boolean).length} из {cfg.cols.length}
+                        {colsOpen ? "▾" : "▸"} Колонки: {cfg.cols.filter((v, c) => v && !hiddenCols.has(c)).length} из {cfg.cols.length - hiddenCols.size}
                       </button>
                       {colsOpen && (
                         <div className="flex flex-wrap gap-x-4 gap-y-1.5 pl-3">
-                          {sec.headers.map((h, c) => (
+                          {sec.headers.map((h, c) => (hiddenCols.has(c) ? null : (
                             <label key={c} className={`flex items-center gap-1.5 ${c === 0 ? "opacity-60" : "cursor-pointer"}`}>
                               <input
                                 type="checkbox"
@@ -316,7 +351,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
                               />
                               {h || "—"}
                             </label>
-                          ))}
+                          )))}
                         </div>
                       )}
                     </div>

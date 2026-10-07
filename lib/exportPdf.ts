@@ -6,6 +6,9 @@ import autoTable from "jspdf-autotable";
 // колонтитул с номером страницы. Шрифты (Noto Sans и Noto Serif) лежат в
 // public/fonts/pdf — в них есть кириллица, казахские буквы и знак тенге.
 
+// Данные, которые в окне «Что скачать» скрываются одной галочкой: себестоимость и прибыль, конверсия.
+export type PdfGroup = "cost" | "conversion";
+
 export type PdfRowKind = "normal" | "group" | "sub" | "total";
 
 export type PdfSection = {
@@ -21,6 +24,8 @@ export type PdfSection = {
   optional?: boolean; // по умолчанию не отмечена (например, краткая сводка рядом с подробной)
   hint?: string; // пояснение под названием в окне выбора
   levelLabels?: string[]; // названия уровней детализации: «Только поставщики», «+ артикулы», …
+  group?: PdfGroup; // вся таблица относится к группе (например, оборачиваемость — себестоимость)
+  groupCols?: Partial<Record<PdfGroup, number[]>>; // номера колонок, относящихся к группе
   pickLabels?: string[]; // подписи строк для списка выбора в окне (по строкам таблицы): «Город · Актау», «Касса · Актау»
   units?: string[]; // для load: названия основных строк (чтобы в окне можно было выбрать нужные)
   filters?: { dates?: boolean; query?: string }; // для load: поля «с даты / по дату» и поиск (query — подпись поля)
@@ -32,7 +37,7 @@ export type PdfDoc = {
   title: string;
   subtitle?: string; // период, фильтры
   meta?: string[]; // мелкие подписи под заголовком
-  kpis?: { label: string; value: string; note?: string }[];
+  kpis?: { label: string; value: string; note?: string; group?: PdfGroup }[]; // group: карточка скрывается галочкой своей группы
   sections: PdfSection[];
   orientation?: "portrait" | "landscape";
   author?: string | null;

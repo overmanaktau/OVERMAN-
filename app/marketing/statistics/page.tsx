@@ -513,13 +513,14 @@ export default function StatisticsPage() {
       kpis: [
         { label: "Трафик, факт", value: Math.round(totals.fact).toLocaleString("ru-RU"), note: `план ${Math.round(totals.plan).toLocaleString("ru-RU")}` },
         { label: "Чеков", value: salesTotals.receipts.toLocaleString("ru-RU") },
-        { label: "Конверсия", value: conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—" },
+        { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—" },
         { label: "Средний чек", value: avgCheck !== null ? `${Math.round(avgCheck).toLocaleString("ru-RU")} ₸` : "—" },
       ],
       sections: [
         {
           title: "Статистика по дням",
           headers: t.headers,
+          groupCols: { conversion: t.headers.map((h, i) => (/конверс/i.test(h) ? i : -1)).filter((i) => i > 0) },
           rows: t.rows.map((r) => r.map((c) => (c === "" ? "—" : c))),
           rowKinds: t.rows.map((_, i) => (i === last ? "total" : "normal")),
           align: t.headers.map((_, i) => (i === 0 ? "left" : "right")),

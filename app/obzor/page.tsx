@@ -504,8 +504,9 @@ export default function ObzorPage() {
             const sections: PdfDoc["sections"] = [
               {
                 title: "Продажи по дням",
-                headers: ["Дата", "Выручка", "Чеков", "Штук", "Средний чек", "Валовая прибыль"],
-                widths: [1.2, 1.6, 1, 1, 1.4, 1.6],
+                headers: ["Дата", "Выручка", "Чеков", "Штук", "Средний чек", "Себестоимость", "Валовая прибыль"],
+                groupCols: { cost: [5, 6] },
+                widths: [1.2, 1.6, 1, 1, 1.4, 1.6, 1.6],
                 rows: [...dayRows]
                   .sort((a, b) => (a.date < b.date ? -1 : 1))
                   .map((r) => {
@@ -516,6 +517,7 @@ export default function ObzorPage() {
                       r.receipts,
                       r.items,
                       r.receipts > 0 ? money(r.revenue / r.receipts) : "—",
+                      r.cost !== null ? money(r.cost) : "—",
                       r.cost !== null ? money(r.revenue - r.cost) : "—",
                     ];
                   })
@@ -526,6 +528,7 @@ export default function ObzorPage() {
                       totalReceipts,
                       totalItems,
                       totalReceipts > 0 ? money(avgCheck) : "—",
+                      totalCost !== null ? money(totalCost) : "—",
                       margin !== null ? money(margin) : "—",
                     ],
                   ]),
@@ -542,6 +545,7 @@ export default function ObzorPage() {
               body.push(["Итого", money(turnoverCogsTotal), money(turnoverStockValueTotal), turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—"]);
               sections.push({
                 title: "Оборачиваемость по категориям",
+                group: "cost",
                 note: "Себестоимость продаж за период / себестоимость текущего остатка.",
                 headers: ["Категория", "Себестоимость продаж", "Себестоимость остатка", "Оборачиваемость"],
                 widths: [2, 1.6, 1.6, 1.4],
@@ -558,8 +562,8 @@ export default function ObzorPage() {
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: totalReceipts > 0 ? money(avgCheck) : "—" },
                 { label: "Глубина чека", value: totalReceipts > 0 ? `${itemsPerReceipt.toFixed(1)} шт` : "—" },
-                { label: "Валовая прибыль", value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от выручки` : undefined },
-                { label: "Оборачиваемость склада", value: turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—" },
+                { label: "Валовая прибыль", group: "cost" as const, value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от выручки` : undefined },
+                { label: "Оборачиваемость склада", group: "cost" as const, value: turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—" },
               ],
               sections,
             };
