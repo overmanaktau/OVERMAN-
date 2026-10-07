@@ -87,9 +87,11 @@ function Chevron({ open }: { open: boolean }) {
   return <span className="text-mutedLight text-[10px] w-3 flex-none inline-block">{open ? "▾" : "▸"}</span>;
 }
 
-// ── Приёмки поставщика: каждый приход по датам и документам и сколько из него продано.
-// Продажи списываются с самого старого прихода (FIFO), поэтому остаток товара
-// считается «с конца»: в самых свежих приходах. Учитываются только документы «Приёмка».
+// ── Приходы поставщика: каждый приход по датам и документам и что с ним стало.
+// Приход — это приёмка от поставщика, оприходование или перемещение на склад.
+// Продажи и перемещения на другой склад списываются с самого старого прихода (FIFO),
+// поэтому остаток товара «лежит» в самых свежих приходах. Перемещение на другой склад
+// показывается отдельно («Перемещено») и продажей не считается.
 type ReceiptLine = {
   supplyId: string;
   docName: string;
@@ -101,8 +103,24 @@ type ReceiptLine = {
   quantity: number;
   price: number | null;
   remaining: number;
+  moved: number; // ушло на другой склад перемещением
+  docType: "supply" | "enter" | "move_in";
+  counterStore: string | null; // у перемещения: склад-отправитель
 };
-type ReceiptDoc = { supplyId: string; docName: string; date: string; store: string; lines: ReceiptLine[] };
+type ReceiptDoc = { supplyId: string; docName: string; date: string; store: string; docType: ReceiptLine["docType"]; counterStore: string | null; lines: ReceiptLine[] };
+
+function whLabel(code: string | null): string {
+  if (!code) return "";
+  return WAREHOUSES.find((w) => w.code === code)?.label ?? (code === "frozen" ? "Заморозка" : code);
+}
+
+// «Приёмка 00224», «Оприходование 00012», «Перемещение 00017 из Overman Актау»
+function docTitle(d: { docName: string; docType: ReceiptLine["docType"]; counterStore: string | null }): string {
+  const no = d.docName || "без номера";
+  if (d.docType === "enter") return `Оприходование ${no}`;
+  if (d.docType === "move_in") return `Перемещение ${no}${d.counterStore ? ` из ${whLabel(d.counterStore)}` : ""}`;
+  return `Приёмка ${no}`;
+}
 
 const DOCS_PAGE = 25;
 
@@ -136,6 +154,9 @@ async function fetchReceiptLines(supplier: string, stores: string[]): Promise<Re
     quantity: number;
     price: number | null;
     remaining: number;
+    moved: number | null;
+    doc_type: string | null;
+    counter_store: string | null;
   };
   const raw = await fetchAllRows<Raw>((from, to) => supabase.rpc("supplier_receipts", { p_supplier: supplier, p_stores: stores }).range(from, to));
   const mapped = raw.map((r) => ({
@@ -149,6 +170,9 @@ async function fetchReceiptLines(supplier: string, stores: string[]): Promise<Re
     quantity: Number(r.quantity),
     price: r.price != null ? Number(r.price) : null,
     remaining: Number(r.remaining),
+    moved: Number(r.moved ?? 0),
+    docType: (r.doc_type === "enter" || r.doc_type === "move_in" ? r.doc_type : "supply") as ReceiptLine["docType"],
+    counterStore: r.counter_store,
   }));
   receiptsCache.set(cacheKey, mapped);
   return mapped;
@@ -157,9 +181,9 @@ async function fetchReceiptLines(supplier: string, stores: string[]): Promise<Re
 function groupDocs(lines: ReceiptLine[]): ReceiptDoc[] {
   const map = new Map<string, ReceiptDoc>();
   for (const l of lines) {
-    const d = map.get(l.supplyId) ?? { supplyId: l.supplyId, docName: l.docName, date: l.date, store: l.store, lines: [] };
+    const d = map.get(l.supplyId + "|" + l.store) ?? { supplyId: l.supplyId, docName: l.docName, date: l.date, store: l.store, docType: l.docType, counterStore: l.counterStore, lines: [] };
     d.lines.push(l);
-    map.set(l.supplyId, d);
+    map.set(l.supplyId + "|" + l.store, d);
   }
   return [...map.values()].sort((a, b) => b.date.localeCompare(a.date) || b.docName.localeCompare(a.docName));
 }
@@ -168,7 +192,8 @@ const sumLines = (ls: ReceiptLine[]) => {
   const qty = ls.reduce((a, l) => a + l.quantity, 0);
   const remaining = ls.reduce((a, l) => a + l.remaining, 0);
   const cost = ls.reduce((a, l) => a + l.quantity * (l.price ?? 0), 0);
-  return { qty, remaining, sold: qty - remaining, cost };
+  const moved = ls.reduce((a, l) => a + l.moved, 0);
+  return { qty, remaining, moved, sold: Math.max(0, qty - remaining - moved), cost };
 };
 
 // «с даты / по дату» и поиск по накладной или товару для PDF
@@ -176,28 +201,28 @@ function filterDocs(docs: ReceiptDoc[], f: { from?: string; to?: string; query?:
   const q = (f.query ?? "").trim().toLowerCase();
   return docs
     .filter((d) => (!f.from || d.date >= f.from) && (!f.to || d.date <= f.to))
-    .map((d) => (q && !d.docName.toLowerCase().includes(q) ? { ...d, lines: d.lines.filter((l) => l.productName.toLowerCase().includes(q)) } : d))
+    .map((d) => (q && !docTitle(d).toLowerCase().includes(q) ? { ...d, lines: d.lines.filter((l) => l.productName.toLowerCase().includes(q)) } : d))
     .filter((d) => d.lines.length > 0);
 }
 
-const RECEIPT_HEADERS = ["Накладная / товар", "Дата", "Склад", "Принято, шт", "Себестоимость", "Продано", "Остаток", "Продано, %", "В день", "С прихода"];
-const RECEIPT_ALIGN: ("left" | "right")[] = ["left", "left", "left", "right", "right", "right", "right", "right", "right", "right"];
-const RECEIPT_WIDTHS = [3.4, 1.1, 1.5, 1, 1.5, 0.9, 0.9, 1, 0.8, 1];
+const RECEIPT_HEADERS = ["Документ / товар", "Дата", "Склад", "Пришло, шт", "Себестоимость", "Продано", "Перемещено", "Остаток", "Продано, %", "В день", "С прихода"];
+const RECEIPT_ALIGN: ("left" | "right")[] = ["left", "left", "left", "right", "right", "right", "right", "right", "right", "right", "right"];
+const RECEIPT_WIDTHS = [3.4, 1.1, 1.5, 1, 1.5, 0.9, 1, 0.9, 1, 0.8, 1];
 
-function receiptStats(t: { qty: number; sold: number; remaining: number; cost: number }, days: number): (string | number)[] {
-  return [num(t.qty), money(t.cost), num(t.sold), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", t.sold > 0 ? (t.sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0", `${days} дн.`];
+function receiptStats(t: { qty: number; sold: number; moved: number; remaining: number; cost: number }, days: number): (string | number)[] {
+  return [num(t.qty), money(t.cost), num(t.sold), num(t.moved), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", t.sold > 0 ? (t.sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0", `${days} дн.`];
 }
 
 // накладная и её товары; baseIndent — уровень накладной (0 у приёмок одного поставщика, 1 под поставщиком)
 function pushDocRows(out: { rows: (string | number)[][]; kinds: ("group" | "sub" | "total")[]; indent: number[] }, d: ReceiptDoc, baseIndent: number) {
-  const wh = WAREHOUSES.find((w) => w.code === d.store)?.label ?? (d.store === "frozen" ? "Заморозка" : d.store);
+  const wh = whLabel(d.store);
   const days = daysSince(d.date);
-  out.rows.push([d.docName || "без номера", fmtRuDate(d.date), wh, ...receiptStats(sumLines(d.lines), days)]);
+  out.rows.push([docTitle(d), fmtRuDate(d.date), wh, ...receiptStats(sumLines(d.lines), days)]);
   out.kinds.push(baseIndent === 0 ? "group" : "sub");
   out.indent.push(baseIndent);
   for (const l of [...d.lines].sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "ru"))) {
-    const sold = l.quantity - l.remaining;
-    out.rows.push([l.productName + (l.price !== null ? ` · ${money(l.price)}/шт` : ""), "", "", ...receiptStats({ qty: l.quantity, cost: l.quantity * (l.price ?? 0), sold, remaining: l.remaining }, days)]);
+    const sold = Math.max(0, l.quantity - l.remaining - l.moved);
+    out.rows.push([l.productName + (l.price !== null ? ` · ${money(l.price)}/шт` : ""), "", "", ...receiptStats({ qty: l.quantity, cost: l.quantity * (l.price ?? 0), sold, moved: l.moved, remaining: l.remaining }, days)]);
     out.kinds.push("sub");
     out.indent.push(baseIndent + 1);
   }
@@ -240,8 +265,8 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lines, q, productKey]);
 
-  const warehouseLabel = (code: string) => WAREHOUSES.find((w) => w.code === code)?.label ?? (code === "frozen" ? "Заморозка" : code);
-  const grid = "grid-cols-[0.8fr_1.1fr_1fr_0.7fr_1fr_0.7fr_0.7fr_1fr_0.8fr_0.7fr]";
+  const warehouseLabel = whLabel;
+  const grid = "grid-cols-[0.8fr_1.3fr_1fr_0.7fr_1fr_0.7fr_0.8fr_0.7fr_1fr_0.7fr_0.7fr]";
 
   function toggleDoc(id: string) {
     setOpenDocs((prev) => {
@@ -254,13 +279,14 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
 
   const sumOf = sumLines;
 
-  function Cells({ qty, cost, sold, remaining, date }: { qty: number; cost: number; sold: number; remaining: number; date: string }) {
+  function Cells({ qty, cost, sold, moved, remaining, date }: { qty: number; cost: number; sold: number; moved: number; remaining: number; date: string }) {
     const days = daysSince(date);
     return (
       <>
         <div className="num text-right">{num(qty)}</div>
         <div className="num text-right">{money(cost)}</div>
         <div className="num text-right">{num(sold)}</div>
+        <div className="num text-right text-muted">{moved > 0 ? num(moved) : "—"}</div>
         <div className="num text-right">{num(remaining)}</div>
         <div className="flex items-center justify-end gap-2">
           <div className="w-14 h-1.5 bg-paper rounded-full overflow-hidden flex-none">
@@ -277,7 +303,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
   return (
     <div className="bg-paper/40 border-t border-borderSoft px-3 py-3 min-w-[980px]">
       <div className="flex items-center gap-3 flex-wrap mb-2.5 pl-6">
-        <div className="text-[13px] font-bold">{title ? `Приёмки: ${title}` : `Приёмки поставщика ${supplier}`}</div>
+        <div className="text-[13px] font-bold">{title ? `Приходы: ${title}` : `Приходы поставщика ${supplier}`}</div>
         {!productIds && (
           <input
             type="text"
@@ -303,18 +329,18 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
           disabled={docs.length === 0}
           className="text-[12px] font-semibold text-accent bg-surface border border-border rounded-md px-3 py-1.5 hover:bg-paper disabled:opacity-50"
           build={(): PdfDoc => ({
-            fileName: title ? `Приёмки_${title}` : `Приёмки_${supplier}`,
-            title: title ? `Приёмки: ${title}` : `Приёмки поставщика ${supplier}`,
+            fileName: title ? `Приходы_${title}` : `Приходы_${supplier}`,
+            title: title ? `Приходы: ${title}` : `Приходы поставщика ${supplier}`,
             subtitle: `${title ? `Поставщик ${supplier} · ` : ""}${stores.map(warehouseLabel).join(", ")}${q ? ` · товар: «${query.trim()}»` : ""}`,
-            meta: ["Продажи списываются с самого старого прихода (FIFO).", "Учтены только документы «Приёмка»."],
+            meta: ["Приход — приёмка от поставщика, оприходование или перемещение на склад.", "Продажи и перемещения на другой склад списываются с самого старого прихода (FIFO); перемещённое показано отдельно и продажей не считается."],
             orientation: "landscape",
             sections: [
               {
                 title: "Приходы по накладным",
-                hint: "Каждый приход: дата, накладная, сколько принято, продано и осталось. Можно выбрать период, накладные и товары.",
-                units: docs.map((d) => `${fmtRuDate(d.date)} · ${d.docName || "без номера"} · ${warehouseLabel(d.store)}`),
-                levelLabels: ["Только накладные", "+ товары в накладных"],
-                filters: { dates: true, query: "Накладная или товар" },
+                hint: "Каждый приход: дата, документ, сколько пришло, продано, перемещено на другой склад и осталось. Можно выбрать период, документы и товары.",
+                units: docs.map((d) => `${fmtRuDate(d.date)} · ${docTitle(d)} · ${warehouseLabel(d.store)}`),
+                levelLabels: ["Только документы", "+ товары в документах"],
+                filters: { dates: true, query: "Документ или товар" },
                 headers: RECEIPT_HEADERS,
                 align: RECEIPT_ALIGN,
                 widths: RECEIPT_WIDTHS,
@@ -324,7 +350,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
                   const out = { rows: [] as (string | number)[][], kinds: [] as ("group" | "sub" | "total")[], indent: [] as number[] };
                   for (const d of picked) pushDocRows(out, d, 0);
                   const all = sumOf(picked.flatMap((d) => d.lines));
-                  out.rows.push(["Итого по выбранным приходам", "", "", num(all.qty), money(all.cost), num(all.sold), num(all.remaining), all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", "", ""]);
+                  out.rows.push(["Итого по выбранным приходам", "", "", num(all.qty), money(all.cost), num(all.sold), num(all.moved), num(all.remaining), all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", "", ""]);
                   out.kinds.push("total");
                   out.indent.push(0);
                   return { headers: [], rows: out.rows, rowKinds: out.kinds, indent: out.indent };
@@ -334,13 +360,13 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
           })}
         />
         <div className="text-[11.5px] text-mutedLight max-w-xl">
-          Продажи списываются с самого старого прихода. «В день» — продано ÷ дней с прихода. Только документы «Приёмка» (перемещения и оприходования не видны).
+          Приход — приёмка от поставщика, оприходование или перемещение на склад. Продажи и перемещения на другой склад списываются с самого старого прихода; «Перемещено» продажей не считается. «В день» — продано ÷ дней с прихода.
         </div>
       </div>
 
       {error && <div className="text-[12.5px] text-[#A34B36] pl-6">{error}</div>}
-      {!lines && !error && <div className="text-[12.5px] text-muted pl-6 py-2">Загрузка приёмок…</div>}
-      {lines && docs.length === 0 && <div className="text-[12.5px] text-mutedLight pl-6 py-2">{q ? "Ничего не найдено." : "Приёмок нет."}</div>}
+      {!lines && !error && <div className="text-[12.5px] text-muted pl-6 py-2">Загрузка приходов…</div>}
+      {lines && docs.length === 0 && <div className="text-[12.5px] text-mutedLight pl-6 py-2">{q ? "Ничего не найдено." : "Приходов нет."}</div>}
 
       {docs.length > 0 && (
         <>
@@ -348,27 +374,29 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
             <div>Дата</div>
             <div>Документ</div>
             <div>Склад</div>
-            <div className="text-right">Принято, шт</div>
+            <div className="text-right">Пришло, шт</div>
             <div className="text-right">Себестоимость</div>
             <div className="text-right">Продано</div>
+            <div className="text-right">Перемещено</div>
             <div className="text-right">Остаток</div>
             <div className="text-right">Продано, %</div>
             <div className="text-right">В день</div>
             <div className="text-right">С прихода</div>
           </div>
           {docs.slice(0, shown).map((d) => {
-            const isOpen = allOpen ? !openDocs.has(d.supplyId) : openDocs.has(d.supplyId) || (q.length > 0 && d.lines.length <= 12);
+            const docKey = `${d.supplyId}|${d.store}`;
+            const isOpen = allOpen ? !openDocs.has(docKey) : openDocs.has(docKey) || (q.length > 0 && d.lines.length <= 12);
             const t = sumOf(d.lines);
             return (
-              <div key={d.supplyId} className="border-b border-borderSoft">
-                <div className={`grid ${grid} gap-3 py-2 pl-6 items-center text-[12.5px] cursor-pointer hover:bg-paper`} onClick={() => toggleDoc(d.supplyId)} title="Показать товары прихода">
+              <div key={docKey} className="border-b border-borderSoft">
+                <div className={`grid ${grid} gap-3 py-2 pl-6 items-center text-[12.5px] cursor-pointer hover:bg-paper`} onClick={() => toggleDoc(docKey)} title="Показать товары прихода">
                   <div className="flex items-center gap-1.5 font-semibold">
                     <Chevron open={isOpen} />
                     {fmtRuDate(d.date)}
                   </div>
-                  <div className="break-words min-w-0">{d.docName || "—"}</div>
+                  <div className="break-words min-w-0">{docTitle(d)}</div>
                   <div className="text-muted">{warehouseLabel(d.store)}</div>
-                  <Cells qty={t.qty} cost={t.cost} sold={t.sold} remaining={t.remaining} date={d.date} />
+                  <Cells qty={t.qty} cost={t.cost} sold={t.sold} moved={t.moved} remaining={t.remaining} date={d.date} />
                 </div>
                 {isOpen &&
                   [...d.lines]
@@ -380,7 +408,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
                           {l.productName}
                           {l.price !== null && <span className="text-mutedLight"> · {money(l.price)}/шт</span>}
                         </div>
-                        <Cells qty={l.quantity} cost={l.quantity * (l.price ?? 0)} sold={l.quantity - l.remaining} remaining={l.remaining} date={l.date} />
+                        <Cells qty={l.quantity} cost={l.quantity * (l.price ?? 0)} sold={Math.max(0, l.quantity - l.remaining - l.moved)} moved={l.moved} remaining={l.remaining} date={l.date} />
                       </div>
                     ))}
               </div>
@@ -388,7 +416,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
           })}
           {docs.length > shown && (
             <button type="button" onClick={() => setShown((n) => n + DOCS_PAGE)} className="mt-2 ml-6 text-[12.5px] font-semibold text-accent">
-              Показать ещё приёмки ({docs.length - shown})
+              Показать ещё приходы ({docs.length - shown})
             </button>
           )}
         </>
@@ -407,7 +435,7 @@ function ReceiptsButton({ active, onClick }: { active: boolean; onClick: () => v
       }}
       className={`text-[11px] font-semibold rounded-md border px-2 py-0.5 flex-none ${active ? "bg-accent text-paper border-accent" : "text-accent border-border hover:bg-paper"}`}
     >
-      Приёмки
+      Приходы
     </button>
   );
 }
@@ -567,7 +595,7 @@ function SupplierTable({
                   }}
                   className={`text-[11.5px] font-semibold rounded-md border px-2 py-0.5 ${openReceipts.has(r.supplier) ? "bg-accent text-paper border-accent" : "text-accent border-border hover:bg-paper"}`}
                 >
-                  Приёмки
+                  Приходы
                 </button>
               </div>
               <div className="num text-right">{num(r.articles)}</div>
@@ -879,13 +907,13 @@ export default function SuppliersPage() {
               ],
               sections: [
                 {
-                  title: "Приёмки по накладным",
-                  hint: "Каждый приход каждого поставщика: дата, накладная, сколько принято, продано и осталось (продажи списываются с самого старого прихода). Выберите поставщиков, период и накладные.",
+                  title: "Приходы по документам",
+                  hint: "Каждый приход каждого поставщика (приёмка, оприходование, перемещение на склад): дата, документ, сколько пришло, продано, перемещено на другой склад и осталось. Выберите поставщиков, период и документы.",
                   optional: true,
                   units: rows.map((r) => r.supplier),
-                  levelLabels: ["Только поставщики", "+ накладные", "+ накладные и товары"],
-                  filters: { dates: true, query: "Накладная или товар" },
-                  headers: ["Поставщик / накладная / товар", "Дата", "Склад", "Принято, шт", "Себестоимость", "Продано", "Остаток", "Продано, %", "В день", "С прихода"],
+                  levelLabels: ["Только поставщики", "+ документы", "+ документы и товары"],
+                  filters: { dates: true, query: "Документ или товар" },
+                  headers: ["Поставщик / документ / товар", "Дата", "Склад", "Пришло, шт", "Себестоимость", "Продано", "Перемещено", "Остаток", "Продано, %", "В день", "С прихода"],
                   align: RECEIPT_ALIGN,
                   widths: RECEIPT_WIDTHS,
                   rows: [],
@@ -908,13 +936,13 @@ export default function SuppliersPage() {
                       const ls = docs.flatMap((d) => d.lines);
                       everything.push(...ls);
                       const t = sumLines(ls);
-                      out.rows.push([r.supplier, `${docs.length} накл.`, "", num(t.qty), money(t.cost), num(t.sold), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", "", ""]);
+                      out.rows.push([r.supplier, `${docs.length} док.`, "", num(t.qty), money(t.cost), num(t.sold), num(t.moved), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", "", ""]);
                       out.kinds.push("group");
                       out.indent.push(0);
                       for (const d of docs) pushDocRows(out, d, 1);
                     }
                     const all = sumLines(everything);
-                    out.rows.push(["Итого по выбранным приходам", "", "", num(all.qty), money(all.cost), num(all.sold), num(all.remaining), all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", "", ""]);
+                    out.rows.push(["Итого по выбранным приходам", "", "", num(all.qty), money(all.cost), num(all.sold), num(all.moved), num(all.remaining), all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—", "", ""]);
                     out.kinds.push("total");
                     out.indent.push(0);
                     return { headers: [], rows: out.rows, rowKinds: out.kinds, indent: out.indent };

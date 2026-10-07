@@ -643,6 +643,8 @@ export type SupplyRow = {
   quantity: number;
   price: number | null; // закупочная цена за штуку, тенге
   agentName: string | null; // контрагент в документе
+  docType?: "supply" | "enter" | "move_in" | "move_out"; // по умолчанию — приёмка
+  counterWarehouseId?: string; // у перемещений: второй склад
 };
 
 export async function fetchAllSupplies(): Promise<SupplyRow[]> {
@@ -698,6 +700,70 @@ export async function fetchAllSupplies(): Promise<SupplyRow[]> {
     offset += limit;
   }
   return all;
+}
+
+// Оприходования и перемещения между складами — тоже меняют остаток, но продажами
+// не являются: для «Приёмок» их нужно знать, иначе перемещённый товар на складе-получателе
+// «ниоткуда» не появляется, а на складе-отправителе выглядит как проданный.
+// Их десятки-сотни, поэтому, как и приёмки, берём целиком каждый раз.
+async function fetchPositionDocs(entity: "enter" | "move"): Promise<SupplyRow[]> {
+  const limit = 100;
+  let offset = 0;
+  const all: SupplyRow[] = [];
+  const idOf = (href?: string) => href?.split("/").pop()?.split("?")[0] ?? "";
+  for (;;) {
+    const page = await moyskladFetch(`/entity/${entity}`, { expand: "positions", limit: String(limit), offset: String(offset) });
+    type Raw = {
+      id?: string;
+      name?: string;
+      moment?: string;
+      store?: { meta?: { href?: string } };
+      sourceStore?: { meta?: { href?: string } };
+      targetStore?: { meta?: { href?: string } };
+      positions?: { rows?: { quantity?: number; price?: number; assortment?: { meta?: { href?: string } } }[] };
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      const date = (r.moment ?? "").slice(0, 10);
+      if (!date || !r.id) continue;
+      let line = 0;
+      for (const p of r.positions?.rows ?? []) {
+        line += 1;
+        const productId = idOf(p.assortment?.meta?.href);
+        if (!productId) continue;
+        const base = {
+          productMsId: productId,
+          date,
+          supplyId: r.id,
+          docName: r.name ?? "",
+          quantity: p.quantity ?? 0,
+          price: p.price != null ? p.price / 100 : null,
+          agentName: null,
+        };
+        if (entity === "enter") {
+          const warehouseId = idOf(r.store?.meta?.href);
+          if (warehouseId) all.push({ ...base, warehouseId, line, docType: "enter" });
+        } else {
+          const from = idOf(r.sourceStore?.meta?.href);
+          const to = idOf(r.targetStore?.meta?.href);
+          if (to) all.push({ ...base, warehouseId: to, line, docType: "move_in", counterWarehouseId: from });
+          // строки «ушло» — со сдвигом номера, чтобы не пересекаться со строками «пришло» того же документа
+          if (from) all.push({ ...base, warehouseId: from, line: line + 10000, docType: "move_out", counterWarehouseId: to });
+        }
+      }
+    }
+    if (rows.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
+export async function fetchAllEnters(): Promise<SupplyRow[]> {
+  return fetchPositionDocs("enter");
+}
+
+export async function fetchAllMoves(): Promise<SupplyRow[]> {
+  return fetchPositionDocs("move");
 }
 
 // This account has no working "артикул" field — every colour/size gets its

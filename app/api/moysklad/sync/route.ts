@@ -20,6 +20,8 @@ import {
   fetchStockAll,
   fetchStockByStore,
   fetchAllSupplies,
+  fetchAllEnters,
+  fetchAllMoves,
   fetchProfitByProductForDate,
   deriveArticle,
 } from "@/lib/moysklad";
@@ -437,10 +439,15 @@ async function syncCatalogAndStock() {
     if (error) throw error;
   }
 
-  // Каждая строка каждой приёмки — для раздела «По поставщикам → Приёмки» (сколько из какого прихода продано)
-  const itemRows = supplies.flatMap((row) => {
+  // Каждая строка приёмок, оприходований и перемещений — для раздела «По поставщикам → Приёмки»
+  // (сколько из какого прихода продано, сколько перемещено на другой склад)
+  const [enters, moves] = await Promise.all([fetchAllEnters(), fetchAllMoves()]);
+  const itemRows = [...supplies, ...enters, ...moves].flatMap((row) => {
     const store = WAREHOUSE_STORE[row.warehouseId];
     if (!store || !seenIds.has(row.productMsId) || !row.supplyId) return [];
+    const counter = row.counterWarehouseId ? WAREHOUSE_STORE[row.counterWarehouseId] ?? null : null;
+    // перемещение между складами одного учётного склада (город/заморозка совпадают) остатка склада не меняет
+    if ((row.docType === "move_in" || row.docType === "move_out") && counter === store) return [];
     return [
       {
         supply_id: row.supplyId,
@@ -452,6 +459,8 @@ async function syncCatalogAndStock() {
         quantity: row.quantity,
         price: row.price,
         agent_name: row.agentName,
+        doc_type: row.docType ?? "supply",
+        counter_store: counter,
         synced_at: now,
       },
     ];
