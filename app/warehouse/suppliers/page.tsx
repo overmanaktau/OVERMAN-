@@ -158,7 +158,10 @@ async function fetchReceiptLines(supplier: string, stores: string[]): Promise<Re
     doc_type: string | null;
     counter_store: string | null;
   };
-  const raw = await fetchAllRows<Raw>((from, to) => supabase.rpc("supplier_receipts", { p_supplier: supplier, p_stores: stores }).range(from, to));
+  // одним json-значением: функция считается один раз (постранично она пересчитывалась бы на каждой тысяче строк)
+  const { data, error } = await supabase.rpc("supplier_receipts_json", { p_supplier: supplier, p_stores: stores });
+  if (error) throw new Error(error.message);
+  const raw = (data ?? []) as Raw[];
   const mapped = raw.map((r) => ({
     supplyId: r.supply_id,
     docName: r.doc_name ?? "",
