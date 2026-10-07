@@ -534,7 +534,7 @@ export default function ObzorPage() {
                       r.receipts,
                       r.items,
                       r.receipts > 0 ? money(r.revenue / r.receipts) : "—",
-                      trafficByDate.get(r.date) ?? "—",
+                      trafficByDate.has(r.date) ? Math.round(trafficByDate.get(r.date) as number) : "—",
                       (trafficByDate.get(r.date) ?? 0) > 0 ? `${((r.receipts / (trafficByDate.get(r.date) as number)) * 100).toFixed(1)}%` : "—",
                       r.cost !== null ? money(r.cost) : "—",
                       r.cost !== null ? money(r.revenue - r.cost) : "—",
@@ -585,7 +585,7 @@ export default function ObzorPage() {
                 { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
                 { label: "Глубина чека", value: totalReceipts > 0 ? `${itemsPerReceipt.toFixed(1)} шт` : "—" },
                 { label: "Валовая прибыль", group: "cost" as const, value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от выручки` : undefined },
-                { label: "Оборачиваемость склада", group: "cost" as const, value: turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—" },
+                { label: "Оборачиваемость склада", group: "cost" as const, value: turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—" },
               ],
               sections,
             };
