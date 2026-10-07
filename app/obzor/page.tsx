@@ -198,6 +198,8 @@ export default function ObzorPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Посетители по дням (счётчик на входе, traffic_entries.traffic_fact) — для конверсии «чек / посетитель»
+  const [trafficByDate, setTrafficByDate] = useState<Map<string, number>>(new Map());
   const [dayRows, setDayRows] = useState<{ date: string; revenue: number; receipts: number; items: number; cost: number | null }[]>([]);
   const [range, setRange] = useState<Range>(() => getPeriodRange(DEFAULT_PERIOD, new Date()));
 
@@ -298,6 +300,17 @@ export default function ObzorPage() {
         .gte("sale_date", ymd(start))
         .lte("sale_date", ymd(end));
       if (err) throw err;
+      const { data: trafficData, error: trafficErr } = await supabase
+        .from("traffic_entries")
+        .select("entry_date, traffic_fact")
+        .in("store", selectedStores)
+        .gte("entry_date", ymd(start))
+        .lte("entry_date", ymd(end));
+      if (trafficErr) throw trafficErr;
+      const trafficMap = new Map<string, number>();
+      for (const t of (trafficData ?? []) as { entry_date: string; traffic_fact: number | null }[]) {
+        trafficMap.set(t.entry_date, (trafficMap.get(t.entry_date) ?? 0) + (t.traffic_fact ?? 0));
+      }
 
       type Row = {
         sale_date: string;
@@ -324,11 +337,13 @@ export default function ObzorPage() {
         .sort((a, b) => a.date.localeCompare(b.date));
       if (seq !== loadSeq.current) return; // a newer load() has since started — drop this stale result
       setDayRows(rows);
+      setTrafficByDate(trafficMap);
       setRange({ start, end });
     } catch (e) {
       if (seq !== loadSeq.current) return;
       setError(friendlyError(e));
       setDayRows([]);
+      setTrafficByDate(new Map());
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -380,6 +395,8 @@ export default function ObzorPage() {
   const totalItems = dayRows.reduce((acc, r) => acc + r.items, 0);
   const costKnown = dayRows.every((r) => r.cost !== null);
   const totalCost = costKnown ? dayRows.reduce((acc, r) => acc + (r.cost ?? 0), 0) : null;
+  const totalTraffic = [...trafficByDate.values()].reduce((acc, n) => acc + n, 0);
+  const conversionPct = totalTraffic > 0 ? (totalReceipts / totalTraffic) * 100 : null;
   const avgCheck = totalReceipts > 0 ? totalRevenue / totalReceipts : 0;
   const itemsPerReceipt = totalReceipts > 0 ? totalItems / totalReceipts : 0;
   const margin = totalCost !== null ? totalRevenue - totalCost : null;
@@ -504,9 +521,9 @@ export default function ObzorPage() {
             const sections: PdfDoc["sections"] = [
               {
                 title: "Продажи по дням",
-                headers: ["Дата", "Выручка", "Чеков", "Штук", "Средний чек", "Себестоимость", "Валовая прибыль"],
-                groupCols: { cost: [5, 6] },
-                widths: [1.2, 1.6, 1, 1, 1.4, 1.6, 1.6],
+                headers: ["Дата", "Выручка", "Чеков", "Штук", "Средний чек", "Посетителей", "Конверсия", "Себестоимость", "Валовая прибыль"],
+                groupCols: { cost: [7, 8], conversion: [5, 6] },
+                widths: [1.2, 1.6, 1, 1, 1.4, 1.2, 1.1, 1.6, 1.6],
                 rows: [...dayRows]
                   .sort((a, b) => (a.date < b.date ? -1 : 1))
                   .map((r) => {
@@ -517,6 +534,8 @@ export default function ObzorPage() {
                       r.receipts,
                       r.items,
                       r.receipts > 0 ? money(r.revenue / r.receipts) : "—",
+                      trafficByDate.get(r.date) ?? "—",
+                      (trafficByDate.get(r.date) ?? 0) > 0 ? `${((r.receipts / (trafficByDate.get(r.date) as number)) * 100).toFixed(1)}%` : "—",
                       r.cost !== null ? money(r.cost) : "—",
                       r.cost !== null ? money(r.revenue - r.cost) : "—",
                     ];
@@ -528,6 +547,8 @@ export default function ObzorPage() {
                       totalReceipts,
                       totalItems,
                       totalReceipts > 0 ? money(avgCheck) : "—",
+                      totalTraffic > 0 ? Math.round(totalTraffic) : "—",
+                      conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—",
                       totalCost !== null ? money(totalCost) : "—",
                       margin !== null ? money(margin) : "—",
                     ],
@@ -561,6 +582,7 @@ export default function ObzorPage() {
                 { label: "Выручка", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: totalReceipts > 0 ? money(avgCheck) : "—" },
+                { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
                 { label: "Глубина чека", value: totalReceipts > 0 ? `${itemsPerReceipt.toFixed(1)} шт` : "—" },
                 { label: "Валовая прибыль", group: "cost" as const, value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от выручки` : undefined },
                 { label: "Оборачиваемость склада", group: "cost" as const, value: turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—" },
@@ -577,11 +599,20 @@ export default function ObzorPage() {
         <div className="text-sm text-muted">Загрузка…</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             <Kpi label="Выручка" value={money(totalRevenue)} />
             <Kpi label="Чеков" value={totalReceipts.toLocaleString("ru-RU")} />
             <Kpi label="Средний чек" value={money(avgCheck)} />
             <Kpi label="Глубина чека" value={itemsPerReceipt.toFixed(2)} />
+            <Kpi
+              label="Конверсия (чек / посетитель)"
+              value={conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—"}
+              suffix={
+                <span className="text-[11px] text-mutedLight">
+                  {totalTraffic > 0 ? `${totalReceipts.toLocaleString("ru-RU")} чеков из ${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : "нет данных по трафику за период"}
+                </span>
+              }
+            />
             <Kpi
               label="Валовая прибыль"
               value={margin !== null ? money(margin) : "—"}
