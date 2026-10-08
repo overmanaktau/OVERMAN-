@@ -281,31 +281,44 @@ const BIG_CHECK_FROM = 100_000;
 // Для недели и месяца (from < to) метка «бигчек» не ставится — отчёт за период
 // только суммирует сотрудников.
 async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, withBigCheck = true): Promise<string> {
-  const [empRes, regRes, demands] = await Promise.all([
+  const [empRes, regRes, demands, trafficRes] = await Promise.all([
     supabaseAdmin
       .from("moysklad_employee_sales_daily")
-      .select("employee_ms_id, employee_name, revenue, receipts_count, items_count")
+      .select("employee_ms_id, employee_name, store, sale_date, revenue, receipts_count, items_count")
       .gte("sale_date", from)
       .lte("sale_date", to)
       .in("store", scope.cityCodes),
     supabaseAdmin.from("moysklad_registers").select("id").in("store", scope.cityCodes),
     withBigCheck ? fetchRetailDemandSummariesForDate(to) : Promise.resolve([]),
+    supabaseAdmin.from("traffic_entries").select("store, entry_date, traffic_fact").gte("entry_date", from).lte("entry_date", to).in("store", scope.cityCodes),
   ]);
   if (empRes.error) throw empRes.error;
   if (regRes.error) throw regRes.error;
+  if (trafficRes.error) throw trafficRes.error;
 
-  const byEmployee = new Map<string, { name: string; revenue: number; receipts: number; items: number }>();
+  // Трафик по дням и городам (счётчик на входе). Конверсия сотрудника — чеки к ОБЩЕМУ трафику
+  // только за дни его смен: нет продаж — нет смены, такой день в трафик сотрудника не входит.
+  const trafficByDay = new Map<string, number>();
+  for (const t of (trafficRes.data ?? []) as { store: string; entry_date: string; traffic_fact: number | null }[]) {
+    const key = `${t.store}|${t.entry_date}`;
+    trafficByDay.set(key, (trafficByDay.get(key) ?? 0) + (Number(t.traffic_fact) || 0));
+  }
+
+  const byEmployee = new Map<string, { name: string; revenue: number; receipts: number; items: number; shiftDays: Set<string> }>();
   for (const r of (empRes.data ?? []) as {
     employee_ms_id: string;
     employee_name: string;
+    store: string;
+    sale_date: string;
     revenue: number;
     receipts_count: number;
     items_count: number;
   }[]) {
-    const agg = byEmployee.get(r.employee_ms_id) ?? { name: r.employee_name, revenue: 0, receipts: 0, items: 0 };
+    const agg = byEmployee.get(r.employee_ms_id) ?? { name: r.employee_name, revenue: 0, receipts: 0, items: 0, shiftDays: new Set<string>() };
     agg.revenue += r.revenue;
     agg.receipts += r.receipts_count;
     agg.items += r.items_count;
+    if (r.receipts_count > 0 || r.revenue > 0) agg.shiftDays.add(`${r.store}|${r.sale_date}`); // был в смене
     byEmployee.set(r.employee_ms_id, agg);
   }
   if (byEmployee.size === 0) return `<i>за ${from === to ? "день" : "период"} продаж нет</i>`;
@@ -324,11 +337,15 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
       const mark = bigCheck && bigCheck.ownerId === id ? ` (бигчек ${num(bigCheck.sum / 100)})` : "";
       const avgCheck = e.receipts > 0 ? money(e.revenue / e.receipts) : "—";
       const depth = e.receipts > 0 ? (e.items / e.receipts).toFixed(2) : "—";
+      const shiftTraffic = [...e.shiftDays].reduce((acc, k) => acc + (trafficByDay.get(k) ?? 0), 0);
+      const conversion = shiftTraffic > 0 ? `${((e.receipts / shiftTraffic) * 100).toFixed(1)}% (${num(e.receipts)}/${num(Math.round(shiftTraffic))})` : "нет трафика";
       return (
         `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
-        `\n   ср.чек ${avgCheck} · глубина ${depth}`
+        `\n   ср.чек ${avgCheck} · глубина ${depth}` +
+        `\n   конверсия ${conversion}`
       );
     });
+  lines.push("", "Конверсия: чеки к общему трафику за дни смен сотрудника");
   return pre(lines.join("\n"));
 }
 
