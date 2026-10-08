@@ -278,6 +278,9 @@ function checksWord(n: number): string {
 // ровно одному сотруднику (владельцу этого чека), не нескольким.
 const BIG_CHECK_FROM = 100_000;
 
+// Сотрудники, у которых в отчётах не показываем конверсию и трафик (решение владельца 2026-10-08).
+const NO_CONVERSION_EMPLOYEE_IDS = new Set(["4d408fda-490d-11f1-0a80-1a3e0018b649"]); // Болат Наргиза
+
 // Для недели и месяца (from < to) метка «бигчек» не ставится — отчёт за период
 // только суммирует сотрудников.
 async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, withBigCheck = true): Promise<string> {
@@ -338,14 +341,16 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
       const avgCheck = e.receipts > 0 ? money(e.revenue / e.receipts) : "—";
       const depth = e.receipts > 0 ? (e.items / e.receipts).toFixed(2) : "—";
       const shiftTraffic = [...e.shiftDays].reduce((acc, k) => acc + (trafficByDay.get(k) ?? 0), 0);
-      const conversion = shiftTraffic > 0 ? `${((e.receipts / shiftTraffic) * 100).toFixed(1)}% (${num(e.receipts)}/${num(Math.round(shiftTraffic))})` : "нет трафика";
+      // в скобках — трафик за дни смен сотрудника
+      const conversion = shiftTraffic > 0 ? `${((e.receipts / shiftTraffic) * 100).toFixed(1)}% (${num(Math.round(shiftTraffic))})` : "нет трафика";
+      const hide = NO_CONVERSION_EMPLOYEE_IDS.has(id);
       return (
         `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
         `\n   ср.чек ${avgCheck} · глубина ${depth}` +
-        `\n   конверсия ${conversion}`
+        (hide ? "" : `\n   конверсия ${conversion}`)
       );
     });
-  lines.push("", "Конверсия: чеки к общему трафику за дни смен сотрудника");
+  lines.push("", "Конверсия: в скобках трафик за дни смен сотрудника");
   return pre(lines.join("\n"));
 }
 
