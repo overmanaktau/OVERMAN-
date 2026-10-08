@@ -744,3 +744,38 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
     section("ТРАФИК", trafficBlock2),
   ]);
 }
+
+// Вечерняя конверсия (ежедневно в 01:00): трафик счётчиков за 17:00–00:00 и чеки с 17:00 до 01:00 —
+// чеки, пробитые уже после закрытия, всё равно относятся к вечеру. Время в МойСклад на 2 часа раньше
+// Алматы: 17:00 → 15:00, 01:00 следующих суток → 23:00 того же дня. `date` — день смены (вчера в 01:00).
+export async function buildEveningReport(scope: ReportScope, date: string): Promise<string[]> {
+  const from = `${date} 15:00:00`;
+  const to = `${date} 23:00:00`;
+  const [allDemands, allReturns, traffic] = await Promise.all([
+    fetchRetailDemandsForDate(date),
+    fetchRetailSalesReturnsForDate(date),
+    fetchTrafficUntilHour(date, 24, 17).catch(() => null),
+  ]);
+  const inWindow = (m: string | undefined) => (m ?? "") >= from && (m ?? "") < to;
+  const agg = await aggregateSales(
+    date,
+    allDemands.filter((d) => inWindow(d.moment)),
+    allReturns.filter((r) => inWindow(r.moment))
+  );
+  let receipts = 0;
+  for (const [id, a] of agg.byRegister) {
+    if (scope.cityCodes.includes(REGISTER_STORE[id] ?? "")) receipts += a.receipts;
+  }
+  const visitors = traffic ? scope.cityCodes.reduce((a, c) => a + (traffic.get(c)?.fact ?? 0), 0) : 0;
+  const line = (label: string, value: string) => `${label.padEnd(18)}${value.padStart(14)}`;
+  const title = `📊 <b>Вечерняя конверсия · ${escapeHtml(scope.title)}</b>
+<i>за ${shortDate(date)}: трафик 17:00–00:00, чеки до 01:00</i>`;
+  const body = pre(
+    [
+      line("Чеков 17:00–01:00", num(receipts)),
+      line("Трафик 17:00–00:00", traffic ? visitors.toFixed(2) : "нет данных"),
+      line("Конверсия", traffic ? (visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "нет трафика") : "нет данных"),
+    ].join("\n")
+  );
+  return packSections([title, section("ВЕЧЕРНЯЯ КОНВЕРСИЯ", body)]);
+}

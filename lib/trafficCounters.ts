@@ -43,16 +43,17 @@ export type DailyTraffic = {
   complete: boolean; // счётчик уже передал данные до конца этих суток
 };
 
-// Трафик точек за один день по часам с 10:00 до `untilHour`:00 (не включая) — для дневного отчёта
+// Трафик точек за один день по часам с `fromHour` (по умолчанию 10:00) до `untilHour`:00 (не включая) — для дневного отчёта
 // «сегодня до 17:00». Возвращает карту точка → { income, fact }, fact — с вычетом процента точки.
 export async function fetchTrafficUntilHour(
   dateYmd: string,
-  untilHour: number
+  untilHour: number,
+  fromHour = WORK_FROM_HOUR
 ): Promise<Map<string, { income: number; fact: number }>> {
   const key = orgKey();
   const [devices, data] = await Promise.all([
     getJson<DeviceInfo[]>(`/device/list/${key}`),
-    getJson<DeviceData[]>(`/data/${key}/2/false`),
+    getJson<DeviceData[]>(`/data/${key}/3/false`),
   ]);
   const deviceByKey = new Map(devices.map((d) => [d.Key, d]));
   const incomeByStore = new Map<string, number>();
@@ -63,7 +64,7 @@ export async function fetchTrafficUntilHour(
     for (const item of device.Items) {
       if (item.DTime.slice(0, 10) !== dateYmd) continue;
       const hour = Number(item.DTime.slice(11, 13));
-      if (hour < WORK_FROM_HOUR || hour >= untilHour) continue;
+      if (hour < fromHour || hour >= untilHour) continue;
       incomeByStore.set(store, (incomeByStore.get(store) ?? 0) + (Number(item.Income) || 0));
     }
   }
