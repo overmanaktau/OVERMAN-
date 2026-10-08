@@ -777,5 +777,20 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
       line("Конверсия", traffic ? (visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "нет трафика") : "нет данных"),
     ].join("\n")
   );
-  return packSections([title, section("ВЕЧЕРНЯЯ КОНВЕРСИЯ", body)]);
+  // По сотрудникам: чеки вечера к общему вечернему трафику города; нет чеков вечером — нет смены.
+  const byPerson = new Map<string, { name: string; receipts: number }>();
+  for (const [key, e] of agg.byEmployee) {
+    if (!scope.cityCodes.includes(e.store)) continue;
+    const id = key.slice(0, key.lastIndexOf("|"));
+    const p = byPerson.get(id) ?? { name: e.name, receipts: 0 };
+    p.receipts += e.receipts;
+    byPerson.set(id, p);
+  }
+  const people = [...byPerson.entries()].filter(([, e]) => e.receipts > 0).sort((a, b) => b[1].receipts - a[1].receipts);
+  const empLines = people.map(([id, e], i) => {
+    const conv = traffic ? (visitors > 0 ? `${((e.receipts / visitors) * 100).toFixed(1)}% (${num(Math.round(visitors))})` : "нет трафика") : "нет данных";
+    return `${i + 1}. ${e.name}\n   ${num(e.receipts)} ${checksWord(e.receipts)}` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конверсия ${conv}`);
+  });
+  const employees = people.length === 0 ? "<i>вечером продаж не было</i>" : pre([...empLines, "", "Конверсия: в скобках трафик вечера"].join("\n"));
+  return packSections([title, section("ВЕЧЕРНЯЯ КОНВЕРСИЯ", body), section("ПО СОТРУДНИКАМ", employees)]);
 }
