@@ -61,34 +61,46 @@ type SupplierRow = {
 type SortKey = "supplier" | "articles" | "stock" | "money" | "share" | "extra" | "last" | "turnover";
 type Sort = { key: SortKey; dir: "asc" | "desc" } | null;
 
-const TURNOVER_PERIODS = [
-  { key: "30d", label: "последние 30 дней" },
-  { key: "90d", label: "последние 90 дней" },
-  { key: "month", label: "с начала месяца" },
-  { key: "prevmonth", label: "прошлый месяц" },
-  { key: "year", label: "с начала года" },
-] as const;
-type TurnoverPeriod = (typeof TURNOVER_PERIODS)[number]["key"];
+// Периоды — те же, что в «Обзоре» (и тот же расчёт границ), чтобы цифры можно было сравнивать
+const TURNOVER_PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"] as const;
+type TurnoverPeriod = number | "custom";
+const DEFAULT_TURNOVER_PERIOD = 3; // «С начала месяца»
 
 function ymdLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// период оборачиваемости заканчивается вчера: продажи за сегодня ещё не выгружены
-function turnoverRange(key: TurnoverPeriod): { from: string; to: string; label: string } {
+function turnoverRange(period: TurnoverPeriod, custom: { from: string; to: string }): { from: string; to: string; label: string } {
+  if (period === "custom") return { from: custom.from, to: custom.to, label: `${fmtRuDate(custom.from)} — ${fmtRuDate(custom.to)}` };
   const now = new Date();
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  const label = TURNOVER_PERIODS.find((p) => p.key === key)?.label ?? "";
-  if (key === "30d" || key === "90d") {
-    const n = key === "30d" ? 30 : 90;
-    return { from: ymdLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n)), to: ymdLocal(yesterday), label };
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const add = (x: Date, n: number) => new Date(x.getFullYear(), x.getMonth(), x.getDate() + n);
+  const dow = d.getDay();
+  const thisMonday = add(d, dow === 0 ? -6 : 1 - dow);
+  const thisSunday = add(thisMonday, 6);
+  const label = TURNOVER_PERIODS[period].toLowerCase();
+  let start = d;
+  let end = d;
+  if (period === 0) {
+    start = add(d, -1);
+    end = add(d, -1);
+  } else if (period === 1) {
+    start = add(thisMonday, -7);
+    end = add(thisSunday, -7);
+  } else if (period === 2) {
+    start = thisMonday;
+    end = thisSunday;
+  } else if (period === 3) {
+    start = new Date(d.getFullYear(), d.getMonth(), 1);
+    end = d;
+  } else if (period === 4) {
+    start = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    end = new Date(d.getFullYear(), d.getMonth(), 0);
+  } else {
+    start = new Date(2000, 0, 1);
+    end = d;
   }
-  if (key === "month") {
-    const first = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { from: ymdLocal(first <= yesterday ? first : yesterday), to: ymdLocal(yesterday), label };
-  }
-  if (key === "prevmonth") return { from: ymdLocal(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: ymdLocal(new Date(now.getFullYear(), now.getMonth(), 0)), label };
-  return { from: ymdLocal(new Date(now.getFullYear(), 0, 1)), to: ymdLocal(yesterday), label };
+  return { from: ymdLocal(start), to: ymdLocal(end), label };
 }
 
 function turnText(v: number | null): string {
@@ -814,7 +826,11 @@ export default function SuppliersPage() {
   const [stockRows, setStockRows] = useState<SupplierRow[]>([]);
   const [staleRows, setStaleRows] = useState<SupplierRow[]>([]);
   const [stockTotalsForStale, setStockTotalsForStale] = useState<Map<string, number>>(new Map());
-  const [turnPeriod, setTurnPeriod] = useState<TurnoverPeriod>("30d");
+  const [turnPeriod, setTurnPeriod] = useState<TurnoverPeriod>(DEFAULT_TURNOVER_PERIOD);
+  const [customRange, setCustomRange] = useState<{ from: string; to: string }>(() => {
+    const today = new Date();
+    return { from: ymdLocal(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)), to: ymdLocal(today) };
+  });
   const [turnover, setTurnover] = useState<Map<string, { cogs: number; stockValue: number }>>(new Map());
   const [sort, setSort] = useState<Sort>(null);
   const [loading, setLoading] = useState(true);
@@ -867,7 +883,7 @@ export default function SuppliersPage() {
   const turnoverStoresKey = turnoverStores.join(",");
   useEffect(() => {
     let cancelled = false;
-    const range = turnoverRange(turnPeriod);
+    const range = turnoverRange(turnPeriod, customRange);
     (async () => {
       try {
         const data = await fetchAllRows<{ supplier_name: string; cogs: number; stock_value: number }>((from, to) =>
@@ -882,7 +898,7 @@ export default function SuppliersPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turnoverStoresKey, turnPeriod]);
+  }, [turnoverStoresKey, turnPeriod, customRange.from, customRange.to]);
 
   if (!canView) {
     return (
@@ -937,7 +953,7 @@ export default function SuppliersPage() {
   const totalCogs = rows.reduce((a, r) => a + r.cogs, 0);
   const totalStockValue = rows.reduce((a, r) => a + (turnover.get(r.supplier)?.stockValue ?? 0), 0);
   const totalTurnover = totalStockValue > 0 ? (totalCogs / totalStockValue) * 100 : null;
-  const turnoverInfo = turnoverRange(turnPeriod);
+  const turnoverInfo = turnoverRange(turnPeriod, customRange);
   const totalMoney = rows.reduce((a, r) => a + r.money, 0);
   // себестоимость всего склада на выбранных складах — для «доли склада» (поиск по поставщику её не меняет)
   const warehouseTotal = tab === "stock" ? stockRows.reduce((a, r) => a + r.money, 0) : Array.from(stockTotalsForStale.values()).reduce((a, v) => a + v, 0);
@@ -1045,16 +1061,30 @@ export default function SuppliersPage() {
             className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px] w-[220px]"
           />
         </label>
-        <label className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold text-muted">Оборачиваемость за</span>
-          <select value={turnPeriod} onChange={(e) => setTurnPeriod(e.target.value as TurnoverPeriod)} className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px]">
-            {TURNOVER_PERIODS.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={String(turnPeriod)}
+              onChange={(e) => setTurnPeriod(e.target.value === "custom" ? "custom" : Number(e.target.value))}
+              className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px]"
+            >
+              {TURNOVER_PERIODS.map((label, i) => (
+                <option key={label} value={i}>
+                  {label}
+                </option>
+              ))}
+              <option value="custom">Свой период</option>
+            </select>
+            {turnPeriod === "custom" && (
+              <>
+                <input type="date" value={customRange.from} max={customRange.to} onChange={(e) => e.target.value && setCustomRange((r) => ({ ...r, from: e.target.value }))} className="bg-paper border border-border rounded-lg px-2 py-1.5 text-[13px]" />
+                <span className="text-muted">—</span>
+                <input type="date" value={customRange.to} min={customRange.from} onChange={(e) => e.target.value && setCustomRange((r) => ({ ...r, to: e.target.value }))} className="bg-paper border border-border rounded-lg px-2 py-1.5 text-[13px]" />
+              </>
+            )}
+          </div>
+        </div>
         <PdfButton
           disabled={rows.length === 0}
           build={(): PdfDoc => {
