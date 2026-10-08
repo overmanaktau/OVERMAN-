@@ -311,9 +311,9 @@ export async function handleCertText(t: Transport, user: CertUser, text: string)
   if (draft.step === "number") {
     const number = text.trim().replace(/\s+/g, " ");
     if (number.length < 1 || number.length > 32) return retry("Номер должен быть не длиннее 32 символов. Напишите номер сертификата.");
-    const { data: dup, error } = await supabaseAdmin.from("certificates").select("id").ilike("number", number.replace(/[\\%_]/g, "\\$&")).limit(1);
+    const { data: dup, error } = await supabaseAdmin.from("certificates").select("id").eq("store", user.store).ilike("number", number.replace(/[\\%_]/g, "\\$&")).limit(1);
     if (error) throw error;
-    if (dup && dup.length > 0) return retry(`Сертификат с номером <b>${escapeHtml(number)}</b> уже есть в системе. Проверьте номер и напишите ещё раз.`);
+    if (dup && dup.length > 0) return retry(`Сертификат с номером <b>${escapeHtml(number)}</b> уже есть в вашем городе. Проверьте номер и напишите ещё раз.`);
     const data = { ...d, number };
     await saveDraft(user.id, "confirm_sell", data, false);
     await t.send(chat, `${sellSummary(data, user.store)}\n\nПродать?`, {
@@ -377,7 +377,7 @@ async function finishSell(t: Transport, user: CertUser) {
   if (error) {
     await clearCertDraft(user.id);
     const dup = error.code === "23505";
-    await t.send(chat, dup ? `Сертификат с номером <b>${escapeHtml(String(d.number))}</b> уже есть в системе — продажа не оформлена.` : "Не удалось сохранить сертификат. Попробуйте ещё раз.", menuFor(user));
+    await t.send(chat, dup ? `Сертификат с номером <b>${escapeHtml(String(d.number))}</b> уже есть в вашем городе — продажа не оформлена.` : "Не удалось сохранить сертификат. Попробуйте ещё раз.", menuFor(user));
     return;
   }
   await logEvent(data.id, user.employee_name, "sold", `${money(Number(d.amount))}, ${payText({ pay_cash: Number(d.cash), pay_noncash: Number(d.noncash) })}; продавец ${d.seller_name}`);
