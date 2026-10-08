@@ -54,7 +54,74 @@ type SupplierRow = {
   money: number;
   saleValue: number;
   maxDays: number | null;
+  turnover: number | null; // оборачиваемость, %: себестоимость продаж за период ÷ себестоимость остатка
+  cogs: number; // себестоимость продаж за период
 };
+
+type SortKey = "supplier" | "articles" | "stock" | "money" | "share" | "extra" | "last" | "turnover";
+type Sort = { key: SortKey; dir: "asc" | "desc" } | null;
+
+const TURNOVER_PERIODS = [
+  { key: "30d", label: "последние 30 дней" },
+  { key: "90d", label: "последние 90 дней" },
+  { key: "month", label: "с начала месяца" },
+  { key: "prevmonth", label: "прошлый месяц" },
+  { key: "year", label: "с начала года" },
+] as const;
+type TurnoverPeriod = (typeof TURNOVER_PERIODS)[number]["key"];
+
+function ymdLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// период оборачиваемости заканчивается вчера: продажи за сегодня ещё не выгружены
+function turnoverRange(key: TurnoverPeriod): { from: string; to: string; label: string } {
+  const now = new Date();
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const label = TURNOVER_PERIODS.find((p) => p.key === key)?.label ?? "";
+  if (key === "30d" || key === "90d") {
+    const n = key === "30d" ? 30 : 90;
+    return { from: ymdLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n)), to: ymdLocal(yesterday), label };
+  }
+  if (key === "month") {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: ymdLocal(first <= yesterday ? first : yesterday), to: ymdLocal(yesterday), label };
+  }
+  if (key === "prevmonth") return { from: ymdLocal(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: ymdLocal(new Date(now.getFullYear(), now.getMonth(), 0)), label };
+  return { from: ymdLocal(new Date(now.getFullYear(), 0, 1)), to: ymdLocal(yesterday), label };
+}
+
+function turnText(v: number | null): string {
+  return v === null ? "—" : `${v.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
+// Заголовок колонки с двумя стрелками: ▼ — от большего к меньшему, ▲ — от меньшего к большему.
+// Повторное нажатие на выбранную стрелку снимает сортировку.
+function SortHead({ label, k, sort, onSort, left }: { label: string; k: SortKey; sort: Sort; onSort: (s: Sort) => void; left?: boolean }) {
+  const btn = (dir: "asc" | "desc") => {
+    const active = sort?.key === k && sort.dir === dir;
+    return (
+      <button
+        type="button"
+        title={dir === "desc" ? "От большего к меньшему" : "От меньшего к большему"}
+        aria-label={dir === "desc" ? "Сортировать от большего к меньшему" : "Сортировать от меньшего к большему"}
+        onClick={() => onSort(active ? null : { key: k, dir })}
+        className={`text-[10px] leading-none px-0.5 ${active ? "text-accent font-bold" : "text-mutedLight hover:text-ink"}`}
+      >
+        {dir === "desc" ? "▼" : "▲"}
+      </button>
+    );
+  };
+  return (
+    <div className={`flex items-center gap-1 ${left ? "" : "justify-end"}`}>
+      <span>{label}</span>
+      <span className="flex items-center flex-none">
+        {btn("desc")}
+        {btn("asc")}
+      </span>
+    </div>
+  );
+}
 
 type ItemRow = {
   id: string;
@@ -464,12 +531,20 @@ function SupplierTable({
   warehouseTotal,
   stockTotals,
   stores,
+  sort,
+  onSort,
+  totalTurnover,
+  turnoverLabel,
 }: {
   tab: Tab;
   rows: SupplierRow[];
   warehouseTotal: number; // себестоимость всего склада (без учёта поиска) — знаменатель доли
   stockTotals: Map<string, number>; // себестоимость всех остатков поставщика (для вкладки «Зависшие»)
   stores: string[];
+  sort: Sort;
+  onSort: (s: Sort) => void;
+  totalTurnover: number | null;
+  turnoverLabel: string;
 }) {
   const [openSuppliers, setOpenSuppliers] = useState<Set<string>>(new Set());
   const [openArticles, setOpenArticles] = useState<Set<string>>(new Set());
@@ -566,8 +641,8 @@ function SupplierTable({
 
   const stale = tab === "stale";
   // на «Зависших» лишняя колонка: какая часть остатков поставщика зависла
-  const grid = stale ? "grid-cols-[1.6fr_0.55fr_0.55fr_1fr_0.7fr_0.8fr_0.95fr]" : "grid-cols-[1.7fr_0.6fr_0.6fr_1fr_0.7fr_1fr]";
-  const minW = stale ? "min-w-[980px]" : "min-w-[860px]";
+  const grid = stale ? "grid-cols-[1.6fr_0.6fr_0.6fr_1fr_0.75fr_0.85fr_1fr_0.95fr]" : "grid-cols-[1.7fr_0.65fr_0.65fr_1fr_0.75fr_1fr_0.95fr]";
+  const minW = stale ? "min-w-[1120px]" : "min-w-[980px]";
   const supplierStock = (supplier: string, money: number) => (stale ? stockTotals.get(supplier) ?? 0 : money);
   const sumSupplierStock = rows.reduce((a, r) => a + supplierStock(r.supplier, r.money), 0);
   const sumStock = rows.reduce((a, r) => a + r.stock, 0);
@@ -578,13 +653,16 @@ function SupplierTable({
   return (
     <div className="overflow-x-auto">
       <div className={`${minW} grid ${grid} gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border`}>
-        <div>Поставщик</div>
-        <div className="text-right">Артикулов</div>
-        <div className="text-right">Штук</div>
-        <div className="text-right">{stale ? "Себестоимость зависшего" : "Себестоимость"}</div>
-        <div className="text-right">Доля склада</div>
-        {stale && <div className="text-right">Зависло у него</div>}
-        <div className="text-right">{stale ? "Дней без продаж (макс.)" : "По цене продажи"}</div>
+        <SortHead label="Поставщик" k="supplier" sort={sort} onSort={onSort} left />
+        <SortHead label="Артикулов" k="articles" sort={sort} onSort={onSort} />
+        <SortHead label="Штук" k="stock" sort={sort} onSort={onSort} />
+        <SortHead label={stale ? "Себестоимость зависшего" : "Себестоимость"} k="money" sort={sort} onSort={onSort} />
+        <SortHead label="Доля склада" k="share" sort={sort} onSort={onSort} />
+        {stale && <SortHead label="Зависло у него" k="extra" sort={sort} onSort={onSort} />}
+        <SortHead label={stale ? "Дней без продаж (макс.)" : "По цене продажи"} k="last" sort={sort} onSort={onSort} />
+        <div title={`Себестоимость продаж за период (${turnoverLabel}) ÷ себестоимость остатка сейчас`}>
+          <SortHead label="Оборачиваемость" k="turnover" sort={sort} onSort={onSort} />
+        </div>
       </div>
 
       {rows.map((r) => {
@@ -624,6 +702,7 @@ function SupplierTable({
               <div className="num text-right text-muted">
                 {stale ? (r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`) : money(r.saleValue)}
               </div>
+              <div className="num text-right font-semibold">{turnText(r.turnover)}</div>
             </div>
 
             {openReceipts.has(r.supplier) && <ReceiptsPanel supplier={r.supplier} stores={stores} />}
@@ -656,6 +735,7 @@ function SupplierTable({
                         <div className="num text-right text-muted">
                           {stale ? (g.maxDays === null ? "не продавался" : `${g.maxDays} дн.`) : money(g.saleValue)}
                         </div>
+                        <div />
                       </div>
                       {openItemReceipts.has(key) && (
                         <ReceiptsPanel supplier={r.supplier} stores={stores} productIds={g.items.map((x) => x.id)} title={g.article} />
@@ -681,6 +761,7 @@ function SupplierTable({
                               <div className="num text-right text-mutedLight">
                                 {stale ? (it.days === null ? "не продавался" : `${it.days} дн.`) : money(it.saleValue)}
                               </div>
+                              <div />
                             </div>
                             {openItemReceipts.has(it.id) && (
                               <ReceiptsPanel supplier={r.supplier} stores={stores} productIds={[it.id]} title={it.name} />
@@ -704,6 +785,7 @@ function SupplierTable({
         <div className="num text-right text-muted">{pct(sumSupplierStock, warehouseTotal)}</div>
         {stale && <div className="num text-right text-muted">{pct(sumMoney, sumSupplierStock)}</div>}
         <div className="num text-right text-muted">{stale ? "" : money(sumSale)}</div>
+        <div className="num text-right">{turnText(totalTurnover)}</div>
       </div>
     </div>
   );
@@ -732,6 +814,9 @@ export default function SuppliersPage() {
   const [stockRows, setStockRows] = useState<SupplierRow[]>([]);
   const [staleRows, setStaleRows] = useState<SupplierRow[]>([]);
   const [stockTotalsForStale, setStockTotalsForStale] = useState<Map<string, number>>(new Map());
+  const [turnPeriod, setTurnPeriod] = useState<TurnoverPeriod>("30d");
+  const [turnover, setTurnover] = useState<Map<string, { cogs: number; stockValue: number }>>(new Map());
+  const [sort, setSort] = useState<Sort>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const seq = useRef(0);
@@ -758,6 +843,8 @@ export default function SuppliersPage() {
         money: Number(r.money),
         saleValue: Number(r.sale_value),
         maxDays: "max_days" in r ? (r.max_days ?? null) : null,
+        turnover: null,
+        cogs: 0,
       });
       setStockRows(stock.map(map).sort((a, b) => b.money - a.money));
       setStaleRows(stale.map(map).sort((a, b) => b.money - a.money));
@@ -775,6 +862,28 @@ export default function SuppliersPage() {
     load();
   }, [load]);
 
+  // оборачиваемость по поставщикам за выбранный период — на тех же складах, что и таблица вкладки
+  const turnoverStores = tab === "stock" ? stockStores : staleStores;
+  const turnoverStoresKey = turnoverStores.join(",");
+  useEffect(() => {
+    let cancelled = false;
+    const range = turnoverRange(turnPeriod);
+    (async () => {
+      try {
+        const data = await fetchAllRows<{ supplier_name: string; cogs: number; stock_value: number }>((from, to) =>
+          supabase.rpc("stock_turnover_by_supplier", { p_stores: turnoverStores, p_from: range.from, p_to: range.to }).range(from, to)
+        );
+        if (!cancelled) setTurnover(new Map(data.map((r) => [r.supplier_name, { cogs: Number(r.cogs), stockValue: Number(r.stock_value) }])));
+      } catch {
+        if (!cancelled) setTurnover(new Map());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnoverStoresKey, turnPeriod]);
+
   if (!canView) {
     return (
       <div className="bg-surface border border-border rounded-card p-8 max-w-md">
@@ -784,7 +893,51 @@ export default function SuppliersPage() {
   }
 
   const q = search.trim().toLowerCase();
-  const rows = (tab === "stock" ? stockRows : staleRows).filter((r) => !q || r.supplier.toLowerCase().includes(q));
+  const turnoverOf = (supplier: string): { cogs: number; turnover: number | null } => {
+    const t = turnover.get(supplier);
+    if (!t) return { cogs: 0, turnover: null };
+    return { cogs: t.cogs, turnover: t.stockValue > 0 ? (t.cogs / t.stockValue) * 100 : null };
+  };
+  // сортировка по стрелкам в заголовках; без неё — по себестоимости, от большего к меньшему
+  const sortValue = (r: SupplierRow, key: SortKey): number | string | null => {
+    const own = tab === "stale" ? stockTotalsForStale.get(r.supplier) ?? 0 : r.money;
+    switch (key) {
+      case "supplier":
+        return r.supplier;
+      case "articles":
+        return r.articles;
+      case "stock":
+        return r.stock;
+      case "money":
+        return r.money;
+      case "share":
+        return warehouseTotal > 0 ? own / warehouseTotal : 0;
+      case "extra":
+        return own > 0 ? r.money / own : 0;
+      case "last":
+        return tab === "stale" ? r.maxDays : r.saleValue;
+      case "turnover":
+        return r.turnover;
+    }
+  };
+  const rows = (tab === "stock" ? stockRows : staleRows)
+    .filter((r) => !q || r.supplier.toLowerCase().includes(q))
+    .map((r) => ({ ...r, ...turnoverOf(r.supplier) }))
+    .sort((a, b) => {
+      if (!sort) return b.money - a.money;
+      const x = sortValue(a, sort.key);
+      const y = sortValue(b, sort.key);
+      // пустые значения («—», «не продавался») всегда внизу, в любую сторону
+      if (x === null && y === null) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      const cmp = typeof x === "string" ? x.localeCompare(y as string, "ru") : (x as number) - (y as number);
+      return sort.dir === "asc" ? cmp : -cmp;
+    });
+  const totalCogs = rows.reduce((a, r) => a + r.cogs, 0);
+  const totalStockValue = rows.reduce((a, r) => a + (turnover.get(r.supplier)?.stockValue ?? 0), 0);
+  const totalTurnover = totalStockValue > 0 ? (totalCogs / totalStockValue) * 100 : null;
+  const turnoverInfo = turnoverRange(turnPeriod);
   const totalMoney = rows.reduce((a, r) => a + r.money, 0);
   // себестоимость всего склада на выбранных складах — для «доли склада» (поиск по поставщику её не меняет)
   const warehouseTotal = tab === "stock" ? stockRows.reduce((a, r) => a + r.money, 0) : Array.from(stockTotalsForStale.values()).reduce((a, v) => a + v, 0);
@@ -800,16 +953,16 @@ export default function SuppliersPage() {
     if (tab === "stock") {
       downloadExcel(
         "Остатки_по_поставщикам",
-        ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада, %", "По цене продажи"],
-        rows.map((r) => [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((r.money / warehouseTotal) * 1000) / 10 : 0, Math.round(r.saleValue)])
+        ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада, %", "По цене продажи", `Оборачиваемость, % (${turnoverInfo.label})`],
+        rows.map((r) => [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((r.money / warehouseTotal) * 1000) / 10 : 0, Math.round(r.saleValue), r.turnover === null ? "" : Math.round(r.turnover * 10) / 10])
       );
     } else {
       downloadExcel(
         "Зависшие_по_поставщикам",
-        ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада, %", "Зависло от остатков поставщика, %", "Дней без продаж (макс.)"],
+        ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада, %", "Зависло от остатков поставщика, %", "Дней без продаж (макс.)", `Оборачиваемость, % (${turnoverInfo.label})`],
         rows.map((r) => {
           const total = stockTotalsForStale.get(r.supplier) ?? 0;
-          return [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((total / warehouseTotal) * 1000) / 10 : 0, total > 0 ? Math.round((r.money / total) * 1000) / 10 : 0, r.maxDays ?? "не продавался"];
+          return [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((total / warehouseTotal) * 1000) / 10 : 0, total > 0 ? Math.round((r.money / total) * 1000) / 10 : 0, r.maxDays ?? "не продавался", r.turnover === null ? "" : Math.round(r.turnover * 10) / 10];
         })
       );
     }
@@ -892,6 +1045,16 @@ export default function SuppliersPage() {
             className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px] w-[220px]"
           />
         </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-semibold text-muted">Оборачиваемость за</span>
+          <select value={turnPeriod} onChange={(e) => setTurnPeriod(e.target.value as TurnoverPeriod)} className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px]">
+            {TURNOVER_PERIODS.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <PdfButton
           disabled={rows.length === 0}
           build={(): PdfDoc => {
@@ -901,19 +1064,19 @@ export default function SuppliersPage() {
             const sumSupplierStock = rows.reduce((a, r) => a + supplierStock(r), 0);
             const body: (string | number)[][] = rows.map((r) =>
               stale
-                ? [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(supplierStock(r), warehouseTotal), pct(r.money, supplierStock(r)), r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`]
-                : [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(r.money, warehouseTotal), money(r.saleValue)]
+                ? [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(supplierStock(r), warehouseTotal), pct(r.money, supplierStock(r)), r.maxDays === null ? "не продавался" : `${r.maxDays} дн.`, turnText(r.turnover)]
+                : [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(r.money, warehouseTotal), money(r.saleValue), turnText(r.turnover)]
             );
             const sumArticles = rows.reduce((a, r) => a + r.articles, 0);
             body.push(
               stale
-                ? ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(sumSupplierStock, warehouseTotal), pct(totalMoney, sumSupplierStock), ""]
-                : ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(totalMoney, warehouseTotal), money(totalSale)]
+                ? ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(sumSupplierStock, warehouseTotal), pct(totalMoney, sumSupplierStock), "", turnText(totalTurnover)]
+                : ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(totalMoney, warehouseTotal), money(totalSale), turnText(totalTurnover)]
             );
             return {
               fileName: stale ? "Зависшие_по_поставщикам" : "Остатки_по_поставщикам",
               title: stale ? "Зависшие остатки по поставщикам" : "Остатки по поставщикам",
-              subtitle: `Склады: ${labels.join(", ")}${search.trim() ? ` · поставщик: «${search.trim()}»` : ""}`,
+              subtitle: `Склады: ${labels.join(", ")} · оборачиваемость за ${turnoverInfo.label}${search.trim() ? ` · поставщик: «${search.trim()}»` : ""}`,
               meta: stale
                 ? [`Зависшим считается товар без продаж и приходов дольше ${STALE_DAYS} дней`, "«Доля склада» — доля поставщика в себестоимости всего склада", "«Зависло у него» — какая часть остатков самого поставщика зависла"]
                 : ["«Доля склада» — доля поставщика в себестоимости всего склада", "Поставщик — из карточки товара в МойСклад"],
@@ -969,11 +1132,11 @@ export default function SuppliersPage() {
                   hint: "Только строки поставщиков, без артикулов и размеров.",
                   optional: true,
                   headers: stale
-                    ? ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада", "Зависло у него", "Дней без продаж (макс.)"]
-                    : ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада", "По цене продажи"],
+                    ? ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада", "Зависло у него", "Дней без продаж (макс.)", "Оборачиваемость"]
+                    : ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада", "По цене продажи", "Оборачиваемость"],
                   rows: body,
                   rowKinds: body.map((_, i) => (i === body.length - 1 ? "total" : "normal")),
-                  widths: stale ? [2.6, 1, 1, 1.7, 1.1, 1.1, 1.5] : [2.8, 1, 1, 1.7, 1.2, 1.7],
+                  widths: stale ? [2.4, 0.9, 0.9, 1.6, 1.0, 1.0, 1.4, 1.2] : [2.6, 0.9, 0.9, 1.6, 1.1, 1.6, 1.2],
                 },
                 {
                   title: stale ? "Зависшие по поставщикам — с артикулами и размерами" : "Остатки по поставщикам — с артикулами и размерами",
@@ -981,9 +1144,9 @@ export default function SuppliersPage() {
                   units: rows.map((r) => r.supplier),
                   levelLabels: ["Только поставщики", "+ артикулы", "+ артикулы и размеры"],
                   headers: stale
-                    ? ["Поставщик / артикул / размер", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада", "Зависло у него", "Дней без продаж (макс.)"]
-                    : ["Поставщик / артикул / размер", "Артикулов", "Штук", "Себестоимость", "Доля склада", "По цене продажи"],
-                  widths: stale ? [3.4, 0.9, 0.9, 1.6, 1.1, 1.1, 1.5] : [3.6, 0.9, 0.9, 1.6, 1.2, 1.6],
+                    ? ["Поставщик / артикул / размер", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада", "Зависло у него", "Дней без продаж (макс.)", "Оборачиваемость"]
+                    : ["Поставщик / артикул / размер", "Артикулов", "Штук", "Себестоимость", "Доля склада", "По цене продажи", "Оборачиваемость"],
+                  widths: stale ? [3.2, 0.9, 0.9, 1.5, 1.0, 1.0, 1.4, 1.2] : [3.4, 0.9, 0.9, 1.5, 1.1, 1.5, 1.2],
                   rows: [],
                   load: async ({ skip }) => {
                     type Raw = { product_ms_id: string; product_name: string; article: string; stock: number; money: number; sale_value: number; buy_price?: number | null; days_since_last_sale?: number | null };
@@ -1023,16 +1186,16 @@ export default function SuppliersPage() {
                       const own = supplierStock(r);
                       out.push(
                         stale
-                          ? [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(own, warehouseTotal), pct(r.money, own), last(r.maxDays)]
-                          : [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(r.money, warehouseTotal), money(r.saleValue)]
+                          ? [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(own, warehouseTotal), pct(r.money, own), last(r.maxDays), turnText(r.turnover)]
+                          : [r.supplier, num(r.articles), num(r.stock), money(r.money), pct(r.money, warehouseTotal), money(r.saleValue), turnText(r.turnover)]
                       );
                       kinds.push("group");
                       indent.push(0);
                       for (const g of groupByArticle(itemsBy.get(r.supplier) ?? [])) {
                         out.push(
                           stale
-                            ? [g.article, "", num(g.stock), money(g.money), pct(g.money, warehouseTotal), "", last(g.maxDays)]
-                            : [g.article, "", num(g.stock), money(g.money), pct(g.money, warehouseTotal), money(g.saleValue)]
+                            ? [g.article, "", num(g.stock), money(g.money), pct(g.money, warehouseTotal), "", last(g.maxDays), ""]
+                            : [g.article, "", num(g.stock), money(g.money), pct(g.money, warehouseTotal), money(g.saleValue), ""]
                         );
                         kinds.push("sub");
                         indent.push(1);
@@ -1040,8 +1203,8 @@ export default function SuppliersPage() {
                           const name = it.name + (it.buyPrice !== null ? ` · ${money(it.buyPrice)}/шт` : "");
                           out.push(
                             stale
-                              ? [name, "", num(it.stock), money(it.money), pct(it.money, warehouseTotal), "", last(it.days)]
-                              : [name, "", num(it.stock), money(it.money), pct(it.money, warehouseTotal), money(it.saleValue)]
+                              ? [name, "", num(it.stock), money(it.money), pct(it.money, warehouseTotal), "", last(it.days), ""]
+                              : [name, "", num(it.stock), money(it.money), pct(it.money, warehouseTotal), money(it.saleValue), ""]
                           );
                           kinds.push("sub");
                           indent.push(2);
@@ -1051,8 +1214,8 @@ export default function SuppliersPage() {
                     if (chosen.length === rows.length) {
                       out.push(
                         stale
-                          ? ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(sumSupplierStock, warehouseTotal), pct(totalMoney, sumSupplierStock), ""]
-                          : ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(totalMoney, warehouseTotal), money(totalSale)]
+                          ? ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(sumSupplierStock, warehouseTotal), pct(totalMoney, sumSupplierStock), "", turnText(totalTurnover)]
+                          : ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(totalMoney, warehouseTotal), money(totalSale), turnText(totalTurnover)]
                       );
                       kinds.push("total");
                       indent.push(0);
@@ -1100,7 +1263,7 @@ export default function SuppliersPage() {
           </div>
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <SupplierTable tab={tab} rows={rows} warehouseTotal={warehouseTotal} stockTotals={stockTotalsForStale} stores={tableStores} />
+            <SupplierTable tab={tab} rows={rows} warehouseTotal={warehouseTotal} stockTotals={stockTotalsForStale} stores={tableStores} sort={sort} onSort={setSort} totalTurnover={totalTurnover} turnoverLabel={turnoverInfo.label} />
           </div>
         </>
       )}
