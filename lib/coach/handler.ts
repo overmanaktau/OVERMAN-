@@ -8,6 +8,7 @@ import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, set
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfCancel, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
 import { TEST_EMPLOYEE_ID, TEST_LABEL, expireTestUser, isTestExpired } from "@/lib/coach/testmode";
 import { handleVerifyCallback } from "@/lib/verify/botActions";
+import { clearCertDraft, handleCertAdminCallback, handleCertCallback, handleCertOwnerCallback, handleCertText, sendCertAdminMenu, sendConsultantMenu } from "@/lib/coach/certificates";
 import {
   AUTO_ONLY_TEXT,
   ADMIN_HELP_TEXT,
@@ -167,6 +168,12 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
   } else if (section === "sales") {
     if (u.is_admin) await sendSalesStart(t, u.telegram_chat_id, adminStores(u));
     else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
+  } else if (section === "cert") {
+    if (!u.is_admin) await sendConsultantMenu(t, u);
+    else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
+  } else if (section === "certs") {
+    if (u.is_admin) await sendCertAdminMenu(t, u.telegram_chat_id);
+    else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
   } else if (section === "exit") {
     if (u.is_protected) await t.send(u.telegram_chat_id, "Главный владелец не может выйти из аккаунта.", menu);
     else await t.send(u.telegram_chat_id, EXIT_CONFIRM_TEXT, EXIT_CONFIRM_KEYBOARD);
@@ -225,6 +232,8 @@ const SECTION_BY_TEXT: Record<string, string> = {
   заявки: "requests",
   сотрудники: "staff",
   продажи: "sales",
+  сертификат: "cert",
+  сертификаты: "certs",
   "/help": "help",
 };
 
@@ -265,7 +274,12 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
       await handleCustomPeriodInput(t, user, user.awaiting, text, adminStores(user));
       return;
     }
-    if (user.awaiting) await setAwaiting(user.id, null);
+    // Идёт диалог по сертификату (продажа): любой текст, кроме кнопок меню, — ответ на вопрос бота.
+    if (user.awaiting === "cert" && !user.is_admin && !user.is_test && !section) {
+      if (await handleCertText(t, user, text)) return;
+    }
+    if (user.awaiting === "cert") await clearCertDraft(user.id);
+    else if (user.awaiting) await setAwaiting(user.id, null);
     if (section) {
       await showSection(t, user, section);
     } else {
@@ -347,6 +361,32 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     // Условный режим «руководитель» — только для тестового аккаунта в этой роли.
     if (!existing || existing.status !== "approved" || !existing.is_test || existing.test_role !== "manager") return;
     await handleDemoCallback(cb.data, t, chatId, dropCurrent);
+    return;
+  }
+
+  if (cb.data.startsWith("cs:")) {
+    // Сертификаты — стилист-консультант (не администратор, не тестовый).
+    if (!existing || existing.status !== "approved" || existing.is_admin || existing.is_test) return;
+    await handleCertCallback(cb.data, t, existing, dropCurrent);
+    return;
+  }
+
+  if (cb.data.startsWith("ca:")) {
+    // Списки сертификатов — администраторы и владельцы.
+    if (!existing || existing.status !== "approved" || !existing.is_admin || existing.is_test) return;
+    if (cb.data.startsWith("ca:m:")) {
+      await dropCurrent();
+      await sendCertAdminMenu(t, chatId);
+      return;
+    }
+    await handleCertAdminCallback(cb.data, t, chatId, adminStores(existing), dropCurrent);
+    return;
+  }
+
+  if (cb.data.startsWith("cr:")) {
+    // Решения по сертификатам (запросы на подтверждение, возвраты по чекам) — только главный владелец.
+    if (!existing || existing.status !== "approved" || !existing.is_protected) return;
+    await handleCertOwnerCallback(cb.data, t, chatId, existing.employee_name, clearCurrent);
     return;
   }
 

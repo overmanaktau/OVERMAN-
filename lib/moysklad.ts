@@ -75,6 +75,8 @@ export function totalCostKopecks(rows: PositionRow[] | undefined): number {
 }
 
 export type RetailDemand = {
+  id?: string;
+  name?: string; // номер чека в МойСклад
   meta?: { href?: string };
   moment: string; // "2026-09-21 14:32:00.000"
   sum: number; // total in kopecks
@@ -852,4 +854,74 @@ export async function fetchActiveEmployees(): Promise<ActiveEmployee[]> {
 
 export async function fetchActiveEmployeeIds(): Promise<string[]> {
   return (await fetchActiveEmployees()).map((e) => e.id);
+}
+
+
+// ---- Чеки для бота сертификатов ----
+// Лёгкая карточка чека: номер, время, кассир, касса и оплата (деньги в тенге).
+export type CheckInfo = {
+  id: string;
+  name: string;
+  moment: string; // время МойСклад как есть (Алматы минус 2 часа)
+  sum: number;
+  cash: number; // наличными
+  noncash: number; // безнал = сумма минус наличные
+  cashier: string;
+  retailStoreId: string;
+};
+
+type RawCheck = {
+  id?: string;
+  name?: string;
+  moment?: string;
+  sum?: number;
+  cashSum?: number;
+  owner?: { name?: string } | null;
+  retailStore?: { id?: string } | null;
+};
+
+function toCheckInfo(r: RawCheck): CheckInfo {
+  const sum = Math.round((r.sum ?? 0) / 100);
+  const cash = Math.round((r.cashSum ?? 0) / 100);
+  return {
+    id: r.id ?? "",
+    name: r.name ?? "",
+    moment: r.moment ?? "",
+    sum,
+    cash,
+    noncash: Math.max(0, sum - cash),
+    cashier: r.owner?.name ?? "—",
+    retailStoreId: r.retailStore?.id ?? "",
+  };
+}
+
+// Все чеки торгового дня (как в fetchRetailDemandsForDate), но без позиций — быстро.
+export async function fetchChecksForDate(date: string): Promise<CheckInfo[]> {
+  const { from, to } = dayWindow(date);
+  const filter = `moment>=${from};moment<${to}`;
+  const all: CheckInfo[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await moyskladFetch("/entity/retaildemand", {
+      filter,
+      limit: "100",
+      offset: String(offset),
+      order: "moment,desc",
+      expand: "retailStore,owner",
+    });
+    const rows: RawCheck[] = page.rows ?? [];
+    all.push(...rows.map(toCheckInfo));
+    if (rows.length < 100) break;
+  }
+  return all;
+}
+
+// Один чек по id — свежие данные (оплату могли исправить).
+export async function fetchCheckById(id: string): Promise<CheckInfo | null> {
+  try {
+    const raw = (await moyskladFetch(`/entity/retaildemand/${id}`, { expand: "retailStore,owner" })) as RawCheck;
+    return toCheckInfo(raw);
+  } catch (e) {
+    if (e instanceof Error && e.message.includes(" 404")) return null;
+    throw e;
+  }
 }
