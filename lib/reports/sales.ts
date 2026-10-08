@@ -32,6 +32,10 @@ const nf = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 export function num(n: number): string {
   return nf.format(Math.round(n)).replace(/[  ]/g, " ");
 }
+// Проценты в отчётах: два знака и запятая («11,02%»).
+export function pct2(n: number): string {
+  return `${n.toFixed(2).replace(".", ",")}%`;
+}
 export function money(n: number): string {
   return `${num(n)} ₸`;
 }
@@ -167,13 +171,13 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
 function trafficBlock(receipts: number, visitors: number, plan: number): string {
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
   // Ничего не округляем до целых: везде два знака после точки (х.хх).
-  const planValue = plan > 0 ? `${plan.toFixed(2)} (${((visitors / plan) * 100).toFixed(2)}%)` : "—";
+  const planValue = plan > 0 ? `${plan.toFixed(2)} (${pct2((visitors / plan) * 100)})` : "—";
   return pre(
     [
       line("План", planValue),
       line("Факт", visitors > 0 ? visitors.toFixed(2) : "—"),
       line("Чек", num(receipts)),
-      line("Конверсия", visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "—"),
+      line("Конверсия", visitors > 0 ? `${pct2((receipts / visitors) * 100)}` : "—"),
     ].join("\n")
   );
 }
@@ -201,7 +205,7 @@ async function ltvBlock(dayRows: SalesRow[], from: string, to: string): Promise<
   const total = checks.length;
   const fresh = total - own.length;
   const registered = fresh - retail.length;
-  const p = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toFixed(2)}%` : "—");
+  const p = (part: number, whole: number) => (whole > 0 ? pct2((part / whole) * 100) : "—");
 
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
   const lines = [
@@ -353,7 +357,7 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
       const depth = e.receipts > 0 ? (e.items / e.receipts).toFixed(2) : "—";
       const shiftTraffic = [...e.shiftDays].reduce((acc, k) => acc + (trafficByDay.get(k) ?? 0), 0);
       // в скобках — трафик за дни смен сотрудника
-      const conversion = shiftTraffic > 0 ? `${((e.receipts / shiftTraffic) * 100).toFixed(1)}% (${num(Math.round(shiftTraffic))})` : "нет трафика";
+      const conversion = shiftTraffic > 0 ? `${pct2((e.receipts / shiftTraffic) * 100)} (${num(Math.round(shiftTraffic))})` : "нет трафика";
       const hide = NO_CONVERSION_EMPLOYEE_IDS.has(id);
       return (
         `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
@@ -679,7 +683,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
 
   const visitors = traffic ? scope.cityCodes.reduce((a, c) => a + (traffic.get(c)?.fact ?? 0), 0) : 0;
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
-  const conv = (n: number, v: number) => (v > 0 ? `${((n / v) * 100).toFixed(1)}% (${num(Math.round(v))})` : "нет трафика");
+  const conv = (n: number, v: number) => (v > 0 ? `${pct2((n / v) * 100)} (${num(Math.round(v))})` : "нет трафика");
   const period = `${String(untilHour).padStart(2, "0")}:00`;
   const title = `📊 <b>Продажи · ${escapeHtml(scope.title)}</b>\n<i>сегодня ${shortDate(date)}, данные до ${period}</i>`;
 
@@ -690,7 +694,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
       line("Товара, шт", num(items)),
       line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
       line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
-      line("Конверсия", traffic ? (visitors > 0 ? `${((receipts / visitors) * 100).toFixed(1)}% (${receipts}/${num(Math.round(visitors))})` : "нет трафика") : "нет данных"),
+      line("Конверсия", traffic ? (visitors > 0 ? `${pct2((receipts / visitors) * 100)} (${receipts}/${num(Math.round(visitors))})` : "нет трафика") : "нет данных"),
     ].join("\n")
   );
   const payments = pre([line("Наличные", money((cash - retCash) / 100)), line("Безнал", money((total - cash - (retTotal - retCash)) / 100))].join("\n"));
@@ -731,7 +735,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
 
   const trafficBlock2 = pre(
     traffic
-      ? [line("Факт до " + period, visitors.toFixed(2)), line("Чек", num(receipts)), line("Конверсия", visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "нет трафика")].join("\n")
+      ? [line("Факт до " + period, visitors.toFixed(2)), line("Чек", num(receipts)), line("Конверсия", visitors > 0 ? `${pct2((receipts / visitors) * 100)}` : "нет трафика")].join("\n")
       : "нет данных счётчика"
   );
 
@@ -774,7 +778,7 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
     [
       line("Чеков 17:00–01:00", num(receipts)),
       line("Трафик 17:00–00:00", traffic ? visitors.toFixed(2) : "нет данных"),
-      line("Конверсия", traffic ? (visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "нет трафика") : "нет данных"),
+      line("Конверсия", traffic ? (visitors > 0 ? `${pct2((receipts / visitors) * 100)}` : "нет трафика") : "нет данных"),
     ].join("\n")
   );
   // По сотрудникам: чеки вечера к общему вечернему трафику города; нет чеков вечером — нет смены.
@@ -788,7 +792,7 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
   }
   const people = [...byPerson.entries()].filter(([, e]) => e.receipts > 0).sort((a, b) => b[1].receipts - a[1].receipts);
   const empLines = people.map(([id, e], i) => {
-    const conv = traffic ? (visitors > 0 ? `${((e.receipts / visitors) * 100).toFixed(1)}% (${num(Math.round(visitors))})` : "нет трафика") : "нет данных";
+    const conv = traffic ? (visitors > 0 ? `${pct2((e.receipts / visitors) * 100)} (${num(Math.round(visitors))})` : "нет трафика") : "нет данных";
     return `${i + 1}. ${e.name}\n   ${num(e.receipts)} ${checksWord(e.receipts)}` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конверсия ${conv}`);
   });
   const employees = people.length === 0 ? "<i>вечером продаж не было</i>" : pre([...empLines, "", "Конверсия: в скобках трафик вечера"].join("\n"));
