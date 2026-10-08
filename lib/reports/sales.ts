@@ -352,13 +352,27 @@ async function buildReturnsBlock(scope: ReportScope, from: string, to: string, d
     { amount: 0, receipts: 0, items: 0 }
   );
 
-  const { data, error } = await supabaseAdmin
-    .from("moysklad_employee_sales_daily")
-    .select("employee_ms_id, employee_name, returned_amount, returned_receipts, returned_items")
-    .gte("sale_date", from)
-    .lte("sale_date", to)
-    .in("store", scope.cityCodes);
+  const [{ data, error }, regRes, payments] = await Promise.all([
+    supabaseAdmin
+      .from("moysklad_employee_sales_daily")
+      .select("employee_ms_id, employee_name, returned_amount, returned_receipts, returned_items")
+      .gte("sale_date", from)
+      .lte("sale_date", to)
+      .in("store", scope.cityCodes),
+    supabaseAdmin.from("moysklad_registers").select("id").in("store", scope.cityCodes),
+    // способ оплаты возвратов — по документам возврата МойСклад (наличные и всё остальное)
+    fetchPaymentSummariesForRange(from, to, "return"),
+  ]);
   if (error) throw error;
+  if (regRes.error) throw regRes.error;
+  const registerIds = new Set((regRes.data ?? []).map((r) => r.id as string));
+  let refundTotal = 0;
+  let refundCash = 0;
+  for (const p of payments) {
+    if (!registerIds.has(p.retailStoreId)) continue;
+    refundTotal += p.sum;
+    refundCash += p.cash;
+  }
 
   const byEmployee = new Map<string, { name: string; amount: number; receipts: number; items: number }>();
   for (const r of (data ?? []) as {
@@ -384,6 +398,10 @@ async function buildReturnsBlock(scope: ReportScope, from: string, to: string, d
   }
 
   const lines = [`Всего: ${returnSummary(total.amount, total.receipts, total.items)}`];
+  if (refundTotal > 0) {
+    const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+    lines.push("", line("Наличные", money(refundCash / 100)), line("Безнал", money((refundTotal - refundCash) / 100)));
+  }
   const people = [...byEmployee.values()].sort((a, b) => b.amount - a.amount);
   if (people.length > 0) lines.push("");
   for (const e of people) lines.push(`${e.name}\n   ${returnSummary(e.amount, e.receipts, e.items)}`);

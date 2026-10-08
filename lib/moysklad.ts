@@ -214,7 +214,7 @@ export async function fetchPaymentSummariesForDate(date: string): Promise<Paymen
 
 // То же за несколько дней подряд (недельный и месячный отчёты): окно от начала
 // первого дня до 02:00 после последнего, как у dayWindow.
-export async function fetchPaymentSummariesForRange(fromDate: string, toDate: string): Promise<PaymentSummary[]> {
+export async function fetchPaymentSummariesForRange(fromDate: string, toDate: string, only?: "sale" | "return"): Promise<PaymentSummary[]> {
   const from = dayWindow(fromDate).from;
   const to = dayWindow(toDate).to;
   const filter = `moment>=${from};moment<${to}`;
@@ -225,6 +225,7 @@ export async function fetchPaymentSummariesForRange(fromDate: string, toDate: st
     ["/entity/retaildemand", "sale"],
     ["/entity/retailsalesreturn", "return"],
   ] as const) {
+    if (only && kind !== only) continue;
     let offset = 0;
     for (;;) {
       const page = await moyskladFetch(path, { filter, limit: String(limit), offset: String(offset) });
