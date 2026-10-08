@@ -78,6 +78,7 @@ export type RetailDemand = {
   meta?: { href?: string };
   moment: string; // "2026-09-21 14:32:00.000"
   sum: number; // total in kopecks
+  cashSum?: number; // из суммы — наличными (остальное безнал)
   // "retailStore" (точка продаж / касса) is what the business actually uses
   // to tell registers apart — "store" (склад) is just the warehouse stock
   // gets deducted from, and doesn't carry the city in its name.
@@ -252,6 +253,7 @@ export type RetailSalesReturn = {
   id?: string;
   moment?: string; // "2026-10-04 15:45:00.000"
   sum: number; // kopecks
+  cashSum?: number; // из суммы — наличными (остальное безнал)
   retailStore?: { name?: string; id?: string } | null;
   owner?: { name?: string; id?: string } | null;
   positions?: { rows?: PositionRow[] };

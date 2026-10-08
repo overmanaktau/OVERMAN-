@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { sendTelegramMessages } from "@/lib/telegram";
-import { buildPeriodReport, buildSalesReport, SCOPES, yesterdayInAlmaty } from "@/lib/reports/sales";
+import { buildIntradayReport, buildPeriodReport, buildSalesReport, SCOPES, todayInAlmaty, yesterdayInAlmaty } from "@/lib/reports/sales";
 import { REPORT_ROUTES } from "@/lib/reports/routes";
 import { activeHoldFor, recordHeldReport, reportKindOf, reportRange } from "@/lib/verify/holds";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
@@ -12,7 +12,7 @@ export const maxDuration = 60;
 // Ежедневная рассылка отчётов в группы Telegram. Дёргается по расписанию
 // (pg_cron в Supabase) с CRON_SECRET, вручную — админом. ?dry=1 ничего не
 // отправляет, а возвращает тексты; ?date=YYYY-MM-DD — отчёт за другой день, ?chat=<id> — только в одну группу,
-// ?scope=point_1|point_3 — только отчёты этого города, ?force=1 — отправить, даже если отчёт удержан.
+// ?intraday=1 — дневной отчёт «сегодня, данные до N:00» (?until=17 по умолчанию, дата — сегодня), ?scope=point_1|point_3 — только отчёты этого города, ?force=1 — отправить, даже если отчёт удержан.
 // Отчёт города удерживается (не уходит в группы), если ночная сверка нашла расхождение и автоисправление
 // не помогло (см. lib/verify/holds.ts): неправильный отчёт отправлять нельзя, он уйдёт после исправления.
 async function handle(request: Request) {
@@ -25,7 +25,10 @@ async function handle(request: Request) {
   }
 
   const url = new URL(request.url);
-  const date = url.searchParams.get("date") ?? yesterdayInAlmaty();
+  const intraday = url.searchParams.get("intraday") === "1";
+  const untilHour = Number(url.searchParams.get("until") ?? 17);
+  if (!Number.isInteger(untilHour) || untilHour < 11 || untilHour > 23) return NextResponse.json({ error: "Неверный until." }, { status: 400 });
+  const date = url.searchParams.get("date") ?? (intraday ? todayInAlmaty() : yesterdayInAlmaty());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
   const dry = url.searchParams.get("dry") === "1";
   const onlyChat = url.searchParams.get("chat");
@@ -51,7 +54,7 @@ async function handle(request: Request) {
       if (onlyScope && scopeKey !== onlyScope) continue;
       try {
         // Удержание: за период отчёта есть неисправленное расхождение этого города — не отправляем.
-        if (!force && !dry) {
+        if (!force && !dry && !intraday) {
           const kind = reportKindOf(periodParam);
           const hold = await activeHoldFor(scope.cityCodes, reportRange(kind, date));
           if (hold) {
@@ -68,7 +71,11 @@ async function handle(request: Request) {
         }
         let messages = cache.get(scopeKey);
         if (!messages) {
-          messages = period ? await buildPeriodReport(scope, period, date) : await buildSalesReport(scope, date);
+          messages = intraday
+            ? await buildIntradayReport(scope, date, untilHour)
+            : period
+              ? await buildPeriodReport(scope, period, date)
+              : await buildSalesReport(scope, date);
           cache.set(scopeKey, messages);
         }
         if (dry) {

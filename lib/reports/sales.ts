@@ -5,7 +5,12 @@ import {
   fetchLtvChecksForRange,
   fetchPaymentSummariesForRange,
   fetchRetailDemandSummariesForDate,
+  fetchRetailDemandsForDate,
+  fetchRetailSalesReturnsForDate,
 } from "@/lib/moysklad";
+import { aggregateSales } from "@/lib/salesAggregate";
+import { REGISTER_STORE, SAYA_PARK_REGISTER_ID, SAYA_PARK_RETIRED_FROM } from "@/lib/registers";
+import { fetchTrafficUntilHour } from "@/lib/trafficCounters";
 
 // compact: укороченный формат — без маржи, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. У Актау и Актобе
@@ -73,6 +78,12 @@ function dateLabel(date: string): string {
 }
 
 // Kazakhstan has one fixed zone (UTC+5, no DST); the server runs in UTC.
+export function todayInAlmaty(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 export function yesterdayInAlmaty(): string {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(new Date()).split("-").map(Number);
   const today = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
@@ -635,4 +646,101 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   ]);
 
   return [...salesMessages, ...productMessages];
+}
+
+
+// Дневной отчёт «сегодня до 17:00»: живые данные из МойСклад (за сегодня ночная синхронизация ещё не
+// прошла) и трафик со счётчиков за часы с 10:00 до 17:00. Время в МойСклад — на 2 часа раньше Алматы.
+// Те же правила, что у обычного отчёта: возврат вычитается, чек аннулируется, когда вернули всё.
+export async function buildIntradayReport(scope: ReportScope, date: string, untilHour = 17): Promise<string[]> {
+  const cutoff = `${date} ${String(untilHour - 2).padStart(2, "0")}:00:00`;
+  const [allDemands, allReturns, traffic] = await Promise.all([
+    fetchRetailDemandsForDate(date),
+    fetchRetailSalesReturnsForDate(date),
+    fetchTrafficUntilHour(date, untilHour).catch(() => null),
+  ]);
+  const demands = allDemands.filter((d) => (d.moment ?? "") < cutoff);
+  const returns = allReturns.filter((r) => (r.moment ?? "") < cutoff);
+  const agg = await aggregateSales(date, demands, returns);
+  const inScope = (store: string | undefined) => !!store && scope.cityCodes.includes(store);
+
+  let revenue = 0, receipts = 0, items = 0, retAmount = 0, retReceipts = 0, retItems = 0;
+  for (const [id, a] of agg.byRegister) {
+    if (!inScope(REGISTER_STORE[id])) continue;
+    revenue += a.revenue; receipts += a.receipts; items += a.items;
+    retAmount += a.returnedAmount; retReceipts += a.returnedReceipts; retItems += a.returnedItems;
+  }
+
+  // способ оплаты по документам тех же касс
+  const liveRegister = (id: string | undefined) => !!id && inScope(REGISTER_STORE[id]) && !(id === SAYA_PARK_REGISTER_ID && date >= SAYA_PARK_RETIRED_FROM);
+  let cash = 0, total = 0, retCash = 0, retTotal = 0;
+  for (const d of demands) if (liveRegister(d.retailStore?.id)) { total += d.sum ?? 0; cash += d.cashSum ?? 0; }
+  for (const r of returns) if (liveRegister(r.retailStore?.id)) { retTotal += r.sum ?? 0; retCash += r.cashSum ?? 0; }
+
+  const visitors = traffic ? scope.cityCodes.reduce((a, c) => a + (traffic.get(c)?.fact ?? 0), 0) : 0;
+  const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+  const conv = (n: number, v: number) => (v > 0 ? `${((n / v) * 100).toFixed(1)}% (${num(Math.round(v))})` : "нет трафика");
+  const period = `${String(untilHour).padStart(2, "0")}:00`;
+  const title = `📊 <b>Продажи · ${escapeHtml(scope.title)}</b>\n<i>сегодня ${shortDate(date)}, данные до ${period}</i>`;
+
+  const kpi = pre(
+    [
+      line("Выручка", money(revenue)),
+      line("Чеков", num(receipts)),
+      line("Товара, шт", num(items)),
+      line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
+      line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
+      line("Конверсия", traffic ? (visitors > 0 ? `${((receipts / visitors) * 100).toFixed(1)}% (${receipts}/${num(Math.round(visitors))})` : "нет трафика") : "нет данных"),
+    ].join("\n")
+  );
+  const payments = pre([line("Наличные", money((cash - retCash) / 100)), line("Безнал", money((total - cash - (retTotal - retCash)) / 100))].join("\n"));
+
+  // сотрудники: смена = были продажи; трафик смены — весь трафик города за сегодня до 17:00
+  const byPerson = new Map<string, { name: string; revenue: number; receipts: number; items: number; retAmount: number; retItems: number; retReceipts: number }>();
+  for (const [key, e] of agg.byEmployee) {
+    if (!inScope(e.store)) continue;
+    const id = key.slice(0, key.lastIndexOf("|"));
+    const p = byPerson.get(id) ?? { name: e.name, revenue: 0, receipts: 0, items: 0, retAmount: 0, retItems: 0, retReceipts: 0 };
+    p.revenue += e.revenue; p.receipts += e.receipts; p.items += e.items;
+    p.retAmount += e.returnedAmount; p.retItems += e.returnedItems; p.retReceipts += e.returnedReceipts;
+    byPerson.set(id, p);
+  }
+  const people = [...byPerson.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
+  const empLines = people.map(([id, e], i) => {
+    const avgCheck = e.receipts > 0 ? money(e.revenue / e.receipts) : "—";
+    const depth = e.receipts > 0 ? (e.items / e.receipts).toFixed(2) : "—";
+    const worked = e.receipts > 0 || e.revenue > 0;
+    const showConv = traffic && worked && !NO_CONVERSION_EMPLOYEE_IDS.has(id);
+    return (
+      `${i + 1}. ${e.name}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
+      `\n   ср.чек ${avgCheck} · глубина ${depth}` +
+      (showConv ? `\n   конверсия ${conv(e.receipts, visitors)}` : "")
+    );
+  });
+  const employees = people.length === 0 ? "<i>продаж пока нет</i>" : pre([...empLines, "", "Конверсия: в скобках трафик города до " + period].join("\n"));
+
+  let returnsBlock = "<i>возвратов пока нет</i>";
+  const withReturns = people.filter(([, e]) => e.retAmount !== 0 || e.retItems !== 0);
+  if (retAmount !== 0 || retItems !== 0 || withReturns.length > 0) {
+    const rl = [`Всего: ${returnSummary(retAmount, retReceipts, retItems)}`];
+    if (retTotal > 0) rl.push("", line("Наличные", money(retCash / 100)), line("Безнал", money((retTotal - retCash) / 100)));
+    if (withReturns.length > 0) rl.push("");
+    for (const [, e] of withReturns) rl.push(`${e.name}\n   ${returnSummary(e.retAmount, e.retReceipts, e.retItems)}`);
+    returnsBlock = pre(rl.join("\n"));
+  }
+
+  const trafficBlock2 = pre(
+    traffic
+      ? [line("Факт до " + period, visitors.toFixed(2)), line("Чек", num(receipts)), line("Конверсия", visitors > 0 ? `${((receipts / visitors) * 100).toFixed(2)}%` : "нет трафика")].join("\n")
+      : "нет данных счётчика"
+  );
+
+  return packSections([
+    title,
+    section(`ИТОГИ СЕГОДНЯ ДО ${period}`, kpi),
+    section("ПО СПОСОБУ ОПЛАТЫ", payments),
+    section("ПО СОТРУДНИКАМ", employees),
+    section("ВОЗВРАТЫ", returnsBlock),
+    section("ТРАФИК", trafficBlock2),
+  ]);
 }

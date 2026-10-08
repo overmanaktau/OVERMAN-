@@ -43,6 +43,38 @@ export type DailyTraffic = {
   complete: boolean; // счётчик уже передал данные до конца этих суток
 };
 
+// Трафик точек за один день по часам с 10:00 до `untilHour`:00 (не включая) — для дневного отчёта
+// «сегодня до 17:00». Возвращает карту точка → { income, fact }, fact — с вычетом процента точки.
+export async function fetchTrafficUntilHour(
+  dateYmd: string,
+  untilHour: number
+): Promise<Map<string, { income: number; fact: number }>> {
+  const key = orgKey();
+  const [devices, data] = await Promise.all([
+    getJson<DeviceInfo[]>(`/device/list/${key}`),
+    getJson<DeviceData[]>(`/data/${key}/2/false`),
+  ]);
+  const deviceByKey = new Map(devices.map((d) => [d.Key, d]));
+  const incomeByStore = new Map<string, number>();
+  for (const device of data) {
+    const info = deviceByKey.get(device.Key);
+    const store = info ? STORE_BY_OBJECT_CODE[info.ObjectCode] : undefined;
+    if (!info || !store) continue;
+    for (const item of device.Items) {
+      if (item.DTime.slice(0, 10) !== dateYmd) continue;
+      const hour = Number(item.DTime.slice(11, 13));
+      if (hour < WORK_FROM_HOUR || hour >= untilHour) continue;
+      incomeByStore.set(store, (incomeByStore.get(store) ?? 0) + (Number(item.Income) || 0));
+    }
+  }
+  const result = new Map<string, { income: number; fact: number }>();
+  for (const [store, income] of incomeByStore) {
+    const percent = DEDUCT_PERCENT[store] ?? 0;
+    result.set(store, { income, fact: Math.round(income * (1 - percent / 100) * 100) / 100 });
+  }
+  return result;
+}
+
 // «Вошло» (Income) по суткам для каждой точки за последние `days` дней
 // (максимум 20 — ограничение метода сервиса). Текущие незавершённые сутки в
 // ответ не включаются. Суммируются часы с 10:00 до 23:59 (WORK_FROM_HOUR);
