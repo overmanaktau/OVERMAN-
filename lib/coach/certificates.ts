@@ -64,7 +64,6 @@ const CITY: Record<string, string> = { point_1: "Актау", point_3: "Акто
 const HIDDEN_NAME = /саяпарк|saya/i;
 const EXPIRY_MONTHS = 3;
 const CHECKS_PER_PAGE = 8;
-const MAX_BUTTONS = 40;
 const MAX_AMOUNT = 10_000_000;
 const TOLERANCE = 1; // тенге — на округление
 
@@ -322,6 +321,26 @@ export async function handleCertText(t: Transport, user: CertUser, text: string)
     });
     return true;
   }
+  if (draft.step === "usenumber" || draft.step === "returnnumber") {
+    const forReturn = draft.step === "returnnumber";
+    const cert = await findCertByNumber(user.store, text);
+    if (!cert) return retry(`Сертификат с номером <b>${escapeHtml(text.trim())}</b> в вашем городе не найден. Проверьте номер и напишите ещё раз.`);
+    const why = unusableReason(cert, forReturn);
+    if (why) {
+      await clearCertDraft(user.id);
+      await t.send(chat, `Сертификат №<b>${escapeHtml(cert.number)}</b> ${why}.`, menuFor(user));
+      return true;
+    }
+    if (forReturn) {
+      await saveDraft(user.id, "confirm_return", { certId: cert.id }, false);
+      await t.send(chat, `Точно вернуть сертификат №<b>${escapeHtml(cert.number)}</b> на ${money(cert.amount)} (продал ${escapeHtml(cert.seller_name)})? После возврата использовать его будет нельзя.`, {
+        inline_keyboard: [[{ text: "✅ Да, вернуть", callback_data: `cs:ry:${cert.id}` }, { text: "Нет", callback_data: "cs:x" }]],
+      });
+    } else {
+      await showChecks(t, user, cert.id, 0);
+    }
+    return true;
+  }
   // На других шагах ответ даётся кнопками — текст игнорируем.
   await t.send(chat, "Выберите вариант кнопкой выше или нажмите «Отмена».", cancelMarkup);
   return true;
@@ -368,34 +387,38 @@ async function finishSell(t: Transport, user: CertUser) {
 
 // ───────── использование ─────────
 
-async function loadCerts(store: string, statuses: Status[]): Promise<Cert[]> {
-  const { data, error } = await supabaseAdmin.from("certificates").select("*").eq("store", store).in("status", statuses).order("sold_at", { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as Cert[];
-}
-
 async function getCert(id: number): Promise<Cert | null> {
   const { data, error } = await supabaseAdmin.from("certificates").select("*").eq("id", id).maybeSingle();
   if (error) throw error;
   return (data as Cert | null) ?? null;
 }
 
+// Поиск сертификата по введённому номеру среди сертификатов своего города (списка консультанту не показываем).
+async function findCertByNumber(store: string, text: string): Promise<Cert | null> {
+  const number = text.trim().replace(/\s+/g, " ");
+  if (!number) return null;
+  const { data, error } = await supabaseAdmin
+    .from("certificates")
+    .select("*")
+    .eq("store", store)
+    .ilike("number", number.replace(/[\\%_]/g, "\\$&"))
+    .limit(1);
+  if (error) throw error;
+  return ((data ?? [])[0] as Cert | undefined) ?? null;
+}
+
+// Почему сертификат нельзя использовать / вернуть сейчас (null — можно).
+function unusableReason(c: Cert, forReturn: boolean): string | null {
+  if (c.status === "used") return "уже использован";
+  if (c.status === "returned") return "уже возвращён";
+  if (c.status === "pending_use") return "ждёт решения руководителя";
+  if (!forReturn && isExpired(c)) return "срок действия истёк — обратитесь к руководителю";
+  return null;
+}
+
 async function startUse(t: Transport, user: CertUser) {
-  const chat = user.telegram_chat_id;
-  const all = await loadCerts(user.store, ["active"]);
-  const usable = all.filter((c) => !isExpired(c));
-  const expired = all.length - usable.length;
-  if (usable.length === 0) {
-    await t.send(chat, `Неиспользованных сертификатов нет${expired ? ` (с истёкшим сроком: ${expired} — обратитесь к руководителю)` : ""}.`, menuFor(user));
-    return;
-  }
-  await saveDraft(user.id, "pickcert", {}, false);
-  await t.send(chat, `✅ <b>Использование сертификата</b>\nВыберите сертификат:${expired ? `\n<i>Сертификаты с истёкшим сроком не показываются (${expired}).</i>` : ""}`, {
-    inline_keyboard: [
-      ...usable.slice(0, MAX_BUTTONS).map((c) => [{ text: `${c.seller_name} — №${c.number} · ${money(c.amount)}`, callback_data: `cs:u:${c.id}` }]),
-      CANCEL_ROW,
-    ],
-  });
+  await saveDraft(user.id, "usenumber", {}, true);
+  await t.send(user.telegram_chat_id, "✅ <b>Использование сертификата</b>\nНапишите номер сертификата:", cancelMarkup);
 }
 
 const sameCity = (store: string, c: CheckInfo) => REGISTER_STORE[c.retailStoreId] === store;
@@ -638,18 +661,8 @@ async function requestOwner(t: Transport, user: CertUser) {
 // ───────── возврат ─────────
 
 async function startReturn(t: Transport, user: CertUser) {
-  const certs = await loadCerts(user.store, ["active"]);
-  if (certs.length === 0) {
-    await t.send(user.telegram_chat_id, "Неиспользованных сертификатов для возврата нет.", menuFor(user));
-    return;
-  }
-  await saveDraft(user.id, "pickreturn", {}, false);
-  await t.send(user.telegram_chat_id, "↩️ <b>Возврат сертификата</b>\nКакой сертификат вернуть?", {
-    inline_keyboard: [
-      ...certs.slice(0, MAX_BUTTONS).map((c) => [{ text: `${c.seller_name} — №${c.number} · ${money(c.amount)}${isExpired(c) ? " (срок истёк)" : ""}`, callback_data: `cs:r:${c.id}` }]),
-      CANCEL_ROW,
-    ],
-  });
+  await saveDraft(user.id, "returnnumber", {}, true);
+  await t.send(user.telegram_chat_id, "↩️ <b>Возврат сертификата</b>\nНапишите номер сертификата, который возвращают:", cancelMarkup);
 }
 
 async function finishReturn(t: Transport, user: CertUser, certId: number) {
@@ -710,24 +723,10 @@ export async function handleCertCallback(data: string, t: Transport, user: CertU
     return;
   }
   if (action === "sy") return finishSell(t, user);
-  if (action === "u") {
-    if (!draft || draft.step !== "pickcert") return void (await t.send(chat, "Начните заново: нажмите «Сертификат».", menuFor(user)));
-    return showChecks(t, user, Number(a), 0);
-  }
   if (action === "uc") return showChecks(t, user, Number(a), Number(b ?? 0));
   if (action === "ud") return pickCheck(t, user, Number(a), String(b));
   if (action === "uy") return finishUse(t, user);
   if (action === "ur") return requestOwner(t, user);
-  if (action === "r") {
-    if (!draft || draft.step !== "pickreturn") return void (await t.send(chat, "Начните заново: нажмите «Сертификат».", menuFor(user)));
-    const cert = await getCert(Number(a));
-    if (!cert || cert.store !== user.store || cert.status !== "active") return void (await t.send(chat, "Этот сертификат уже нельзя вернуть.", menuFor(user)));
-    await saveDraft(user.id, "confirm_return", { certId: cert.id }, false);
-    await t.send(chat, `Точно вернуть сертификат №<b>${escapeHtml(cert.number)}</b> на ${money(cert.amount)} (продал ${escapeHtml(cert.seller_name)})? После возврата использовать его будет нельзя.`, {
-      inline_keyboard: [[{ text: "✅ Да, вернуть", callback_data: `cs:ry:${cert.id}` }, { text: "Нет", callback_data: "cs:x" }]],
-    });
-    return;
-  }
   if (action === "ry") {
     if (!draft || draft.step !== "confirm_return" || Number(draft.data.certId) !== Number(a)) return void (await t.send(chat, "Возврат уже оформлен или отменён.", menuFor(user)));
     return finishReturn(t, user, Number(a));
@@ -814,14 +813,14 @@ export async function handleCertOwnerCallback(
 
 // ───────── списки для администраторов и владельцев ─────────
 
-type Kind = "s" | "u" | "n";
+type Kind = "s" | "u" | "n" | "e";
 type Per = "pm" | "pw" | "tw" | "tm" | "all";
-const KIND_LABEL: Record<Kind, string> = { s: "Проданные", u: "Использованные", n: "Не использованные" };
+const KIND_LABEL: Record<Kind, string> = { s: "Проданные", u: "Использованные", n: "Не использованные", e: "Просроченные" };
 const PER_LABEL: Record<Per, string> = { pm: "Прошлый месяц", pw: "Прошлая неделя", tw: "Эта неделя", tm: "Этот месяц", all: "За всё время" };
 
 export async function sendCertAdminMenu(t: Transport, chatId: number) {
   await t.send(chatId, "🎟 <b>Сертификаты</b>\nКакой список показать?", {
-    inline_keyboard: (["s", "u", "n"] as Kind[]).map((k) => [{ text: KIND_LABEL[k], callback_data: `ca:k:${k}` }]),
+    inline_keyboard: (["s", "u", "n", "e"] as Kind[]).map((k) => [{ text: KIND_LABEL[k], callback_data: `ca:k:${k}` }]),
   });
 }
 
@@ -855,8 +854,8 @@ function certLine(c: Cert, kind: Kind): string {
   } else if (c.status === "used" && c.use_demand_id) {
     lines.push(`   использован на чек <a href="${mdLink(c.use_demand_id)}">№${escapeHtml(c.use_demand_name ?? "")}</a>`);
   }
-  if (kind !== "n" && c.status === "active") lines.push(`   действует до ${fmtDate(c.expires_at)}`);
-  if (kind === "n") lines.push(`   действует до ${fmtDate(c.expires_at)}`);
+  if (kind === "e") lines.push(`   срок истёк ${fmtDate(c.expires_at)}`);
+  else if (c.status === "active") lines.push(`   действует до ${fmtDate(c.expires_at)}`);
   return lines.join("\n");
 }
 
@@ -881,13 +880,16 @@ async function sendList(t: Transport, chatId: number, kind: Kind, stores: string
   let sum = 0;
   for (const store of stores) {
     let q = supabaseAdmin.from("certificates").select("*").eq("store", store);
-    const dateCol = kind === "u" ? "used_at" : "sold_at";
+    // «Просроченные» — неиспользованные с истёкшим сроком; период — по дате окончания срока.
+    const dateCol = kind === "u" ? "used_at" : kind === "e" ? "expires_at" : "sold_at";
     if (kind === "u") q = q.eq("status", "used");
     if (kind === "n") q = q.in("status", ["active", "pending_use"]);
+    if (kind === "e") q = q.eq("status", "active").lt("expires_at", new Date().toISOString());
     if (range) q = q.gte(dateCol, atStart(range.from)).lt(dateCol, atStart(addDays(range.to, 1)));
     const { data, error } = await q.order(dateCol, { ascending: true }).limit(500);
     if (error) throw error;
-    const rows = (data ?? []) as Cert[];
+    // «Не использованные» — только действующие: с истёкшим сроком они в «Просроченных».
+    const rows = ((data ?? []) as Cert[]).filter((c) => kind !== "n" || c.status !== "active" || !isExpired(c));
     total += rows.length;
     sum += rows.filter((c) => c.status !== "returned").reduce((a, c) => a + c.amount, 0);
     const title = `<b>${KIND_LABEL[kind]} · ${cityName(store)} · ${PER_LABEL[per]}${range ? ` (${fmtDate(`${range.from}T12:00:00+05:00`)}–${fmtDate(`${range.to}T12:00:00+05:00`)})` : ""}</b>`;
