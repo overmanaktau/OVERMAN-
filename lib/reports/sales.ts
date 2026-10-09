@@ -359,12 +359,23 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
       // в скобках — трафик за дни смен сотрудника
       const conversion = shiftTraffic > 0 ? `${pct2((e.receipts / shiftTraffic) * 100)} (${num(Math.round(shiftTraffic))})` : "нет трафика";
       const hide = NO_CONVERSION_EMPLOYEE_IDS.has(id);
+      if (from === to) {
+        // Дневной отчёт: короткие подписи (ч — чеки, т — товары, с.ч — средний чек, гл.ч — глубина чека, конв. — конверсия),
+        // трафик в скобке не показываем. Недельный и месячный остаются как были.
+        const dayConv = shiftTraffic > 0 ? pct2((e.receipts / shiftTraffic) * 100) : "нет трафика";
+        return (
+          `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ч · ${num(e.items)} т` +
+          `\n   с.ч ${avgCheck} · гл.ч ${depth}` +
+          (hide ? "" : `\n   конв. ${dayConv}`)
+        );
+      }
       return (
         `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
         `\n   ср.чек ${avgCheck} · глубина ${depth}` +
         (hide ? "" : `\n   конверсия ${conversion}`)
       );
     });
+  if (from === to) return pre(lines.join("\n\n")); // между сотрудниками одна пустая строка
   lines.push("", "Конверсия: в скобках трафик за дни смен сотрудника");
   return pre(lines.join("\n"));
 }
@@ -683,7 +694,6 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
 
   const visitors = traffic ? scope.cityCodes.reduce((a, c) => a + (traffic.get(c)?.fact ?? 0), 0) : 0;
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
-  const conv = (n: number, v: number) => (v > 0 ? `${pct2((n / v) * 100)} (${num(Math.round(v))})` : "нет трафика");
   const period = `${String(untilHour).padStart(2, "0")}:00`;
   const title = `📊 <b>Продажи · ${escapeHtml(scope.title)}</b>\n<i>сегодня ${shortDate(date)}, данные до ${period}</i>`;
 
@@ -716,12 +726,12 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
     const worked = e.receipts > 0 || e.revenue > 0;
     const showConv = traffic && worked && !NO_CONVERSION_EMPLOYEE_IDS.has(id);
     return (
-      `${i + 1}. ${e.name}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
-      `\n   ср.чек ${avgCheck} · глубина ${depth}` +
-      (showConv ? `\n   конверсия ${conv(e.receipts, visitors)}` : "")
+      `${i + 1}. ${e.name}\n   ${money(e.revenue)} · ${num(e.receipts)} ч · ${num(e.items)} т` +
+      `\n   с.ч ${avgCheck} · гл.ч ${depth}` +
+      (showConv ? `\n   конв. ${visitors > 0 ? pct2((e.receipts / visitors) * 100) : "нет трафика"}` : "")
     );
   });
-  const employees = people.length === 0 ? "<i>продаж пока нет</i>" : pre([...empLines, "", "Конверсия: в скобках трафик города до " + period].join("\n"));
+  const employees = people.length === 0 ? "<i>продаж пока нет</i>" : pre(empLines.join("\n\n"));
 
   let returnsBlock = "<i>возвратов пока нет</i>";
   const withReturns = people.filter(([, e]) => e.retAmount !== 0 || e.retItems !== 0);
@@ -792,9 +802,9 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
   }
   const people = [...byPerson.entries()].filter(([, e]) => e.receipts > 0).sort((a, b) => b[1].receipts - a[1].receipts);
   const empLines = people.map(([id, e], i) => {
-    const conv = traffic ? (visitors > 0 ? `${pct2((e.receipts / visitors) * 100)} (${num(Math.round(visitors))})` : "нет трафика") : "нет данных";
-    return `${i + 1}. ${e.name}\n   ${num(e.receipts)} ${checksWord(e.receipts)}` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конверсия ${conv}`);
+    const conv = traffic ? (visitors > 0 ? pct2((e.receipts / visitors) * 100) : "нет трафика") : "нет данных";
+    return `${i + 1}. ${e.name}\n   ${num(e.receipts)} ч` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конв. ${conv}`);
   });
-  const employees = people.length === 0 ? "<i>вечером продаж не было</i>" : pre([...empLines, "", "Конверсия: в скобках трафик вечера"].join("\n"));
+  const employees = people.length === 0 ? "<i>вечером продаж не было</i>" : pre(empLines.join("\n\n"));
   return packSections([title, section("ВЕЧЕРНЯЯ КОНВЕРСИЯ", body), section("ПО СОТРУДНИКАМ", employees)]);
 }
