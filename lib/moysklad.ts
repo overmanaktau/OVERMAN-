@@ -938,3 +938,190 @@ export async function fetchEmployeeNames(): Promise<Map<string, string>> {
   }
   return names;
 }
+
+// ───────── Касса: клиенты и бонусы ─────────
+// Всё только на чтение. Время МойСклад — на 3 часа впереди UTC (Алматы на 2 часа позже него).
+
+export function msMomentToIso(moment: string): string {
+  return `${moment.replace(" ", "T").slice(0, 19)}+03:00`;
+}
+const idOfHref = (href?: string | null) => href?.split("/").pop()?.split("?")[0] ?? "";
+
+export type MsClientBasic = { id: string; name: string; phone: string; tags: string[]; created: string; updated: string; archived: boolean };
+
+// Все контрагенты (постранично по 1000, без expand). Теги и телефоны приходят в самой выдаче.
+export async function fetchAllCounterpartiesBasic(): Promise<MsClientBasic[]> {
+  const all: MsClientBasic[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const page = await moyskladFetch("/entity/counterparty", { limit: "1000", offset: String(offset) });
+    type Raw = { id: string; name?: string; phone?: string; tags?: string[]; created?: string; updated?: string; archived?: boolean };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      all.push({
+        id: r.id,
+        name: r.name ?? "",
+        phone: r.phone ?? "",
+        tags: r.tags ?? [],
+        created: r.created ? msMomentToIso(r.created) : "",
+        updated: r.updated ? msMomentToIso(r.updated) : "",
+        archived: !!r.archived,
+      });
+    }
+    if (rows.length < 1000) break;
+  }
+  return all;
+}
+
+export type MsClientStats = { id: string; demandsCount: number; demandsSum: number; lastDemandAt: string | null; firstDemandAt: string | null };
+
+// Отчёт «Контрагенты»: число и сумма покупок, даты первой и последней покупки (сумма — в тенге).
+export async function fetchClientStats(): Promise<Map<string, MsClientStats>> {
+  const out = new Map<string, MsClientStats>();
+  for (let offset = 0; ; offset += 1000) {
+    const page = await moyskladFetch("/report/counterparty", { limit: "1000", offset: String(offset) });
+    type Raw = {
+      counterparty?: { meta?: { href?: string } };
+      demandsCount?: number;
+      demandsSum?: number;
+      lastDemandDate?: string | null;
+      firstDemandDate?: string | null;
+    };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      const id = idOfHref(r.counterparty?.meta?.href);
+      if (!id) continue;
+      out.set(id, {
+        id,
+        demandsCount: r.demandsCount ?? 0,
+        demandsSum: (r.demandsSum ?? 0) / 100,
+        lastDemandAt: r.lastDemandDate ? msMomentToIso(r.lastDemandDate) : null,
+        firstDemandAt: r.firstDemandDate ? msMomentToIso(r.firstDemandDate) : null,
+      });
+    }
+    if (rows.length < 1000) break;
+  }
+  return out;
+}
+
+export type MsBonusTx = {
+  id: string;
+  clientId: string;
+  moment: string; // ISO
+  updated: string; // ISO
+  value: number; // бонусы (1 бонус = 1 ₸)
+  kind: "earn" | "spend";
+  status: string;
+  parentType: string; // retaildemand | retailsalesreturn | …
+  parentId: string;
+};
+
+type RawBonusTx = {
+  id: string;
+  moment: string;
+  updated: string;
+  bonusValue?: number;
+  transactionType?: string;
+  transactionStatus?: string;
+  agent?: { meta?: { href?: string } };
+  parentDocument?: { meta?: { href?: string; type?: string } };
+};
+
+function toBonusTx(r: RawBonusTx): MsBonusTx {
+  return {
+    id: r.id,
+    clientId: idOfHref(r.agent?.meta?.href),
+    moment: msMomentToIso(r.moment),
+    updated: msMomentToIso(r.updated),
+    value: r.bonusValue ?? 0,
+    kind: r.transactionType === "SPENDING" ? "spend" : "earn",
+    status: r.transactionStatus ?? "COMPLETED",
+    parentType: r.parentDocument?.meta?.type ?? "",
+    parentId: idOfHref(r.parentDocument?.meta?.href),
+  };
+}
+
+// Одна страница бонусных операций, изменившихся с момента updatedFromIso (по возрастанию updated).
+// Список операций в МойСклад отдаётся очень медленно (≈0,3 с на строку), поэтому страницы небольшие.
+export async function fetchBonusTransactionsPage(updatedFromIso: string | null, offset: number, limit = 100): Promise<MsBonusTx[]> {
+  const params: Record<string, string> = { limit: String(limit), offset: String(offset), order: "updated,asc" };
+  if (updatedFromIso) {
+    const ms = new Date(new Date(updatedFromIso).getTime() + 3 * 3600 * 1000).toISOString().slice(0, 23).replace("T", " ");
+    params.filter = `updated>=${ms}`;
+  }
+  const page = await moyskladFetch("/entity/bonustransaction", params);
+  return ((page.rows ?? []) as RawBonusTx[]).map(toBonusTx);
+}
+
+// Бонусные операции одного клиента (обычно единицы строк).
+export async function fetchClientBonusTransactions(clientId: string): Promise<MsBonusTx[]> {
+  const all: MsBonusTx[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await moyskladFetch("/entity/bonustransaction", {
+      filter: `agent=${BASE_URL}/entity/counterparty/${clientId}`,
+      limit: "100",
+      offset: String(offset),
+      order: "moment,asc",
+    });
+    const rows = (page.rows ?? []) as RawBonusTx[];
+    all.push(...rows.map(toBonusTx));
+    if (rows.length < 100) break;
+  }
+  return all;
+}
+
+export type MsClientDoc = { id: string; name: string; moment: string; sum: number; retailStoreId: string; demandId?: string };
+
+// Чеки и возвраты одного клиента (сумма — в тенге), новые сверху.
+export async function fetchClientDocs(clientId: string): Promise<{ demands: MsClientDoc[]; returns: MsClientDoc[] }> {
+  const agent = `agent=${BASE_URL}/entity/counterparty/${clientId}`;
+  const load = async (entity: string) => {
+    const out: MsClientDoc[] = [];
+    for (let offset = 0; ; offset += 100) {
+      const page = await moyskladFetch(`/entity/${entity}`, { filter: agent, limit: "100", offset: String(offset), order: "moment,desc" });
+      type Raw = { id: string; name?: string; moment: string; sum?: number; retailStore?: { meta?: { href?: string } }; demand?: { meta?: { href?: string } } };
+      const rows: Raw[] = page.rows ?? [];
+      for (const r of rows) {
+        out.push({
+          id: r.id,
+          name: r.name ?? "",
+          moment: msMomentToIso(r.moment),
+          sum: (r.sum ?? 0) / 100,
+          retailStoreId: idOfHref(r.retailStore?.meta?.href),
+          demandId: idOfHref(r.demand?.meta?.href) || undefined,
+        });
+      }
+      if (rows.length < 100) break;
+    }
+    return out;
+  };
+  const [demands, returns] = await Promise.all([load("retaildemand"), load("retailsalesreturn")]);
+  return { demands, returns };
+}
+
+export async function fetchClientBasic(clientId: string): Promise<MsClientBasic | null> {
+  try {
+    const r = (await moyskladFetch(`/entity/counterparty/${clientId}`)) as { id: string; name?: string; phone?: string; tags?: string[]; created?: string; updated?: string; archived?: boolean };
+    return { id: r.id, name: r.name ?? "", phone: r.phone ?? "", tags: r.tags ?? [], created: r.created ? msMomentToIso(r.created) : "", updated: r.updated ? msMomentToIso(r.updated) : "", archived: !!r.archived };
+  } catch (e) {
+    if (e instanceof Error && e.message.includes(" 404")) return null;
+    throw e;
+  }
+}
+
+// Возврат → чек, который вернули (для бонусов: списание по возврату должно попасть в партию этой покупки).
+export async function fetchReturnDemandMap(fromIso: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  // МойСклад принимает время своим часовым поясом (UTC+3) в виде «ГГГГ-ММ-ДД ЧЧ:ММ:СС».
+  const from = new Date(new Date(fromIso).getTime() + 3 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " ");
+  for (let offset = 0; ; offset += 100) {
+    const page = await moyskladFetch("/entity/retailsalesreturn", { filter: `moment>=${from}`, limit: "100", offset: String(offset) });
+    type Raw = { id: string; demand?: { meta?: { href?: string } } };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) {
+      const demandId = idOfHref(r.demand?.meta?.href);
+      if (demandId) out.set(r.id, demandId);
+    }
+    if (rows.length < 100) break;
+  }
+  return out;
+}

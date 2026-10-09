@@ -25,7 +25,22 @@ export default function LoginPage() {
     if (data.session) {
       recordLoginEvent(data.session.user.id, data.session.user.email ?? null);
     }
-    router.push("/marketing/statistics");
+    // Вход «Касса» (доступ только к экрану кассы) сразу ведёт на него, остальные — в портал как раньше.
+    let target = "/marketing/statistics";
+    try {
+      const userId = data.session?.user.id;
+      if (userId) {
+        const { data: roleRow } = await supabase.from("user_roles").select("role, role_id").eq("user_id", userId).maybeSingle();
+        if (roleRow && roleRow.role !== "admin" && roleRow.role !== "owner" && roleRow.role_id) {
+          const { data: perms } = await supabase.from("role_permissions").select("section, can_view").eq("role_id", roleRow.role_id).eq("can_view", true);
+          const viewable = (perms ?? []).map((p) => p.section as string);
+          if (viewable.includes("kassa") && viewable.every((s) => s === "kassa")) target = "/kassa";
+        }
+      }
+    } catch {
+      // не получилось определить роль — идём в обычный раздел
+    }
+    router.push(target);
   }
 
   return (

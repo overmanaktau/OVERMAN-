@@ -46,6 +46,7 @@ export const SECTIONS = [
   { key: "settings.coach", label: "Помощник консультантов (Telegram-бот)", group: "settings", hasEdit: true },
   { key: "history", label: "История", group: "settings", hasEdit: false },
 
+  { key: "kassa", label: "Касса (клиенты и сертификаты)", group: "general", hasEdit: true },
   { key: "requests", label: "Запросы", group: "general", hasEdit: true },
   { key: "profile.rename", label: "Смена имени сотрудника", group: "general", hasEdit: true, viewless: true },
 ] as const;
