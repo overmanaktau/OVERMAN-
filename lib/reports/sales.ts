@@ -5,6 +5,7 @@ import {
   fetchLtvChecksForRange,
   fetchPaymentSummariesForRange,
   fetchRetailDemandSummariesForDate,
+  fetchEmployeeNames,
   fetchRetailDemandsForDate,
   fetchRetailSalesReturnsForDate,
 } from "@/lib/moysklad";
@@ -282,12 +283,28 @@ function kassaBlock(rows: SalesRow[], compact: boolean): string {
 // ровно одному сотруднику (владельцу этого чека), не нескольким.
 const BIG_CHECK_FROM = 100_000;
 
+// Имена сотрудников в базе продаж — те, что были в МойСклад в день продажи. Если человека потом
+// переименовали, в отчётах за период он бы значился по-старому, поэтому имена берём актуальные из
+// МойСклад (один запрос, кэш на 5 минут). Если МойСклад не ответил — остаются имена из базы.
+let freshNamesCache: { at: number; names: Map<string, string> } | null = null;
+async function freshEmployeeNames(): Promise<Map<string, string>> {
+  if (freshNamesCache && Date.now() - freshNamesCache.at < 5 * 60_000) return freshNamesCache.names;
+  try {
+    const names = await fetchEmployeeNames();
+    freshNamesCache = { at: Date.now(), names };
+    return names;
+  } catch {
+    return new Map();
+  }
+}
+
 // Сотрудники, у которых в отчётах не показываем конверсию и трафик (решение владельца 2026-10-08).
 const NO_CONVERSION_EMPLOYEE_IDS = new Set(["4d408fda-490d-11f1-0a80-1a3e0018b649"]); // Болат Наргиза
 
 // Для недели и месяца (from < to) метка «бигчек» не ставится — отчёт за период
 // только суммирует сотрудников.
 async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, withBigCheck = true): Promise<string> {
+  const names = await freshEmployeeNames();
   const [empRes, regRes, demands, trafficRes] = await Promise.all([
     supabaseAdmin
       .from("moysklad_employee_sales_daily")
@@ -321,7 +338,7 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
     receipts_count: number;
     items_count: number;
   }[]) {
-    const agg = byEmployee.get(r.employee_ms_id) ?? { name: r.employee_name, revenue: 0, receipts: 0, items: 0, shiftDays: new Set<string>() };
+    const agg = byEmployee.get(r.employee_ms_id) ?? { name: names.get(r.employee_ms_id) ?? r.employee_name, revenue: 0, receipts: 0, items: 0, shiftDays: new Set<string>() };
     agg.revenue += r.revenue;
     agg.receipts += r.receipts_count;
     agg.items += r.items_count;
@@ -364,9 +381,9 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
         (hide ? "" : `\n   конв. ${conversion}`)
       );
     });
-  if (from === to) return pre(lines.join("\n\n")); // между сотрудниками одна пустая строка
-  lines.push("", "Конверсия: в скобках трафик за дни смен сотрудника");
-  return pre(lines.join("\n"));
+  const body = lines.join("\n\n"); // между сотрудниками одна пустая строка
+  if (from === to) return pre(body);
+  return pre(`${body}\n\nКонверсия: в скобках трафик за дни смен сотрудника`);
 }
 
 // Возвраты — как на сайте (Продажа): «сумма · N чек · N тов.», вычитаются из
@@ -389,6 +406,7 @@ async function buildReturnsBlock(scope: ReportScope, from: string, to: string, d
     { amount: 0, receipts: 0, items: 0 }
   );
 
+  const names = await freshEmployeeNames();
   const [{ data, error }, regRes, payments] = await Promise.all([
     supabaseAdmin
       .from("moysklad_employee_sales_daily")
@@ -423,7 +441,7 @@ async function buildReturnsBlock(scope: ReportScope, from: string, to: string, d
     const receipts = r.returned_receipts ?? 0;
     const items = r.returned_items ?? 0;
     if (amount === 0 && receipts === 0 && items === 0) continue;
-    const agg = byEmployee.get(r.employee_ms_id) ?? { name: r.employee_name, amount: 0, receipts: 0, items: 0 };
+    const agg = byEmployee.get(r.employee_ms_id) ?? { name: names.get(r.employee_ms_id) ?? r.employee_name, amount: 0, receipts: 0, items: 0 };
     agg.amount += amount;
     agg.receipts += receipts;
     agg.items += items;
