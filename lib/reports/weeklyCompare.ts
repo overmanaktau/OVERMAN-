@@ -121,9 +121,7 @@ export async function loadWeeklyCompare(store: string, today: string, weekFrom?:
 
 // ───────── расчёты и оформление ─────────
 
-// revPlanFact / trafPlanFact — факт только по дням, у которых есть план: процент выполнения считается
-// по ним, иначе при неполном плане (например, в сентябре его нет) факт за все дни делился бы на план части дней.
-type Totals = Omit<CompareDay, "date"> & { revPlanFact: number; trafPlanFact: number };
+type Totals = Omit<CompareDay, "date">;
 const sumDays = (days: CompareDay[]): Totals =>
   days.reduce<Totals>(
     (a, d) => ({
@@ -133,10 +131,8 @@ const sumDays = (days: CompareDay[]): Totals =>
       visitors: a.visitors + d.visitors,
       receipts: a.receipts + d.receipts,
       items: a.items + d.items,
-      revPlanFact: a.revPlanFact + (d.planRevenue > 0 ? d.revenue : 0),
-      trafPlanFact: a.trafPlanFact + (d.planTraffic > 0 ? d.visitors : 0),
     }),
-    { planRevenue: 0, planTraffic: 0, revenue: 0, visitors: 0, receipts: 0, items: 0, revPlanFact: 0, trafPlanFact: 0 }
+    { planRevenue: 0, planTraffic: 0, revenue: 0, visitors: 0, receipts: 0, items: 0 }
   );
 
 const nf0 = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
@@ -147,8 +143,8 @@ const signed = (n: number, f: (x: number) => string) => (n > 0 ? `+${f(n)}` : f(
 
 const ratios = (t: Totals) => ({
   atv: t.receipts > 0 ? t.revenue / t.receipts : 0,
-  revPct: t.planRevenue > 0 ? (t.revPlanFact / t.planRevenue) * 100 : null,
-  trafPct: t.planTraffic > 0 ? (t.trafPlanFact / t.planTraffic) * 100 : null,
+  revPct: t.planRevenue > 0 ? (t.revenue / t.planRevenue) * 100 : null,
+  trafPct: t.planTraffic > 0 ? (t.visitors / t.planTraffic) * 100 : null,
   cr: t.visitors > 0 ? (t.receipts / t.visitors) * 100 : 0,
   depth: t.receipts > 0 ? t.items / t.receipts : 0,
 });
@@ -276,7 +272,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
     styles: { font: "NotoSans", fontSize: 8, cellPadding: 1.3, halign: "center", valign: "middle", lineColor: [0, 0, 0], lineWidth: 0.2, textColor: [20, 20, 20], minCellHeight: 6.6 },
     headStyles: { fillColor: COLOR.head, textColor: [20, 20, 20], fontStyle: "bold", fontSize: 7.5, lineColor: [0, 0, 0], lineWidth: 0.2 },
     tableWidth: 285,
-    columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 18 }, 2: { cellWidth: 23 }, 3: { cellWidth: 23 }, 4: { cellWidth: 23 }, 5: { cellWidth: 22 }, 6: { cellWidth: 20 }, 7: { cellWidth: 22 }, 8: { cellWidth: 23 }, 9: { cellWidth: 27 }, 10: { cellWidth: 27 }, 11: { cellWidth: 21 }, 12: { cellWidth: 20 } },
+    columnStyles: { 0: { cellWidth: 15 }, 1: { cellWidth: 17 }, 2: { cellWidth: 23 }, 3: { cellWidth: 23 }, 4: { cellWidth: 23 }, 5: { cellWidth: 23 }, 6: { cellWidth: 23 }, 7: { cellWidth: 23 }, 8: { cellWidth: 23 }, 9: { cellWidth: 23 }, 10: { cellWidth: 23 }, 11: { cellWidth: 23 }, 12: { cellWidth: 23 } },
     didParseCell: (data) => {
       if (data.section !== "body") return;
       const row: Row = rows[data.row.index] ?? { cells: [], kind: "diff" };
