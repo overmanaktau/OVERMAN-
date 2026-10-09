@@ -25,6 +25,17 @@ export async function coachApi(method: string, body: Record<string, unknown>): P
   return res.json().catch(() => ({ ok: false, description: `HTTP ${res.status}` }));
 }
 
+// Отправить файл (например, PDF) в личный чат бота-помощника.
+export async function sendCoachDocument(chatId: number | string, fileName: string, bytes: Uint8Array, caption?: string): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  if (caption) form.append("caption", caption);
+  form.append("document", new Blob([Buffer.from(bytes)], { type: "application/pdf" }), fileName);
+  const res = await fetch(`${API}/bot${token()}/sendDocument`, { method: "POST", body: form });
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+  if (!res.ok || !data.ok) throw new Error(`Telegram: ${data.description ?? "не удалось отправить файл"}`);
+}
+
 export type ReplyMarkup = Record<string, unknown>;
 
 // Куда уходят сообщения: настоящий Telegram или перехват для проверки без токена.
