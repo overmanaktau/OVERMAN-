@@ -57,6 +57,15 @@ export default function CoachPage() {
     setLoading(true);
     setError(null);
     try {
+      // Сначала подтягиваем актуальные имена сотрудников из МойСклад (если их переименовали).
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        await fetch("/api/coach/sync-names", { method: "POST", headers: { Authorization: `Bearer ${session?.access_token ?? ""}` } });
+      } catch {
+        // имена не обновились — показываем как есть
+      }
       const { data, error: loadError } = await supabase.from("coach_users").select("*").order("requested_at", { ascending: false });
       if (loadError) throw loadError;
       setUsers((data ?? []) as CoachUser[]);

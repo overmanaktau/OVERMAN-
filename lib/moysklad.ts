@@ -925,3 +925,16 @@ export async function fetchCheckById(id: string): Promise<CheckInfo | null> {
     throw e;
   }
 }
+
+// Актуальные имена сотрудников (id → имя): один запрос по всему списку, без проверки доступа.
+// Нужны, чтобы имена в боте-помощнике не отставали от МойСклад, если сотрудника переименовали.
+export async function fetchEmployeeNames(): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  for (let offset = 0; ; offset += 1000) {
+    const page = await moyskladFetch("/entity/employee", { limit: "1000", offset: String(offset) });
+    const rows: { id: string; name?: string; archived?: boolean }[] = page.rows ?? [];
+    for (const r of rows) if (r.name) names.set(r.id, r.name);
+    if (rows.length < 1000) break;
+  }
+  return names;
+}

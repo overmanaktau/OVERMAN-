@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { menuFor, telegramTransport } from "@/lib/coach/bot";
+import { syncCoachNames } from "@/lib/coach/syncNames";
 import { refOf, type CoachUser } from "@/lib/coach/handler";
 import { dailyMessage, weekMessage } from "@/lib/coach/messages";
 import { addDays, buildAdvice, dayStats, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
@@ -33,6 +34,8 @@ async function handle(request: Request) {
   const onlyUser = url.searchParams.get("user");
 
   try {
+    // Имена в сообщениях — как сейчас в МойСклад (сбой не мешает рассылке).
+    await syncCoachNames().catch(() => null);
     let query = supabaseAdmin.from("coach_users").select("*").eq("status", "approved").eq("is_test", false).eq("is_admin", false);
     if (onlyUser) query = query.eq("id", Number(onlyUser));
     const { data, error } = await query;
