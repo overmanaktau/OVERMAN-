@@ -43,6 +43,13 @@ export type DailyTraffic = {
   complete: boolean; // счётчик уже передал данные до конца этих суток
 };
 
+// Сколько последних суток запросить у счётчиков, чтобы в них попал день `dateYmd` (сервис отдаёт не больше 20).
+function daysBack(dateYmd: string): number {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(new Date());
+  const diff = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${dateYmd}T00:00:00Z`)) / 86400000);
+  return Math.min(Math.max(diff + 1, 2), 20);
+}
+
 // Трафик точек за один день по часам с `fromHour` (по умолчанию 10:00) до `untilHour`:00 (не включая) — для дневного отчёта
 // «сегодня до 17:00». Возвращает карту точка → { income, fact }, fact — с вычетом процента точки.
 export async function fetchTrafficUntilHour(
@@ -53,7 +60,7 @@ export async function fetchTrafficUntilHour(
   const key = orgKey();
   const [devices, data] = await Promise.all([
     getJson<DeviceInfo[]>(`/device/list/${key}`),
-    getJson<DeviceData[]>(`/data/${key}/3/false`),
+    getJson<DeviceData[]>(`/data/${key}/${daysBack(dateYmd)}/false`),
   ]);
   const deviceByKey = new Map(devices.map((d) => [d.Key, d]));
   const incomeByStore = new Map<string, number>();

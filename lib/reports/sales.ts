@@ -707,7 +707,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
   const visitors = traffic ? scope.cityCodes.reduce((a, c) => a + (traffic.get(c)?.fact ?? 0), 0) : 0;
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
   const period = `${String(untilHour).padStart(2, "0")}:00`;
-  const title = `📊 <b>Продажи · ${escapeHtml(scope.title)}</b>\n<i>сегодня ${shortDate(date)}, данные до ${period}</i>`;
+  const title = `📊 <b>Продажи · ${escapeHtml(scope.title)}</b>\n<i>${date === todayInAlmaty() ? "сегодня " : ""}${shortDate(date)}, данные до ${period}</i>`;
 
   const kpi = pre(
     [
@@ -763,7 +763,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
 
   return packSections([
     title,
-    section(`ИТОГИ СЕГОДНЯ ДО ${period}`, kpi),
+    section(`ИТОГИ ${date === todayInAlmaty() ? "СЕГОДНЯ " : ""}ДО ${period}`, kpi),
     section("ПО СПОСОБУ ОПЛАТЫ", payments),
     section("ПО СОТРУДНИКАМ", employees),
     section("ВОЗВРАТЫ", returnsBlock),
