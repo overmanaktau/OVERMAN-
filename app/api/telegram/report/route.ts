@@ -6,8 +6,9 @@ import { buildEveningReport, buildIntradayReport, buildPeriodReport, buildSalesR
 import { REPORT_ROUTES } from "@/lib/reports/routes";
 import { activeHoldFor, recordHeldReport, reportKindOf, reportRange } from "@/lib/verify/holds";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
+import { stable } from "@/lib/reports/stable";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 // Ежедневная рассылка отчётов в группы Telegram. Дёргается по расписанию
 // (pg_cron в Supabase) с CRON_SECRET, вручную — админом. ?dry=1 ничего не
@@ -72,13 +73,25 @@ async function handle(request: Request) {
         }
         let messages = cache.get(scopeKey);
         if (!messages) {
-          messages = evening
-            ? await buildEveningReport(scope, date)
-            : intraday
-            ? await buildIntradayReport(scope, date, untilHour)
-            : period
-              ? await buildPeriodReport(scope, period, date)
-              : await buildSalesReport(scope, date);
+          // Контрольный пересчёт: два независимых подсчёта; не совпали — третий; нет двух одинаковых — не отправляем.
+          const build = () =>
+            evening
+              ? buildEveningReport(scope, date)
+              : intraday
+                ? buildIntradayReport(scope, date, untilHour)
+                : period
+                  ? buildPeriodReport(scope, period, date)
+                  : buildSalesReport(scope, date);
+          const checked = await stable(build, (m) => m.join("\n"));
+          if (!checked.ok) {
+            if (!dry) {
+              await notifyOwner(`⏸ <b>Отчёт не отправлен · ${scope.title}</b>
+Контрольный пересчёт: ${checked.reason}. Данным верить нельзя, поэтому отчёт не ушёл в группы. Запустите ещё раз позже или напишите мне.`);
+            }
+            results.push({ chat: route.label, scope: scopeKey, messages: 0, error: `контрольный пересчёт: ${checked.reason}` });
+            continue;
+          }
+          messages = checked.value;
           cache.set(scopeKey, messages);
         }
         if (dry) {

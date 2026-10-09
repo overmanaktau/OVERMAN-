@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getErrorMessage } from "@/lib/errors";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendCoachDocument } from "@/lib/coach/bot";
+import { stable } from "@/lib/reports/stable";
+import { activeHoldFor } from "@/lib/verify/holds";
+import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { todayInAlmaty } from "@/lib/coach/metrics";
 import { buildWeeklyComparePdf, loadWeeklyCompare } from "@/lib/reports/weeklyCompare";
 
@@ -23,7 +26,21 @@ async function handle(request: Request) {
     return NextResponse.json({ error: "Неверные параметры." }, { status: 400 });
   }
   try {
-    const { weeks, city } = await loadWeeklyCompare(store, todayInAlmaty(), from);
+    // Контрольный пересчёт данных: два независимых подсчёта, не совпали — третий; нет двух одинаковых — не отправляем.
+    const checked = await stable(() => loadWeeklyCompare(store, todayInAlmaty(), from), (v) => JSON.stringify(v));
+    if (!checked.ok) {
+      if (url.searchParams.get("send")) await notifyOwner(`⏸ <b>PDF «Сравнение недель» не отправлен</b>
+Контрольный пересчёт: ${checked.reason}. Данным верить нельзя.`);
+      return NextResponse.json({ error: `контрольный пересчёт: ${checked.reason}` }, { status: 409 });
+    }
+    const { weeks, city } = checked.value;
+    // Неисправленное расхождение за любой из 14 дней — неправильный отчёт не отправляем (как у групповых отчётов).
+    const hold = await activeHoldFor([store], { from: weeks[0].from, to: weeks[1].to });
+    if (hold && url.searchParams.get("send")) {
+      await notifyOwner(`⏸ <b>PDF «Сравнение недель» не отправлен</b>
+Не исправлено расхождение за ${hold.check_date.split("-").reverse().join(".")}. Как только его исправят, отправьте PDF вручную или дождитесь следующего понедельника.`);
+      return NextResponse.json({ held: `расхождение за ${hold.check_date}` }, { status: 409 });
+    }
     const pdf = await buildWeeklyComparePdf(weeks, city);
     const sendTo = Number(url.searchParams.get("send"));
     if (sendTo) {
