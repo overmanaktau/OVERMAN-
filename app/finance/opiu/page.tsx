@@ -207,10 +207,10 @@ function Inner() {
     const kinds = items.map(({ row, depth }) => (row.type === "total" ? "total" : row.type === "subtotal" ? "group" : depth > 0 ? "sub" : "normal") as "total" | "group" | "sub" | "normal");
     const indent = items.map(({ depth }) => depth);
     const kpis = [
-      { label: "Выручка", value: revenue ? fmtMoney(revenue.fact) : "—" },
+      { label: "Оборот", value: revenue ? fmtMoney(revenue.fact) : "—" },
       { label: "Валовая прибыль", value: gross ? fmtMoney(gross.fact) : "—", note: marginPct === null ? undefined : `маржа ${marginPct.toFixed(1)}%` },
-      { label: "Расходы", value: total ? fmtMoney(total.expenses.fact) : "—", note: expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от выручки` },
-      { label: "Рентабельность", value: net ? fmtMoney(net.fact) : "—", note: netPct === null ? undefined : `${netPct.toFixed(1)}% от выручки` },
+      { label: "Расходы", value: total ? fmtMoney(total.expenses.fact) : "—", note: expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от оборота` },
+      { label: "Рентабельность", value: net ? fmtMoney(net.fact) : "—", note: netPct === null ? undefined : `${netPct.toFixed(1)}% от оборота` },
     ];
     const common = { subtitle: `${ruDate(start)} — ${ruDate(end)} · отчёт ${storeScope}`, kpis, orientation: "landscape" as const };
     if (view === "months") {
@@ -218,7 +218,7 @@ function Inner() {
         ...common,
         fileName: `ОПИУ_по_месяцам_${start}_${end}`,
         title: "ОПИУ — прибыли и убытки по месяцам",
-        meta: ["В каждой ячейке: сумма и процент от выручки месяца. У себестоимости по категории — процент от выручки этой категории."],
+        meta: ["В каждой ячейке: сумма и процент от оборота месяца. У себестоимости по категории — процент от оборота этой категории."],
         sections: [
           {
             headers: ["Статья", ...columns.map((c) => monthLabel(c.month)), "Итого"],
@@ -311,7 +311,7 @@ function Inner() {
     <div className="flex flex-col gap-5">
       <PageTitle
         title="ОПИУ — прибыли и убытки"
-        subtitle={`Отчёт ${storeScope}. Выручка и себестоимость — из МойСклад по категориям товара, расходы — из ДДС по статьям.`}
+        subtitle={`Отчёт ${storeScope}. Оборот и себестоимость — из МойСклад по категориям товара, расходы — из ДДС по статьям.`}
       />
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <PeriodTabs preset={period.preset} onPreset={period.setPreset} from={period.from} onFrom={period.setFrom} to={period.to} onTo={period.setTo} />
@@ -324,10 +324,10 @@ function Inner() {
       <ErrorBox message={error ?? ref.error} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <KpiCard label="Выручка" value={revenue ? fmtMoney(revenue.fact) : "—"} note={view === "planfact" && revenue?.plan ? `${fmtPct(pct(revenue))} от плана` : "за выбранный период"} />
+        <KpiCard label="Оборот" value={revenue ? fmtMoney(revenue.fact) : "—"} note={view === "planfact" && revenue?.plan ? `${fmtPct(pct(revenue))} от плана` : "за выбранный период"} />
         <KpiCard label="Валовая прибыль" value={gross ? fmtMoney(gross.fact) : "—"} note={marginPct === null ? undefined : `маржа ${marginPct.toFixed(1)}%`} />
-        <KpiCard label="Расходы" value={total ? fmtMoney(total.expenses.fact) : "—"} note={expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от выручки`} />
-        <KpiCard label="Рентабельность" value={net ? fmtMoney(net.fact) : "—"} valueTone={(net?.fact ?? 0) < 0 ? "negative" : "positive"} note={netPct === null ? undefined : `${netPct.toFixed(1)}% от выручки`} />
+        <KpiCard label="Расходы" value={total ? fmtMoney(total.expenses.fact) : "—"} note={expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от оборота`} />
+        <KpiCard label="Рентабельность" value={net ? fmtMoney(net.fact) : "—"} valueTone={(net?.fact ?? 0) < 0 ? "negative" : "positive"} note={netPct === null ? undefined : `${netPct.toFixed(1)}% от оборота`} />
       </div>
 
       <Tabs value={view} onChange={setView} items={[{ key: "months", label: "По месяцам" }, { key: "planfact", label: "План и факт" }]} />
@@ -410,7 +410,7 @@ function Inner() {
         {total && !loading && (
           <div className="mt-3 flex flex-col gap-1 text-[12px] text-muted">
             {view === "months" ? (
-              <div>Серым справа от суммы — процент от выручки месяца. У себестоимости по категории — процент от выручки этой категории.</div>
+              <div>Серым справа от суммы — процент от оборота месяца. У себестоимости по категории — процент от оборота этой категории.</div>
             ) : (
               <div>% плана: доходы — чем выше, тем лучше; расходы — чем ниже, тем лучше. План вносится кнопкой «Внести план».</div>
             )}
@@ -547,7 +547,7 @@ function PlanModal({
           </Field>
         </div>
         <p className="text-[12px] text-muted">
-          Пустое поле — плана нет. План выручки можно не вносить: если не задан, берётся план из раздела «Продажа». Суммы в тенге за месяц; при просмотре части месяца план пересчитывается по дням.
+          Пустое поле — плана нет. План оборота можно не вносить: если не задан, берётся план из раздела «Продажа». Суммы в тенге за месяц; при просмотре части месяца план пересчитывается по дням.
         </p>
         {!scope ? (
           <Empty>Выберите магазин, чтобы внести план</Empty>

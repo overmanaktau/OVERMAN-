@@ -521,7 +521,7 @@ export default function ObzorPage() {
             const sections: PdfDoc["sections"] = [
               {
                 title: "Продажи по дням",
-                headers: ["Дата", "Выручка", "Чеков", "Штук", "Средний чек", "Посетителей", "Конверсия", "Себестоимость", "Валовая прибыль"],
+                headers: ["Дата", "Оборот", "Чеков", "Штук", "Средний чек", "Посетителей", "Конверсия", "Себестоимость", "Валовая прибыль"],
                 groupCols: { cost: [7, 8], conversion: [5, 6] },
                 widths: [1.2, 1.6, 1, 1, 1.4, 1.2, 1.1, 1.6, 1.6],
                 rows: [...dayRows]
@@ -579,12 +579,12 @@ export default function ObzorPage() {
               title: "Обзор продаж",
               subtitle: `${periodLabel}: ${ru(range.start)} — ${ru(range.end)}`,
               kpis: [
-                { label: "Выручка", value: money(totalRevenue) },
+                { label: "Оборот", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: totalReceipts > 0 ? money(avgCheck) : "—" },
                 { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
                 { label: "Глубина чека", value: totalReceipts > 0 ? `${itemsPerReceipt.toFixed(1)} шт` : "—" },
-                { label: "Валовая прибыль", group: "cost" as const, value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от выручки` : undefined },
+                { label: "Валовая прибыль", group: "cost" as const, value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от оборота` : undefined },
                 { label: "Оборачиваемость склада", group: "cost" as const, value: turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—" },
               ],
               sections,
@@ -600,7 +600,7 @@ export default function ObzorPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            <Kpi label="Выручка" value={money(totalRevenue)} />
+            <Kpi label="Оборот" value={money(totalRevenue)} />
             <Kpi label="Чеков" value={totalReceipts.toLocaleString("ru-RU")} />
             <Kpi label="Средний чек" value={money(avgCheck)} />
             <Kpi label="Глубина чека" value={itemsPerReceipt.toFixed(2)} />
@@ -632,7 +632,7 @@ export default function ObzorPage() {
           </div>
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
-            <div className="text-[15px] font-bold">Выручка, ₸</div>
+            <div className="text-[15px] font-bold">Оборот, ₸</div>
             <RevenueChart points={points} />
           </div>
 

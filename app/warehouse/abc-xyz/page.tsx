@@ -610,7 +610,7 @@ export default function AbcXyzPage() {
         <div className="text-xs text-mutedLight">Склад</div>
         <h1 className="font-serif text-[28px] font-semibold m-0">АВС/XYZ анализ</h1>
         <p className="text-sm text-muted max-w-2xl mt-1">
-          АВС — доля в выручке: A — верхние 80&nbsp;%, B — 15&nbsp;%, C — 5&nbsp;%. XYZ — ровность
+          АВС — доля в обороте: A — верхние 80&nbsp;%, B — 15&nbsp;%, C — 5&nbsp;%. XYZ — ровность
           спроса: доля дней с продажами за выбранный период. X — больше 60&nbsp;%, Y — от 20&nbsp;%,
           Z — реже. По артикулу — это модель и цвет вместе (разный цвет = другая модель); нажмите на
           строку, чтобы раскрыть размеры внутри неё.
@@ -791,7 +791,7 @@ export default function AbcXyzPage() {
 
           <div className="flex items-center gap-4 flex-wrap">
             <div className="text-sm text-muted">
-              Выбрано {filtered.length.toLocaleString("ru-RU")} позиций · выручка {money(totalFilteredRevenue)}
+              Выбрано {filtered.length.toLocaleString("ru-RU")} позиций · оборот {money(totalFilteredRevenue)}
             </div>
             <PdfButton
               disabled={filtered.length === 0}
@@ -799,11 +799,11 @@ export default function AbcXyzPage() {
                 fileName: "АВС_XYZ_анализ",
                 title: "АВС/XYZ анализ",
                 subtitle: `Дней в периоде: ${windowDays} · склады: ${effectiveStores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c).join(", ")}`,
-                meta: ["АВС — доля в выручке: A — верхние 80 %, B — 15 %, C — 5 %", "XYZ — ровность спроса по дням с продажами"],
+                meta: ["АВС — доля в обороте: A — верхние 80 %, B — 15 %, C — 5 %", "XYZ — ровность спроса по дням с продажами"],
                 orientation: "landscape",
                 kpis: [
                   { label: "Позиций в выборке", value: filtered.length.toLocaleString("ru-RU") },
-                  { label: "Выручка выборки", value: money(totalFilteredRevenue) },
+                  { label: "Оборот выборки", value: money(totalFilteredRevenue) },
                 ],
                 sections: [
                   {
@@ -820,7 +820,7 @@ export default function AbcXyzPage() {
                     title: "Позиции",
                     hint: filtered.length <= ROWS_WITH_SIZES_BY_DEFAULT ? "Без размеров (подробная версия — ниже)." : undefined,
                     optional: filtered.length <= ROWS_WITH_SIZES_BY_DEFAULT,
-                    headers: ["Артикул", "Категория", "ABC", "XYZ", "Выручка", "Штук", "Дней", "Маржа %", "Решение"],
+                    headers: ["Артикул", "Категория", "ABC", "XYZ", "Оборот", "Штук", "Дней", "Маржа %", "Решение"],
                     align: ["left", "left", "center", "center", "right", "right", "right", "right", "left"],
                     widths: [2.6, 1.5, 0.5, 0.5, 1.4, 0.8, 0.6, 0.9, 3.2],
                     rows: filtered.map((r) => [
@@ -839,11 +839,11 @@ export default function AbcXyzPage() {
                     title: `Позиции с размерами — ${filtered.length.toLocaleString("ru-RU")}`,
                     hint: filtered.length > ROWS_WITH_SIZES_BY_DEFAULT
                       ? "Как на сайте: артикул → размеры. Позиций много, подгрузка размеров займёт время — по умолчанию выключено; можно выбрать нужные позиции."
-                      : "Как на сайте: артикул → размеры (выручка и штуки за период). Можно выбрать нужные позиции и уровни.",
+                      : "Как на сайте: артикул → размеры (оборот и штуки за период). Можно выбрать нужные позиции и уровни.",
                     optional: filtered.length > ROWS_WITH_SIZES_BY_DEFAULT,
                     units: filtered.map((r) => r.name),
                     levelLabels: ["Только артикулы", "+ размеры"],
-                    headers: ["Артикул / размер", "Категория", "ABC", "XYZ", "Выручка", "Штук", "Дней", "Маржа %", "Решение"],
+                    headers: ["Артикул / размер", "Категория", "ABC", "XYZ", "Оборот", "Штук", "Дней", "Маржа %", "Решение"],
                     align: ["left", "left", "center", "center", "right", "right", "right", "right", "left"],
                     widths: [2.6, 1.5, 0.5, 0.5, 1.4, 0.8, 0.6, 0.9, 3.2],
                     rows: [],
@@ -922,7 +922,7 @@ export default function AbcXyzPage() {
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-muted">Выручка</span>
+                        <span className="text-muted">Оборот</span>
                         <span className="num">{money(r.revenue)}</span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -954,7 +954,7 @@ export default function AbcXyzPage() {
                   <div>Категория</div>
                   <div>ABC</div>
                   <div>XYZ</div>
-                  <div>Выручка</div>
+                  <div>Оборот</div>
                   <div>Штук</div>
                   <div>Дней</div>
                   <div>Маржа %</div>

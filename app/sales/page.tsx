@@ -100,9 +100,9 @@ type EmployeeSalesRow = {
 type EmployeeSortField = "revenue" | "receipts" | "items" | "avgCheck" | "conversion" | "depth";
 
 const EMPLOYEE_SORT_FIELDS: { key: EmployeeSortField; label: string }[] = [
-  { key: "revenue", label: "Выручка" },
+  { key: "revenue", label: "Оборот" },
   { key: "receipts", label: "Чеков" },
-  { key: "items", label: "Кол-во товара" },
+  { key: "items", label: "Колич.товара" },
   { key: "avgCheck", label: "Средний чек" },
   { key: "conversion", label: "Конверсия" },
   { key: "depth", label: "Глубина чека" },
@@ -745,7 +745,7 @@ export default function SalesPage() {
               {
                 title: "Продажи по кассам",
                 note: showGross ? "Суммы без учёта возвратов." : "Суммы с учётом возвратов (возврат вычтен из дня, когда он произошёл).",
-                headers: ["Касса", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Возврат", "Себестоимость", "Валовая прибыль"],
+                headers: ["Касса", "Оборот", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Возврат", "Себестоимость", "Валовая прибыль"],
                 groupCols: { cost: [7, 8] },
                 align: ["left", "right", "right", "right", "right", "right", "right", "right", "right"],
                 widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.8, 1.5, 2],
@@ -758,7 +758,7 @@ export default function SalesPage() {
               sections.push({
                 title: "Продажи по сотрудникам",
                 note: "Конверсия — доля трафика города за дни смен сотрудника, обращённая в его чеки.",
-                headers: ["Сотрудник", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Конверсия", "Себестоимость", "Валовая прибыль"],
+                headers: ["Сотрудник", "Оборот", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Конверсия", "Себестоимость", "Валовая прибыль"],
                 groupCols: { cost: [7, 8], conversion: [6] },
                 align: ["left", "right", "right", "right", "right", "right", "right", "right", "right"],
                 widths: [2.2, 1.5, 0.8, 0.9, 1.3, 1, 1.2, 1.5, 2],
@@ -773,7 +773,7 @@ export default function SalesPage() {
               subtitle: `${periodLabel}: ${ru(r.start)} — ${ru(r.end)}`,
               orientation: "landscape",
               kpis: [
-                { label: "Выручка", value: money(totalRevenue) },
+                { label: "Оборот", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: avg(totalRevenue, totalReceipts) },
                 { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
@@ -862,7 +862,7 @@ export default function SalesPage() {
                           {r.name} <span className="text-muted font-normal">· {storeLabel(r.store)}</span>
                         </label>
                         <SalesField
-                          label="Выручка"
+                          label="Оборот"
                           value={money(d.revenue)}
                           extra={!showGross && r.returnedAmount > 0 ? `(${money(r.returnedAmount)})` : null}
                         />
@@ -873,7 +873,7 @@ export default function SalesPage() {
                         />
                         <SalesField label="Средний чек" value={money(avgCheck)} />
                         <SalesField
-                          label="Кол-во товара"
+                          label="Колич.товара"
                           value={d.items.toLocaleString("ru-RU")}
                           extra={!showGross && r.returnedItems > 0 ? `(${r.returnedItems})` : null}
                         />
@@ -887,7 +887,7 @@ export default function SalesPage() {
                     <div className="flex flex-col gap-1 rounded-lg border border-[#E4DFC8] bg-weekendTint p-3 text-[13px] font-bold">
                       <div>Итого по {group.label}</div>
                       <SalesField
-                        label="Выручка"
+                        label="Оборот"
                         value={money(groupRevenue)}
                         extra={!showGross && groupReturned.returnedAmount > 0 ? `(${money(groupReturned.returnedAmount)})` : null}
                       />
@@ -898,7 +898,7 @@ export default function SalesPage() {
                       />
                       <SalesField label="Средний чек" value={groupReceipts > 0 ? money(groupRevenue / groupReceipts) : "—"} />
                       <SalesField
-                        label="Кол-во товара"
+                        label="Колич.товара"
                         value={groupItems.toLocaleString("ru-RU")}
                         extra={!showGross && groupReturned.returnedItems > 0 ? `(${groupReturned.returnedItems})` : null}
                       />
@@ -913,7 +913,7 @@ export default function SalesPage() {
             <div className="flex flex-col gap-1 rounded-lg border border-[#E4DFC8] p-3 text-[13px] font-bold">
               <div>Итого</div>
               <SalesField
-                label="Выручка"
+                label="Оборот"
                 value={money(totalRevenue)}
                 extra={!showGross && totalReturned.returnedAmount > 0 ? `(${money(totalReturned.returnedAmount)})` : null}
               />
@@ -924,7 +924,7 @@ export default function SalesPage() {
               />
               <SalesField label="Средний чек" value={totalReceipts > 0 ? money(totalRevenue / totalReceipts) : "—"} />
               <SalesField
-                label="Кол-во товара"
+                label="Колич.товара"
                 value={totalItems.toLocaleString("ru-RU")}
                 extra={!showGross && totalReturned.returnedItems > 0 ? `(${totalReturned.returnedItems})` : null}
               />
@@ -938,10 +938,10 @@ export default function SalesPage() {
             <div className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Касса</div>
               <div>Город</div>
-              <div>Выручка</div>
+              <div>Оборот</div>
               <div>Чеков</div>
               <div>Средний чек</div>
-              <div>Кол-во товара</div>
+              <div>Колич.товара</div>
               <div>Глубина чека</div>
               <div>Вал. прибыль</div>
               <div>Возврат</div>
@@ -1111,7 +1111,7 @@ export default function SalesPage() {
                     <div key={`${r.employeeId}|${r.store ?? ""}`} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
                       <div className="font-semibold">{r.name}</div>
                       <SalesField
-                        label="Выручка"
+                        label="Оборот"
                         value={money(displayed(r).revenue)}
                         extra={!showGross && r.returnedAmount > 0 ? `(${money(r.returnedAmount)})` : null}
                       />
@@ -1121,7 +1121,7 @@ export default function SalesPage() {
                         extra={!showGross && r.returnedReceipts > 0 ? `(${r.returnedReceipts})` : null}
                       />
                       <SalesField
-                        label="Кол-во товара"
+                        label="Колич.товара"
                         value={displayed(r).items.toLocaleString("ru-RU")}
                         extra={!showGross && r.returnedItems > 0 ? `(${r.returnedItems})` : null}
                       />
@@ -1143,7 +1143,7 @@ export default function SalesPage() {
                     <div className="flex flex-col gap-1 rounded-lg border border-borderSoft bg-weekendTint p-3 text-[13px] font-bold">
                       <div>Итого по {group.label}</div>
                       <SalesField
-                        label="Выручка"
+                        label="Оборот"
                         value={money(g.revenue)}
                         extra={!showGross && g.returned.returnedAmount > 0 ? `(${money(g.returned.returnedAmount)})` : null}
                       />
@@ -1153,7 +1153,7 @@ export default function SalesPage() {
                         extra={!showGross && g.returned.returnedReceipts > 0 ? `(${g.returned.returnedReceipts})` : null}
                       />
                       <SalesField
-                        label="Кол-во товара"
+                        label="Колич.товара"
                         value={g.items.toLocaleString("ru-RU")}
                         extra={!showGross && g.returned.returnedItems > 0 ? `(${g.returned.returnedItems})` : null}
                       />
@@ -1171,7 +1171,7 @@ export default function SalesPage() {
             <div className="flex flex-col gap-1 rounded-lg border border-[#E4DFC8] p-3 text-[13px] font-bold">
               <div>Итого</div>
               <SalesField
-                label="Выручка"
+                label="Оборот"
                 value={money(totalEmployeeRevenue)}
                 extra={!showGross && totalEmployeeReturned.returnedAmount > 0 ? `(${money(totalEmployeeReturned.returnedAmount)})` : null}
               />
@@ -1181,7 +1181,7 @@ export default function SalesPage() {
                 extra={!showGross && totalEmployeeReturned.returnedReceipts > 0 ? `(${totalEmployeeReturned.returnedReceipts})` : null}
               />
               <SalesField
-                label="Кол-во товара"
+                label="Колич.товара"
                 value={totalEmployeeItems.toLocaleString("ru-RU")}
                 extra={!showGross && totalEmployeeReturned.returnedItems > 0 ? `(${totalEmployeeReturned.returnedItems})` : null}
               />
@@ -1200,9 +1200,9 @@ export default function SalesPage() {
           <div className="overflow-x-auto">
             <div className="min-w-[880px] grid grid-cols-[1.2fr_1fr_0.55fr_0.8fr_0.9fr_0.7fr_0.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
               <div>Сотрудник</div>
-              <div>Выручка</div>
+              <div>Оборот</div>
               <div>Чеков</div>
-              <div>Кол-во товара</div>
+              <div>Колич.товара</div>
               <div>Средний чек</div>
               <div>Конверсия</div>
               <div>Глубина чека</div>

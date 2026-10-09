@@ -79,7 +79,7 @@ export const ACCOUNT_KIND_LABEL: Record<FinAccount["kind"], string> = {
 };
 
 export const OPIU_GROUP_LABEL: Record<OpiuGroup, string> = {
-  revenue: "Выручка",
+  revenue: "Оборот",
   cogs: "Себестоимость",
   marketing: "Маркетинговые расходы",
   payroll: "ФОТ",
@@ -492,7 +492,7 @@ export function computePnl(input: {
     if (kids.length > 0 && Math.abs(diff) > 1) kids.push({ key: "rev-rest", label: "Прочее", level: 1, type: "line", fact: diff, plan: 0, goodWhenHigh: true });
     revenue = {
       key: "h-rev",
-      label: "Выручка",
+      label: "Оборот",
       level: 0,
       type: "subtotal",
       fact: salesRevenue,
@@ -502,7 +502,7 @@ export function computePnl(input: {
       children: kids,
     };
   } else {
-    revenue = { key: "h-rev", label: "Выручка", level: 0, type: "subtotal", fact: sum(revManual, "fact"), plan: revPlanManual, goodWhenHigh: true, children: revManual };
+    revenue = { key: "h-rev", label: "Оборот", level: 0, type: "subtotal", fact: sum(revManual, "fact"), plan: revPlanManual, goodWhenHigh: true, children: revManual };
   }
   out.push(revenue);
 

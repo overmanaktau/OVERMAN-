@@ -174,7 +174,7 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
         <div className="text-sm font-bold">
           План продаж — {range.label.toLowerCase()} ({dates})
         </div>
-        <div className="text-xs text-mutedLight">план по дням из периодов месяца, факт — выручка по вчера</div>
+        <div className="text-xs text-mutedLight">план по дням из периодов месяца, факт — оборот по вчера</div>
       </div>
 
       {error ? (
@@ -212,7 +212,7 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
 
           {plan > 0 && Math.round(totalFact) !== Math.round(fact) && (
             <div className="text-[12.5px] text-muted">
-              Факт — только по точкам и месяцам, где внесён план; вся выручка за период — {money(totalFact)}.
+              Факт — только по точкам и месяцам, где внесён план; весь оборот за период — {money(totalFact)}.
             </div>
           )}
 
@@ -350,7 +350,7 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
         <div className="text-sm font-bold">
           План продаж — {MONTH_NAMES[today.getMonth()]} {today.getFullYear()}
         </div>
-        <div className="text-xs text-mutedLight">выручка с 1-го числа по вчера</div>
+        <div className="text-xs text-mutedLight">оборот с 1-го числа по вчера</div>
       </div>
 
       {error ? (

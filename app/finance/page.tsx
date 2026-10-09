@@ -155,14 +155,14 @@ function Inner() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <KpiCard label="Деньги на счетах сейчас" value={fmtMoney(totalBalance)} valueTone={totalBalance < 0 ? "negative" : "neutral"} note={`${accounts.length} счетов`} />
-        <KpiCard label="Выручка за период" value={revenue ? fmtMoney(revenue.fact) : "—"} note={revPct === null ? "план не задан" : `${fmtPct(revPct)} от плана`} noteTone={revPct !== null && revPct >= 100 ? "positive" : "neutral"} />
+        <KpiCard label="Оборот за период" value={revenue ? fmtMoney(revenue.fact) : "—"} note={revPct === null ? "план не задан" : `${fmtPct(revPct)} от плана`} noteTone={revPct !== null && revPct >= 100 ? "positive" : "neutral"} />
         <KpiCard label="Чистая прибыль" value={net ? fmtMoney(net.fact) : "—"} valueTone={(net?.fact ?? 0) < 0 ? "negative" : "positive"} note={margin === null ? undefined : `валовая маржа ${margin.toFixed(1)}%`} />
         <KpiCard label="Поток денег за период" value={`${inflow - outflow >= 0 ? "+" : "−"}${fmtMoney(Math.abs(inflow - outflow))}`} valueTone={inflow - outflow >= 0 ? "positive" : "negative"} note={`приход ${fmtMoney(inflow)} · выплаты ${fmtMoney(outflow)}`} />
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <KpiCard label="Мы должны" value={fmtMoney(weOwe)} valueTone={weOwe > 0 ? "warning" : "neutral"} />
         <KpiCard label="Нам должны" value={fmtMoney(owedToUs)} valueTone="positive" />
-        <KpiCard label="Расходы за период" value={fmtMoney(burn)} note={revenue && revenue.fact > 0 ? `${((burn / revenue.fact) * 100).toFixed(1)}% от выручки` : undefined} />
+        <KpiCard label="Расходы за период" value={fmtMoney(burn)} note={revenue && revenue.fact > 0 ? `${((burn / revenue.fact) * 100).toFixed(1)}% от оборота` : undefined} />
         <KpiCard label="Запас на расходах" value={runwayDays === null ? "—" : `${runwayDays} дн.`} note="на сколько дней хватит остатка при таких расходах" />
       </div>
 

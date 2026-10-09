@@ -162,7 +162,7 @@ function CategoriesTab({ categories, canEdit, reload }: { categories: FinCategor
       <ErrorBox message={error} />
       <p className="text-[12px] text-muted mb-3">
         «Группа ОПИУ» определяет, где статья окажется в отчёте о прибылях и убытках. Статьи без группы (закупка товара, взносы партнёров, займы,
-        оборудование) двигают деньги, но прибылью не считаются. Выручка и себестоимость при включённой автозагрузке берутся из МойСклад.
+        оборудование) двигают деньги, но прибылью не считаются. Оборот и себестоимость при включённой автозагрузке берутся из МойСклад.
       </p>
       {tops.length === 0 ? (
         <Empty>Статей пока нет</Empty>
@@ -618,8 +618,8 @@ function TermsTab({ settings, canEdit, reload }: { settings: ReturnType<typeof u
         <label className={row}>
           <input type="checkbox" className="mt-1" checked={autoRevenue} onChange={(e) => setAutoRevenue(e.target.checked)} disabled={!canEdit} />
           <span>
-            <span className="text-[13px] font-semibold text-ink block">Выручка в ОПИУ — автоматически из МойСклад</span>
-            <span className="text-[12px] text-muted">Продажи по кассам за период, без дублирования ручными операциями. Если выключить — выручка считается по доходным операциям из ДДС.</span>
+            <span className="text-[13px] font-semibold text-ink block">Оборот в ОПИУ — автоматически из МойСклад</span>
+            <span className="text-[12px] text-muted">Продажи по кассам за период, без дублирования ручными операциями. Если выключить — оборот считается по доходным операциям из ДДС.</span>
           </span>
         </label>
         <label className={row}>
@@ -633,7 +633,7 @@ function TermsTab({ settings, canEdit, reload }: { settings: ReturnType<typeof u
           <input type="checkbox" className="mt-1" checked={autoTax} onChange={(e) => setAutoTax(e.target.checked)} disabled={!canEdit} />
           <div className="flex-1">
             <span className="text-[13px] font-semibold text-ink block">Налог «3%» считать автоматически</span>
-            <span className="text-[12px] text-muted block mb-2">В ОПИУ статья налога = процент от безналичных поступлений выручки в ДДС (счета вида «расчётный счёт» и «карта»). Наличные не учитываются; вручную вносить этот налог не нужно.</span>
+            <span className="text-[12px] text-muted block mb-2">В ОПИУ статья налога = процент от безналичных поступлений оборота в ДДС (счета вида «расчётный счёт» и «карта»). Наличные не учитываются; вручную вносить этот налог не нужно.</span>
             <div className="flex items-center gap-2">
               <input className={`${inputCls} max-w-[90px]`} value={taxRate} onChange={(e) => setTaxRate(e.target.value)} disabled={!canEdit} inputMode="decimal" />
               <span className="text-[13px] text-muted">% ставка</span>
