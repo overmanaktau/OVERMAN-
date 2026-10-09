@@ -26,7 +26,7 @@ export type CertUser = {
 };
 
 type Status = "active" | "pending_use" | "used" | "returned";
-export type Cert = {
+type Cert = {
   id: number;
   store: string;
   number: string;
@@ -80,13 +80,13 @@ function fmtDate(iso: string): string {
 }
 
 // «2026-10-08 14:32:00.000» (время МойСклад, на 2 часа раньше Алматы) → «16:32».
-export function almatyTime(moment: string): string {
+function almatyTime(moment: string): string {
   const h = (Number(moment.slice(11, 13)) + 2) % 24;
   return `${String(h).padStart(2, "0")}:${moment.slice(14, 16)}`;
 }
 
 // Торговый день: после полуночи магазин ещё закрывается, поэтому до 04:00 «сегодня» — вчерашний день.
-export function businessDate(): string {
+function businessDate(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(new Date(Date.now() - 4 * 3600 * 1000));
 }
 
@@ -110,7 +110,7 @@ function fmtPhone(p: string): string {
   return m ? `+7 ${m[1]} ${m[2]} ${m[3]} ${m[4]}` : p;
 }
 
-export function payText(c: { pay_cash: number; pay_noncash: number }): string {
+function payText(c: { pay_cash: number; pay_noncash: number }): string {
   if (c.pay_noncash === 0) return "наличные";
   if (c.pay_cash === 0) return "безнал";
   return `смешанная (нал ${money(c.pay_cash)}, безнал ${money(c.pay_noncash)})`;
@@ -122,9 +122,9 @@ function addMonthsIso(from: Date, months: number): string {
   return d.toISOString();
 }
 
-export const isExpired = (c: Pick<Cert, "expires_at">) => new Date(c.expires_at).getTime() < Date.now();
+const isExpired = (c: Pick<Cert, "expires_at">) => new Date(c.expires_at).getTime() < Date.now();
 
-export async function logEvent(certificateId: number, actor: string, action: string, note?: string) {
+async function logEvent(certificateId: number, actor: string, action: string, note?: string) {
   const { error } = await supabaseAdmin.from("certificate_events").insert({ certificate_id: certificateId, actor, action, note: note ?? null });
   if (error) console.error("certificate_events:", error.message);
 }
@@ -171,7 +171,7 @@ export async function sendConsultantMenu(t: Transport, user: CertUser) {
 
 // Кого предложить как продавца: активные сотрудники МойСклад этого города (продавали за 60 дней) и
 // подтверждённые консультанты города. Если МойСклад не ответил — ошибка, а не список «на всякий случай».
-export async function citySellers(store: string): Promise<{ id: string; name: string }[]> {
+async function citySellers(store: string): Promise<{ id: string; name: string }[]> {
   const since = addDays(todayInAlmaty(), -60);
   const rows: { employee_ms_id: string; employee_name: string }[] = [];
   for (let offset = 0; ; offset += 1000) {
@@ -394,7 +394,7 @@ async function getCert(id: number): Promise<Cert | null> {
 }
 
 // Поиск сертификата по введённому номеру среди сертификатов своего города (списка консультанту не показываем).
-export async function findCertByNumber(store: string, text: string): Promise<Cert | null> {
+async function findCertByNumber(store: string, text: string): Promise<Cert | null> {
   const number = text.trim().replace(/\s+/g, " ");
   if (!number) return null;
   const { data, error } = await supabaseAdmin
@@ -484,7 +484,7 @@ function describeCheck(c: CheckInfo): string {
   return `Чек №${escapeHtml(c.name)} · ${almatyTime(c.moment)} · ${escapeHtml(c.cashier)}\nСумма ${money(c.sum)} (нал ${money(c.cash)}, безнал ${money(c.noncash)})`;
 }
 
-export async function attachedOthers(demandId: string, exceptId: number) {
+async function attachedOthers(demandId: string, exceptId: number) {
   const { data, error } = await supabaseAdmin
     .from("certificates")
     .select("id, amount, pay_cash, pay_noncash")
@@ -537,7 +537,7 @@ async function pickCheck(t: Transport, user: CertUser, certId: number, demandId:
   );
 }
 
-export async function markUsed(cert: Cert, demand: CheckInfo, actor: string): Promise<boolean> {
+async function markUsed(cert: Cert, demand: CheckInfo, actor: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin
     .from("certificates")
     .update({
@@ -594,7 +594,7 @@ async function ownerChats(): Promise<number[]> {
   return (data ?? []).map((r) => r.telegram_chat_id as number);
 }
 
-export async function sendRequestToOwner(t: Transport, user: CertUser, cert: Cert, demand: CheckInfo, problems: string[]) {
+async function sendRequestToOwner(t: Transport, user: CertUser, cert: Cert, demand: CheckInfo, problems: string[]) {
   const text = [
     `🎟 <b>Сертификат №${escapeHtml(cert.number)} ждёт решения</b> · ${cityName(cert.store)}`,
     `Номинал ${money(cert.amount)}, оплачен: ${payText(cert)}. Продал: ${escapeHtml(cert.seller_name)}.`,

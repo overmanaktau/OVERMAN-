@@ -58,11 +58,3 @@ input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-
-/* Экран кассы: плавное появление панели клиента и индикатора */
-@keyframes kassa-slide { from { transform: translateX(32px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes kassa-pop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.06); opacity: 1; } 100% { transform: scale(1); } }
-@keyframes kassa-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.kassa-slide { animation: kassa-slide 0.22s ease-out both; }
-.kassa-pop { animation: kassa-pop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
-.kassa-fade { animation: kassa-fade 0.25s ease-out both; }
