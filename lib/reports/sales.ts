@@ -277,17 +277,6 @@ function kassaBlock(rows: SalesRow[], compact: boolean): string {
   return pre(table(["Касса", "Выручка", "Шт", "Маржа"], list, [16, 7, 3, 5], 1));
 }
 
-// Склонение по модулю: у возвратов чеков может быть минус («−1 чек»), а в JS
-// -1 % 10 === -1, из-за чего без abs любой минус давал бы «чеков».
-function checksWord(n: number): string {
-  const abs = Math.abs(n);
-  const mod100 = abs % 100;
-  const mod10 = abs % 10;
-  if (mod10 === 1 && mod100 !== 11) return "чек";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "чека";
-  return "чеков";
-}
-
 // Сотрудники по убыванию выручки за день. «Бигчек» — самый крупный одиночный
 // чек дня среди всех кассиров отчёта, если он от 100 000 ₸: метка ставится
 // ровно одному сотруднику (владельцу этого чека), не нескольким.
@@ -360,19 +349,19 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
       const conversion = shiftTraffic > 0 ? `${pct2((e.receipts / shiftTraffic) * 100)} (${num(Math.round(shiftTraffic))})` : "нет трафика";
       const hide = NO_CONVERSION_EMPLOYEE_IDS.has(id);
       if (from === to) {
-        // Дневной отчёт: короткие подписи (ч — чеки, т — товары, с.ч — средний чек, гл.ч — глубина чека, конв. — конверсия),
-        // трафик в скобке не показываем. Недельный и месячный остаются как были.
+        // Дневной отчёт: короткие подписи (чек, тов, ср.ч — средний чек, гл.ч — глубина чека, конв. — конверсия),
+        // трафик в скобке не показываем. В недельном и месячном подписи те же, но трафик в скобке остаётся.
         const dayConv = shiftTraffic > 0 ? pct2((e.receipts / shiftTraffic) * 100) : "нет трафика";
         return (
-          `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ч · ${num(e.items)} т` +
-          `\n   с.ч ${avgCheck} · гл.ч ${depth}` +
+          `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
+          `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
           (hide ? "" : `\n   конв. ${dayConv}`)
         );
       }
       return (
-        `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} ${checksWord(e.receipts)} · ${num(e.items)} шт` +
-        `\n   ср.чек ${avgCheck} · глубина ${depth}` +
-        (hide ? "" : `\n   конверсия ${conversion}`)
+        `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
+        `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
+        (hide ? "" : `\n   конв. ${conversion}`)
       );
     });
   if (from === to) return pre(lines.join("\n\n")); // между сотрудниками одна пустая строка
@@ -726,8 +715,8 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
     const worked = e.receipts > 0 || e.revenue > 0;
     const showConv = traffic && worked && !NO_CONVERSION_EMPLOYEE_IDS.has(id);
     return (
-      `${i + 1}. ${e.name}\n   ${money(e.revenue)} · ${num(e.receipts)} ч · ${num(e.items)} т` +
-      `\n   с.ч ${avgCheck} · гл.ч ${depth}` +
+      `${i + 1}. ${e.name}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
+      `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
       (showConv ? `\n   конв. ${visitors > 0 ? pct2((e.receipts / visitors) * 100) : "нет трафика"}` : "")
     );
   });
@@ -803,7 +792,7 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
   const people = [...byPerson.entries()].filter(([, e]) => e.receipts > 0).sort((a, b) => b[1].receipts - a[1].receipts);
   const empLines = people.map(([id, e], i) => {
     const conv = traffic ? (visitors > 0 ? pct2((e.receipts / visitors) * 100) : "нет трафика") : "нет данных";
-    return `${i + 1}. ${e.name}\n   ${num(e.receipts)} ч` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конв. ${conv}`);
+    return `${i + 1}. ${e.name}\n   ${num(e.receipts)} чек` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конв. ${conv}`);
   });
   const employees = people.length === 0 ? "<i>вечером продаж не было</i>" : pre(empLines.join("\n\n"));
   return packSections([title, section("ВЕЧЕРНЯЯ КОНВЕРСИЯ", body), section("ПО СОТРУДНИКАМ", employees)]);
