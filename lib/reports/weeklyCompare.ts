@@ -121,7 +121,9 @@ export async function loadWeeklyCompare(store: string, today: string, weekFrom?:
 
 // ───────── расчёты и оформление ─────────
 
-type Totals = Omit<CompareDay, "date">;
+// revPlanFact / trafPlanFact — факт только по дням, у которых есть план: процент выполнения считается
+// по ним, иначе при неполном плане (например, в сентябре его нет) факт за все дни делился бы на план части дней.
+type Totals = Omit<CompareDay, "date"> & { revPlanFact: number; trafPlanFact: number };
 const sumDays = (days: CompareDay[]): Totals =>
   days.reduce<Totals>(
     (a, d) => ({
@@ -131,8 +133,10 @@ const sumDays = (days: CompareDay[]): Totals =>
       visitors: a.visitors + d.visitors,
       receipts: a.receipts + d.receipts,
       items: a.items + d.items,
+      revPlanFact: a.revPlanFact + (d.planRevenue > 0 ? d.revenue : 0),
+      trafPlanFact: a.trafPlanFact + (d.planTraffic > 0 ? d.visitors : 0),
     }),
-    { planRevenue: 0, planTraffic: 0, revenue: 0, visitors: 0, receipts: 0, items: 0 }
+    { planRevenue: 0, planTraffic: 0, revenue: 0, visitors: 0, receipts: 0, items: 0, revPlanFact: 0, trafPlanFact: 0 }
   );
 
 const nf0 = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
@@ -143,8 +147,8 @@ const signed = (n: number, f: (x: number) => string) => (n > 0 ? `+${f(n)}` : f(
 
 const ratios = (t: Totals) => ({
   atv: t.receipts > 0 ? t.revenue / t.receipts : 0,
-  revPct: t.planRevenue > 0 ? (t.revenue / t.planRevenue) * 100 : null,
-  trafPct: t.planTraffic > 0 ? (t.visitors / t.planTraffic) * 100 : null,
+  revPct: t.planRevenue > 0 ? (t.revPlanFact / t.planRevenue) * 100 : null,
+  trafPct: t.planTraffic > 0 ? (t.trafPlanFact / t.planTraffic) * 100 : null,
   cr: t.visitors > 0 ? (t.receipts / t.visitors) * 100 : 0,
   depth: t.receipts > 0 ? t.items / t.receipts : 0,
 });
@@ -222,10 +226,10 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
     "Посетители",
     "Кол-во чеков",
     "Кол-во товаров",
-    "ATV (средний чек)",
+    "ATV\n(средний чек)",
     "ОБОРОТ %\nвыполнения\nдневного плана",
     "ПОСЕТИТЕЛЬ %\nвыполнения\nплана",
-    "CR (конверсия)",
+    "CR\n(конверсия)",
     "Глубина чека",
   ];
 
@@ -234,7 +238,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   const totals = weeks.map((w) => sumDays(w.days));
   weeks.forEach((w, i) => {
     rows.push({ cells: [`${i + 1} Неделя`], kind: "band" });
-    for (const d of w.days) rows.push({ cells: dayCells(fmtDay(d.date), weekdayOf(d.date), d), kind: "day" });
+    for (const d of w.days) rows.push({ cells: dayCells(fmtDay(d.date), weekdayOf(d.date), sumDays([d])), kind: "day" });
     const t = totals[i];
     rows.push({ cells: dayCells("итог", "", t), kind: "total" });
   });
@@ -245,41 +249,37 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   const r2 = ratios(t2);
   const rel = (a: number, b: number) => (a > 0 ? pct(((b - a) / a) * 100) : "—");
   const diffPP = (a: number | null, b: number | null) => (a === null || b === null ? "—" : signed(b - a, (x) => pct(x)));
-  rows.push({
-    cells: [
-      "разница недели 2 от 1",
+  type Cell = string | { content: string; colSpan?: number; rowSpan?: number };
+  const diffRows: Cell[][] = [
+    [
+      { content: "разница недели 2 от 1", colSpan: 3, rowSpan: 2 },
       "цифра",
-      "",
-      "",
       signed(t2.revenue - t1.revenue, int),
       signed(t2.visitors - t1.visitors, int),
       signed(t2.receipts - t1.receipts, int),
       signed(t2.items - t1.items, int),
       signed(r2.atv - r1.atv, int),
-      diffPP(r1.revPct, r2.revPct),
-      diffPP(r1.trafPct, r2.trafPct),
-      signed(r2.cr - r1.cr, (x) => pct(x)),
+      { content: diffPP(r1.revPct, r2.revPct), rowSpan: 2 },
+      { content: diffPP(r1.trafPct, r2.trafPct), rowSpan: 2 },
+      { content: signed(r2.cr - r1.cr, (x) => pct(x)), rowSpan: 2 },
       signed(r2.depth - r1.depth, (x) => dec(x, 2)),
     ],
-    kind: "diff",
-  });
-  rows.push({
-    cells: ["", "%", "", "", rel(t1.revenue, t2.revenue), rel(t1.visitors, t2.visitors), rel(t1.receipts, t2.receipts), rel(t1.items, t2.items), rel(r1.atv, r2.atv), "", "", "", rel(r1.depth, r2.depth)],
-    kind: "diff",
-  });
+    ["%", rel(t1.revenue, t2.revenue), rel(t1.visitors, t2.visitors), rel(t1.receipts, t2.receipts), rel(t1.items, t2.items), rel(r1.atv, r2.atv), rel(r1.depth, r2.depth)],
+  ];
 
   autoTable(pdf, {
     startY: 17,
     head: [head],
-    body: rows.map((r) => r.cells),
+    body: [...rows.map((r) => r.cells as Cell[]), ...diffRows],
     margin: { left: 6, right: 6, top: 6, bottom: 6 },
     theme: "grid",
-    styles: { font: "NotoSans", fontSize: 8, cellPadding: 1.3, halign: "center", valign: "middle", lineColor: [60, 60, 60], lineWidth: 0.15, textColor: [20, 20, 20] },
-    headStyles: { fillColor: COLOR.head, textColor: [20, 20, 20], fontStyle: "bold", fontSize: 7.5, lineColor: [60, 60, 60] },
-    columnStyles: { 0: { cellWidth: 17 }, 1: { cellWidth: 17 } },
+    styles: { font: "NotoSans", fontSize: 8, cellPadding: 1.3, halign: "center", valign: "middle", lineColor: [0, 0, 0], lineWidth: 0.2, textColor: [20, 20, 20], minCellHeight: 6.6 },
+    headStyles: { fillColor: COLOR.head, textColor: [20, 20, 20], fontStyle: "bold", fontSize: 7.5, lineColor: [0, 0, 0], lineWidth: 0.2 },
+    tableWidth: 285,
+    columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 18 }, 2: { cellWidth: 23 }, 3: { cellWidth: 23 }, 4: { cellWidth: 23 }, 5: { cellWidth: 22 }, 6: { cellWidth: 20 }, 7: { cellWidth: 22 }, 8: { cellWidth: 23 }, 9: { cellWidth: 27 }, 10: { cellWidth: 27 }, 11: { cellWidth: 21 }, 12: { cellWidth: 20 } },
     didParseCell: (data) => {
       if (data.section !== "body") return;
-      const row = rows[data.row.index];
+      const row: Row = rows[data.row.index] ?? { cells: [], kind: "diff" };
       const col = data.column.index;
       const cell = data.cell;
       if (row.kind === "band") {
