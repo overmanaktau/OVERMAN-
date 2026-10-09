@@ -75,18 +75,21 @@ export async function loadWeeklyCompare(store: string, today: string, weekFrom?:
   if (regRes.error) throw regRes.error;
   const registerIds = (regRes.data ?? []).map((r) => r.id as string);
 
-  const [salesRes, trafficRes, plansRes, periodsRes] = await Promise.all([
+  const [salesRes, trafficRes, plansRes, periodsRes, overridesRes] = await Promise.all([
     registerIds.length
       ? supabaseAdmin.from("moysklad_sales_daily").select("sale_date, revenue, receipts_count, items_count").in("register_id", registerIds).gte("sale_date", from).lte("sale_date", to)
       : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("traffic_entries").select("entry_date, traffic_fact, traffic_plan").eq("store", store).gte("entry_date", from).lte("entry_date", to),
     supabaseAdmin.from("sales_plan_monthly").select("plan_month, sales_plan").eq("store", store).gte("plan_month", `${from.slice(0, 7)}-01`).lte("plan_month", to),
     supabaseAdmin.from("sales_plan_periods").select("*").eq("store", store).gte("plan_month", `${from.slice(0, 7)}-01`).lte("plan_month", to),
+    // план оборота, внесённый вручную только для этого отчёта (главнее расчёта по плану месяца)
+    supabaseAdmin.from("weekly_report_plan_overrides").select("plan_date, revenue_plan").eq("store", store).gte("plan_date", from).lte("plan_date", to),
   ]);
   if (salesRes.error) throw salesRes.error;
   if (trafficRes.error) throw trafficRes.error;
   if (plansRes.error) throw plansRes.error;
   if (periodsRes.error) throw periodsRes.error;
+  if (overridesRes.error) throw overridesRes.error;
 
   const sales = new Map<string, { revenue: number; receipts: number; items: number }>();
   for (const r of (salesRes.data ?? []) as { sale_date: string; revenue: number; receipts_count: number; items_count: number }[]) {
@@ -104,6 +107,8 @@ export async function loadWeeklyCompare(store: string, today: string, weekFrom?:
   for (const r of (plansRes.data ?? []) as { plan_month: string; sales_plan: number | null }[]) {
     monthPlans.set(r.plan_month, (monthPlans.get(r.plan_month) ?? 0) + (Number(r.sales_plan) || 0));
   }
+  const overrides = new Map<string, number>();
+  for (const r of (overridesRes.data ?? []) as { plan_date: string; revenue_plan: number }[]) overrides.set(r.plan_date, Number(r.revenue_plan) || 0);
   const periods = new Map<string, PeriodRow>();
   for (const r of (periodsRes.data ?? []) as PeriodRow[]) periods.set(r.plan_month, r);
 
@@ -116,7 +121,7 @@ export async function loadWeeklyCompare(store: string, today: string, weekFrom?:
       const t = traffic.get(date);
       return {
         date,
-        planRevenue: dayRevenuePlan(date, monthPlans, periods),
+        planRevenue: overrides.get(date) ?? dayRevenuePlan(date, monthPlans, periods),
         planTraffic: t?.plan ?? 0,
         revenue: s?.revenue ?? 0,
         visitors: t?.fact ?? 0,
