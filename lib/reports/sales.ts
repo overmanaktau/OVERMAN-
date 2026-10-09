@@ -716,7 +716,6 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
       line("Товара, шт", num(items)),
       line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
       line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
-      line("Конверсия", traffic ? (visitors > 0 ? `${pct2((receipts / visitors) * 100)} (${receipts}/${num(Math.round(visitors))})` : "нет трафика") : "нет данных"),
     ].join("\n")
   );
   const payments = pre([line("Наличные", money((cash - retCash) / 100)), line("Безнал", money((total - cash - (retTotal - retCash)) / 100))].join("\n"));
