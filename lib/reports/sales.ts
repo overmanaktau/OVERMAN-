@@ -155,14 +155,14 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
   );
   const lines = compact
     ? [
-        line("Выручка", money(revenue)),
+        line("Оборот", money(revenue)),
         line("Чеков", num(receipts)),
-        line("Товара, шт", num(items)),
+        line("Колич.товара", num(items)),
         line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
         line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
       ]
     : [
-        line("Выручка", money(revenue)),
+        line("Оборот", money(revenue)),
         line("Чеков", num(receipts)),
         line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
         line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
@@ -272,7 +272,7 @@ function kassaBlock(rows: SalesRow[], compact: boolean): string {
   const sorted = [...byRegister.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
   if (sorted.length === 0) return `<i>за день продаж нет</i>`;
   if (compact) {
-    return pre(table(["Касса", "Выручка", "Шт"], sorted.map(([name, a]) => [name, num(a.revenue), num(a.items)]), [18, 9, 3], 1));
+    return pre(table(["Касса", "Оборот", "Шт"], sorted.map(([name, a]) => [name, num(a.revenue), num(a.items)]), [18, 9, 3], 1));
   }
   const list = sorted.map(([name, a]) => [
     name,
@@ -280,7 +280,7 @@ function kassaBlock(rows: SalesRow[], compact: boolean): string {
     num(a.items),
     pct(a.revenue, sumCost(a.costs.map((c) => ({ cost: c })))),
   ]);
-  return pre(table(["Касса", "Выручка", "Шт", "Маржа"], list, [16, 7, 3, 5], 1));
+  return pre(table(["Касса", "Оборот", "Шт", "Маржа"], list, [16, 7, 3, 5], 1));
 }
 
 // Сотрудники по убыванию выручки за день. «Бигчек» — самый крупный одиночный
@@ -592,7 +592,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
       ? `<i>за день продаж нет</i>`
       : pre(
           table(
-            ["Категория", "Выручка", "Шт", "Маржа"],
+            ["Категория", "Оборот", "Шт", "Маржа"],
             categories.map((c) => [c.category, num(c.revenue), num(c.quantity), pct(c.revenue, c.cost)]),
             [16, 7, 3, 5],
             1
@@ -660,7 +660,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
       ? `<i>продаж за 14 дней нет</i>`
       : pre(
           table(
-            ["Товар", "Шт", "Выручка", "Вчера"],
+            ["Товар", "Шт", "Оборот", "Вчера"],
             products.map((p) => [p.article, num(p.quantity), num(p.revenue), p.day_quantity > 0 ? num(p.day_quantity) : "—"]),
             [14, 3, 7, 5],
             1,
@@ -711,9 +711,9 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
 
   const kpi = pre(
     [
-      line("Выручка", money(revenue)),
+      line("Оборот", money(revenue)),
       line("Чеков", num(receipts)),
-      line("Товара, шт", num(items)),
+      line("Колич.товара", num(items)),
       line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
       line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
     ].join("\n")
