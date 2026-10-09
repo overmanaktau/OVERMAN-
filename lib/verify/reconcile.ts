@@ -104,7 +104,7 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
     const a = db[c.code] ?? empty();
     const b = fresh[c.code] ?? empty();
     const diffs: string[] = [];
-    if (Math.abs(a.revenue - b.revenue) > MONEY_TOLERANCE) diffs.push(`выручка: в базе ${money(a.revenue)}, в МойСклад ${money(b.revenue)}`);
+    if (Math.abs(a.revenue - b.revenue) > MONEY_TOLERANCE) diffs.push(`оборот: в базе ${money(a.revenue)}, в МойСклад ${money(b.revenue)}`);
     if (a.receipts !== b.receipts) diffs.push(`чеков: в базе ${num(a.receipts)}, в МойСклад ${num(b.receipts)}`);
     if (Math.abs(a.items - b.items) > 0.001) diffs.push(`товаров: в базе ${num(a.items)}, в МойСклад ${num(b.items)}`);
     push(diffs.length === 0, "sales", c.code, `${c.name}: продажи совпадают с МойСклад`, diffs.join("; "));
@@ -135,7 +135,7 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
     const reg = db[c.code] ?? empty();
     const e = emp[c.code] ?? empty();
     const diffs: string[] = [];
-    if (Math.abs(reg.revenue - e.revenue) > MONEY_TOLERANCE) diffs.push(`выручка: кассы ${money(reg.revenue)}, сотрудники ${money(e.revenue)}`);
+    if (Math.abs(reg.revenue - e.revenue) > MONEY_TOLERANCE) diffs.push(`оборот: кассы ${money(reg.revenue)}, сотрудники ${money(e.revenue)}`);
     if (reg.receipts !== e.receipts) diffs.push(`чеков: кассы ${num(reg.receipts)}, сотрудники ${num(e.receipts)}`);
     if (Math.abs(reg.items - e.items) > 0.001) diffs.push(`товаров: кассы ${num(reg.items)}, сотрудники ${num(e.items)}`);
     push(diffs.length === 0, "consistency", c.code, `${c.name}: кассы равны сумме по сотрудникам`, diffs.join("; "));

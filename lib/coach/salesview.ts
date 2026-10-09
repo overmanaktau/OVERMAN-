@@ -311,7 +311,7 @@ function sumOf(list: Total[]): Total {
 // Строки с цифрами под именем: чеки, товары, средний чек, глубина чека, смены, возвраты.
 function detailLines(a: Total): string[] {
   const lines = [
-    `  чеков ${num(a.receipts)} · товаров ${num(a.items)} шт`,
+    `  чеков ${num(a.receipts)} · колич.товара ${num(a.items)}`,
     `  ср.чек ${avgCheck(a)} · гл.чек ${depth(a)}`,
   ];
   if (a.shifts > 0) {
