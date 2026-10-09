@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { syncEmployeeNamesEverywhere } from "@/lib/employeeNames";
+import { notifyOwner } from "@/lib/verify/notifyOwner";
 
 // Without this, Vercel caps the function at its platform default (well
 // under a minute) — this route now does a full catalog/stock/supply resync
@@ -397,6 +398,21 @@ async function handle(request: Request) {
   const snapshotParam = url.searchParams.get("snapshot");
   const snapshotDate = snapshotParam === "yesterday" ? yesterdayInAlmaty() : snapshotParam;
 
+  // Ночная синхронизация и её повторы — один «цикл»: упала — через час повтор (pg_cron sync-retry, ?retry=1), и так
+  // до трёх неудач подряд; только после третьей владельцу уходит сообщение. Запуски с датой, снимком и т.п. в цикл не входят.
+  const retry = url.searchParams.get("retry") === "1";
+  const inCycle = retry || (!url.searchParams.get("date") && !skipCatalog && !productsOnly && !snapshotDate);
+  const MAX_FAILS = 3;
+  if (retry) {
+    if (!isCron) return NextResponse.json({ error: "Нет доступа." }, { status: 403 });
+    const { data: st } = await supabaseAdmin.from("moysklad_sync_state").select("last_synced_at, last_status, consecutive_failures").eq("id", true).maybeSingle();
+    const minutesSince = st?.last_synced_at ? (Date.now() - new Date(st.last_synced_at).getTime()) / 60000 : 0;
+    // повторять нужно только после неудачи, не больше трёх попыток подряд и не раньше чем через ~час после прошлой попытки
+    if (!st || st.last_status !== "error" || (st.consecutive_failures ?? 0) < 1 || (st.consecutive_failures ?? 0) >= MAX_FAILS || minutesSince < 55) {
+      return NextResponse.json({ skipped: true, status: st?.last_status ?? null, failures: st?.consecutive_failures ?? 0, minutesSince: Math.round(minutesSince) });
+    }
+  }
+
   try {
     if (snapshotDate) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
@@ -419,7 +435,7 @@ async function handle(request: Request) {
     await syncEmployeeNamesEverywhere().catch((e) => console.error("syncEmployeeNames:", getErrorMessage(e)));
     await supabaseAdmin
       .from("moysklad_sync_state")
-      .update({ last_synced_at: new Date().toISOString(), last_status: "ok", last_error: null })
+      .update({ last_synced_at: new Date().toISOString(), last_status: "ok", last_error: null, ...(inCycle ? { consecutive_failures: 0, owner_notified: false } : {}) })
       .eq("id", true);
     return NextResponse.json({ ok: true, ...result, catalog });
   } catch (e) {
@@ -428,16 +444,32 @@ async function handle(request: Request) {
     // those and silently recorded "[object Object]", which is exactly what
     // hid the real cause of the nightly sync failure on 2026-09-29.
     const message = getErrorMessage(e);
+    let failures = 0;
+    let alreadyNotified = false;
+    if (inCycle) {
+      const { data: st } = await supabaseAdmin.from("moysklad_sync_state").select("consecutive_failures, owner_notified").eq("id", true).maybeSingle();
+      failures = retry ? (st?.consecutive_failures ?? 0) + 1 : 1; // новая ночь начинает счёт заново
+      alreadyNotified = retry ? !!st?.owner_notified : false;
+    }
     await supabaseAdmin
       .from("moysklad_sync_state")
-      .update({ last_synced_at: new Date().toISOString(), last_status: "error", last_error: message })
+      .update({
+        last_synced_at: new Date().toISOString(),
+        last_status: "error",
+        last_error: message,
+        ...(inCycle ? { consecutive_failures: failures, owner_notified: alreadyNotified || failures >= MAX_FAILS } : {}),
+      })
       .eq("id", true);
-    // Surfaces in the notification bell — moysklad_sync_state alone was
-    // easy to miss, which is exactly how the nightly sync silently failed
-    // once before nobody thought to check it.
-    await supabaseAdmin
-      .from("notifications")
-      .insert({ type: "sync_error", message: `Синхронизация МойСклад не удалась (${date}): ${message}` });
+    // Колокольчик на сайте: для ночного цикла — только после третьей неудачи (первые две закрывает повтор через час).
+    if (!inCycle || failures >= MAX_FAILS) {
+      await supabaseAdmin
+        .from("notifications")
+        .insert({ type: "sync_error", message: `Синхронизация МойСклад не удалась (${date})${inCycle ? ` — ${failures} раза подряд` : ""}: ${message}` });
+    }
+    // Владельцу в личку — после трёх неудач подряд (ночной запуск + два повтора с интервалом час).
+    if (inCycle && failures >= MAX_FAILS && !alreadyNotified) {
+      await notifyOwner(`⚠️ <b>Ночная синхронизация МойСклад не прошла ${failures} раза подряд</b>\nДата: ${date}.\nПоследняя ошибка: ${message}\nПовторы каждый час остановлены. Отчёты за вчера могут задержаться — сверка в 03:30 это покажет.`);
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
