@@ -3,7 +3,7 @@
 // только свои города (admin_scope: 'city' — свой, 'all' — все).
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
-import { SCOPES, buildCashReport, money, num, pre } from "@/lib/reports/sales";
+import { SCOPES, buildCashReport, money, num, pre, shortName } from "@/lib/reports/sales";
 import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { addDays, daysBetween, monthStartOf, shortDate, todayInAlmaty } from "@/lib/coach/metrics";
 
@@ -334,7 +334,7 @@ function totalLines(label: string, total: Total): string[] {
 function cityLines(list: Agg[], planOf: Map<string, number>, period: Period): string[] {
   const lines: string[] = [];
   for (const a of list) {
-    lines.push(`${a.name.slice(0, 13).padEnd(13)}${money(a.revenue).padStart(13)}`, ...detailLines(a));
+    lines.push(`${shortName(a.name).slice(0, 13).padEnd(13)}${money(a.revenue).padStart(13)}`, ...detailLines(a));
     const plan = planOf.get(a.id);
     if (period === "m" && plan !== undefined && plan > 0) {
       lines.push(`  план ${money(plan)} · ${((a.revenue / plan) * 100).toFixed(1)}%`);

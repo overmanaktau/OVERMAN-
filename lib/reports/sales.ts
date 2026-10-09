@@ -33,6 +33,14 @@ const nf = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 export function num(n: number): string {
   return nf.format(Math.round(n)).replace(/[  ]/g, " ");
 }
+// Имя сотрудника в отчётах: фамилия сокращается до первой буквы («Абилов Акылбек админ 04» → «А.Акылбек админ 04»).
+// Имя из одного слова остаётся как есть.
+export function shortName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return name.trim();
+  return `${parts[0][0].toUpperCase()}.${parts.slice(1).join(" ")}`;
+}
+
 // Числа трафика в отчётах: два знака и запятая («94,05»).
 export function dec2(n: number): string {
   return n.toFixed(2).replace(".", ",");
@@ -375,13 +383,13 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
         // трафик в скобке не показываем. В недельном и месячном подписи те же, но трафик в скобке остаётся.
         const dayConv = shiftTraffic > 0 ? pct2((e.receipts / shiftTraffic) * 100) : "нет трафика";
         return (
-          `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
+          `${i + 1}. ${shortName(e.name)}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
           `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
           (hide ? "" : `\n   конв. ${dayConv}`)
         );
       }
       return (
-        `${i + 1}. ${e.name}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
+        `${i + 1}. ${shortName(e.name)}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
         `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
         (hide ? "" : `\n   конв. ${conversion}`)
       );
@@ -464,7 +472,7 @@ async function buildReturnsBlock(scope: ReportScope, from: string, to: string, d
   }
   const people = [...byEmployee.values()].sort((a, b) => b.amount - a.amount);
   if (people.length > 0) lines.push("");
-  for (const e of people) lines.push(`${e.name}\n   ${returnSummary(e.amount, e.receipts, e.items)}`);
+  for (const e of people) lines.push(`${shortName(e.name)}\n   ${returnSummary(e.amount, e.receipts, e.items)}`);
   return pre(lines.join("\n"));
 }
 
@@ -737,7 +745,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
     const worked = e.receipts > 0 || e.revenue > 0;
     const showConv = traffic && worked && !NO_CONVERSION_EMPLOYEE_IDS.has(id);
     return (
-      `${i + 1}. ${e.name}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
+      `${i + 1}. ${shortName(e.name)}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
       `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
       (showConv ? `\n   конв. ${visitors > 0 ? pct2((e.receipts / visitors) * 100) : "нет трафика"}` : "")
     );
@@ -750,7 +758,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
     const rl = [`Всего: ${returnSummary(retAmount, retReceipts, retItems)}`];
     if (retTotal > 0) rl.push("", line("Наличные", money(retCash / 100)), line("Безнал", money((retTotal - retCash) / 100)));
     if (withReturns.length > 0) rl.push("");
-    for (const [, e] of withReturns) rl.push(`${e.name}\n   ${returnSummary(e.retAmount, e.retReceipts, e.retItems)}`);
+    for (const [, e] of withReturns) rl.push(`${shortName(e.name)}\n   ${returnSummary(e.retAmount, e.retReceipts, e.retItems)}`);
     returnsBlock = pre(rl.join("\n"));
   }
 
@@ -814,7 +822,7 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
   const people = [...byPerson.entries()].filter(([, e]) => e.receipts > 0).sort((a, b) => b[1].receipts - a[1].receipts);
   const empLines = people.map(([id, e], i) => {
     const conv = traffic ? (visitors > 0 ? pct2((e.receipts / visitors) * 100) : "нет трафика") : "нет данных";
-    return `${i + 1}. ${e.name}\n   ${num(e.receipts)} чек` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конв. ${conv}`);
+    return `${i + 1}. ${shortName(e.name)}\n   ${num(e.receipts)} чек` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конв. ${conv}`);
   });
   const employees = people.length === 0 ? "<i>вечером продаж не было</i>" : pre(empLines.join("\n\n"));
   return packSections([title, section("ВЕЧЕРНЯЯ КОНВЕРСИЯ", body), section("ПО СОТРУДНИКАМ", employees)]);
