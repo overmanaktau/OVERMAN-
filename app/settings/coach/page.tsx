@@ -158,7 +158,7 @@ export default function CoachPage() {
         ) : (
           <div className="flex flex-col">
             {rows.map((u) => (
-              <div key={u.id} className="flex items-center justify-between gap-3 flex-wrap py-2.5 border-t border-borderSoft first:border-t-0">
+              <div key={u.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_270px_230px] items-center gap-x-4 gap-y-2 py-2.5 border-t border-borderSoft first:border-t-0">
                 <div className="flex flex-col gap-0.5 min-w-0">
                   <div className="text-[13.5px] font-semibold">
                     {u.employee_name} <span className="text-mutedLight font-normal">· {storeName(u.store)}</span>
@@ -171,15 +171,16 @@ export default function CoachPage() {
                       : u.decided_at && ` · ${STATUS_LABEL[u.status].toLowerCase()} ${formatDateTime(u.decided_at)}${u.decided_by ? `, ${u.decided_by}` : ""}`}
                   </div>
                 </div>
-                {canEdit && u.is_protected && <div className="text-[12px] text-mutedLight">Главный владелец</div>}
+                {/* колонка «Роль» всегда занята, чтобы выпадающие списки стояли ровно друг под другом */}
+                <div>
                 {canEdit && u.status === "approved" && !u.is_test && !u.is_protected && (
-                  <label className="flex items-center gap-1.5 text-[12px] text-muted">
-                    Роль
+                  <label className="flex items-center gap-2 text-[12px] text-muted">
+                    <span className="w-[34px]">Роль</span>
                     <select
                       value={u.is_admin ? (u.admin_scope === "all" ? "owner" : "city_admin") : "consultant"}
                       disabled={busyId !== null}
                       onChange={(e) => changeRole(u, e.target.value as Role)}
-                      className="text-[12.5px] font-semibold border border-border rounded-md px-2 py-1.5 bg-surface"
+                      className="w-[190px] text-[12.5px] font-semibold border border-border rounded-md px-2 py-1.5 bg-surface"
                     >
                       <option value="consultant">Стилист-консультант</option>
                       <option value="city_admin">Администратор</option>
@@ -187,8 +188,11 @@ export default function CoachPage() {
                     </select>
                   </label>
                 )}
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                {canEdit && u.is_protected && <div className="text-[12px] text-mutedLight">Главный владелец</div>}
                 {canEdit && !u.is_protected && (
-                  <div className="flex items-center gap-2">
+                  <>
                     {u.status === "pending" && (
                       <>
                         <button
@@ -239,8 +243,9 @@ export default function CoachPage() {
                         Убрать
                       </button>
                     )}
-                  </div>
+                  </>
                 )}
+                </div>
               </div>
             ))}
           </div>
