@@ -21,6 +21,15 @@ export type CompareWeek = { from: string; to: string; days: CompareDay[] };
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 const WEEKDAY = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const MONTH = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
+const MONTH_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+// Какая это неделя месяца: неделя (пн–вс) относится к месяцу своего четверга; номер — по числу четверга
+// (1–7 — первая неделя, 8–14 — вторая и т.д.). Так неделя 28.09–04.10 — 1-я неделя октября.
+export function weekOfMonth(mondayYmd: string): { n: number; month: number } {
+  const thursday = addDays(mondayYmd, 3);
+  return { n: Math.floor((Number(thursday.slice(8, 10)) - 1) / 7) + 1, month: Number(thursday.slice(5, 7)) - 1 };
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -211,7 +220,13 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   pdf.text(`Сравнение недель · ${city}`, 148.5, 9, { align: "center" });
   pdf.setFont("NotoSans", "normal");
   pdf.setFontSize(8.5);
-  pdf.text(`1 неделя: ${period(weeks[0])}   ·   2 неделя: ${period(weeks[1])}`, 148.5, 13.5, { align: "center" });
+  const wi = [weekOfMonth(weeks[0].from), weekOfMonth(weeks[1].from)];
+  pdf.text(
+    `${wi[0].n} неделя ${MONTH_SHORT[wi[0].month]} (${period(weeks[0])})   ·   ${wi[1].n} неделя ${MONTH_SHORT[wi[1].month]} (${period(weeks[1])})`,
+    148.5,
+    13.5,
+    { align: "center" }
+  );
 
   const head = [
     "Число",
@@ -233,7 +248,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   const rows: Row[] = [];
   const totals = weeks.map((w) => sumDays(w.days));
   weeks.forEach((w, i) => {
-    rows.push({ cells: [`${i + 1} Неделя`], kind: "band" });
+    rows.push({ cells: [`${wi[i].n} Неделя · ${MONTH[wi[i].month]}`], kind: "band" });
     for (const d of w.days) rows.push({ cells: dayCells(fmtDay(d.date), weekdayOf(d.date), sumDays([d])), kind: "day" });
     const t = totals[i];
     rows.push({ cells: dayCells("итог", "", t), kind: "total" });
@@ -248,7 +263,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   type Cell = string | { content: string; colSpan?: number; rowSpan?: number };
   const diffRows: Cell[][] = [
     [
-      { content: "разница недели 2 от 1", colSpan: 3, rowSpan: 2 },
+      { content: wi[0].month === wi[1].month ? `разница недели ${wi[1].n} от ${wi[0].n}` : `разница недели ${wi[1].n} (${MONTH_SHORT[wi[1].month]}) от ${wi[0].n} (${MONTH_SHORT[wi[0].month]})`, colSpan: 3, rowSpan: 2 },
       "цифра",
       signed(t2.revenue - t1.revenue, int),
       signed(t2.visitors - t1.visitors, int),
