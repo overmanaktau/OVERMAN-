@@ -33,6 +33,11 @@ const nf = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 export function num(n: number): string {
   return nf.format(Math.round(n)).replace(/[  ]/g, " ");
 }
+// Числа трафика в отчётах: два знака и запятая («94,05»).
+export function dec2(n: number): string {
+  return n.toFixed(2).replace(".", ",");
+}
+
 // Проценты в отчётах: два знака и запятая («11,02%»).
 export function pct2(n: number): string {
   return `${n.toFixed(2).replace(".", ",")}%`;
@@ -172,11 +177,11 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
 function trafficBlock(receipts: number, visitors: number, plan: number): string {
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
   // Ничего не округляем до целых: везде два знака после точки (х.хх).
-  const planValue = plan > 0 ? `${plan.toFixed(2)} (${pct2((visitors / plan) * 100)})` : "—";
+  const planValue = plan > 0 ? `${dec2(plan)} (${pct2((visitors / plan) * 100)})` : "—";
   return pre(
     [
       line("План", planValue),
-      line("Факт", visitors > 0 ? visitors.toFixed(2) : "—"),
+      line("Факт", visitors > 0 ? dec2(visitors) : "—"),
       line("Чек", num(receipts)),
       line("Конверсия", visitors > 0 ? `${pct2((receipts / visitors) * 100)}` : "—"),
     ].join("\n")
@@ -752,7 +757,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
 
   const trafficBlock2 = pre(
     traffic
-      ? [line("Факт до " + period, visitors.toFixed(2)), line("Чек", num(receipts)), line("Конверсия", visitors > 0 ? `${pct2((receipts / visitors) * 100)}` : "нет трафика")].join("\n")
+      ? [line("Факт до " + period, dec2(visitors)), line("Чек", num(receipts)), line("Конверсия", visitors > 0 ? `${pct2((receipts / visitors) * 100)}` : "нет трафика")].join("\n")
       : "нет данных счётчика"
   );
 
@@ -794,7 +799,7 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
   const body = pre(
     [
       line("Чеков 17:00–01:00", num(receipts)),
-      line("Трафик 17:00–00:00", traffic ? visitors.toFixed(2) : "нет данных"),
+      line("Трафик 17:00–00:00", traffic ? dec2(visitors) : "нет данных"),
       line("Конверсия", traffic ? (visitors > 0 ? `${pct2((receipts / visitors) * 100)}` : "нет трафика") : "нет данных"),
     ].join("\n")
   );

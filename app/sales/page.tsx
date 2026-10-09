@@ -93,6 +93,8 @@ type EmployeeSalesRow = {
   returnedAmount: number;
   returnedReceipts: number;
   returnedItems: number;
+  // Трафик города только за дни, когда у сотрудника были продажи (его смены) — знаменатель его конверсии.
+  shiftTraffic: number;
 };
 
 type EmployeeSortField = "revenue" | "receipts" | "items" | "avgCheck" | "conversion" | "depth";
@@ -161,7 +163,8 @@ export default function SalesPage() {
   // Посетители считаются по городу (traffic_entries.store), не по кассе и
   // не по сотруднику — счётчик на входе не знает, кто именно обслужил
   // зашедшего. Конверсия сотрудника поэтому показывает, какую долю общего
-  // трафика его города лично он обратил в чеки, а не "личный" трафик.
+  // трафика его города лично он обратил в чеки — только за дни его смен (нет продаж —
+  // нет смены, такой день в его трафик не входит), как и в телеграм-отчётах.
   const [trafficByStore, setTrafficByStore] = useState<Map<string, number>>(new Map());
   const [showGross, setShowGross] = useState(false);
   // Lets you tick a register out of "Продажи по кассам" to isolate what the
@@ -214,13 +217,13 @@ export default function SalesPage() {
         supabase
           .from("moysklad_employee_sales_daily")
           .select(
-            "employee_ms_id, employee_name, store, revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items"
+            "employee_ms_id, employee_name, store, sale_date, revenue, receipts_count, items_count, cost, returned_amount, returned_receipts, returned_items"
           )
           .gte("sale_date", ymd(r.start))
           .lte("sale_date", ymd(r.end)),
         supabase
           .from("traffic_entries")
-          .select("store, traffic_fact")
+          .select("store, entry_date, traffic_fact")
           .in("store", selectedStores)
           .gte("entry_date", ymd(r.start))
           .lte("entry_date", ymd(r.end)),
@@ -230,8 +233,11 @@ export default function SalesPage() {
       if (trafficError) throw trafficError;
 
       const trafficMap = new Map<string, number>();
-      for (const row of (trafficData ?? []) as { store: string; traffic_fact: number | null }[]) {
+      const trafficByDay = new Map<string, number>(); // `${город}|${дата}` → трафик за день
+      for (const row of (trafficData ?? []) as { store: string; entry_date: string; traffic_fact: number | null }[]) {
         trafficMap.set(row.store, (trafficMap.get(row.store) ?? 0) + (row.traffic_fact ?? 0));
+        const dayKey = `${row.store}|${row.entry_date}`;
+        trafficByDay.set(dayKey, (trafficByDay.get(dayKey) ?? 0) + (row.traffic_fact ?? 0));
       }
       if (seq === loadSeq.current) setTrafficByStore(trafficMap);
 
@@ -317,12 +323,14 @@ export default function SalesPage() {
         returnedAmount: number;
         returnedReceipts: number;
         returnedItems: number;
+        shiftDays: Set<string>;
       };
       const byEmployee = new Map<string, EmployeeAgg>();
       for (const row of (employeeData ?? []) as unknown as {
         employee_ms_id: string;
         employee_name: string;
         store: string | null;
+        sale_date: string;
         revenue: number;
         receipts_count: number;
         items_count: number;
@@ -344,7 +352,9 @@ export default function SalesPage() {
           returnedAmount: 0,
           returnedReceipts: 0,
           returnedItems: 0,
+          shiftDays: new Set<string>(),
         };
+        if ((row.receipts_count ?? 0) > 0 || (row.revenue ?? 0) > 0) agg.shiftDays.add(`${row.store ?? ""}|${row.sale_date}`);
         agg.revenue += row.revenue ?? 0;
         agg.receipts += row.receipts_count ?? 0;
         agg.items += row.items_count ?? 0;
@@ -368,6 +378,7 @@ export default function SalesPage() {
           returnedAmount: a.returnedAmount,
           returnedReceipts: a.returnedReceipts,
           returnedItems: a.returnedItems,
+          shiftTraffic: [...a.shiftDays].reduce((acc, k) => acc + (trafficByDay.get(k) ?? 0), 0),
         }))
         .sort((a, b) => b.revenue - a.revenue);
       setEmployeeSales(employeeRows);
@@ -526,7 +537,7 @@ export default function SalesPage() {
       case "avgCheck":
         return d.receipts > 0 ? d.revenue / d.receipts : 0;
       case "conversion": {
-        const traffic = trafficByStore.get(r.store ?? "") ?? 0;
+        const traffic = r.shiftTraffic;
         return traffic > 0 ? d.receipts / traffic : -Infinity;
       }
       case "depth":
@@ -569,7 +580,7 @@ export default function SalesPage() {
         <p className="text-sm text-muted max-w-xl mt-1">
           Продажи по кассам из МойСклад — обновляются раз в сутки, здесь ничего не считается
           в реальном времени. Возврат вычитается из дня, когда он произошёл: сумма и товар — всегда,
-          а сам чек — если в нём был только один товар.
+          а сам чек — если вернули всё, что в нём было.
         </p>
         {error && (
           <div className="flex items-center gap-3 text-sm text-[#A34B36]">
@@ -721,7 +732,7 @@ export default function SalesPage() {
               empPick.push(`Город «${g.label}» — строка-заголовок`);
               for (const x of g.rows) {
                 const d = displayed(x);
-                empRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), conversionLabel(d.receipts, trafficByStore.get(x.store ?? "") ?? 0), costText(x.cost), profitText(d.revenue, x.cost)]);
+                empRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), conversionLabel(d.receipts, x.shiftTraffic), costText(x.cost), profitText(d.revenue, x.cost)]);
                 empKinds.push("normal");
                 empPick.push(`Сотрудник ${x.name} (город ${g.label})`);
               }
@@ -746,7 +757,7 @@ export default function SalesPage() {
             if (empRows.length > 0) {
               sections.push({
                 title: "Продажи по сотрудникам",
-                note: "Конверсия — доля трафика города, обращённая в чеки сотрудника.",
+                note: "Конверсия — доля трафика города за дни смен сотрудника, обращённая в его чеки.",
                 headers: ["Сотрудник", "Выручка", "Чеков", "Товаров", "Средний чек", "Глубина чека", "Конверсия", "Себестоимость", "Валовая прибыль"],
                 groupCols: { cost: [7, 8], conversion: [6] },
                 align: ["left", "right", "right", "right", "right", "right", "right", "right", "right"],
@@ -1120,7 +1131,7 @@ export default function SalesPage() {
                       />
                       <SalesField
                         label="Конверсия"
-                        value={conversionLabel(displayed(r).receipts, trafficByStore.get(r.store ?? "") ?? 0)}
+                        value={conversionLabel(displayed(r).receipts, r.shiftTraffic)}
                       />
                       <SalesField
                         label="Глубина чека"
@@ -1232,7 +1243,7 @@ export default function SalesPage() {
                           )}
                         </div>
                         <div className="num">{money(avgCheck)}</div>
-                        <div className="num">{conversionLabel(d.receipts, trafficByStore.get(r.store ?? "") ?? 0)}</div>
+                        <div className="num">{conversionLabel(d.receipts, r.shiftTraffic)}</div>
                         <div className="num">{checkDepth.toFixed(3)}</div>
                       </div>
                     );

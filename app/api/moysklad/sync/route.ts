@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
+import { syncEmployeeNamesEverywhere } from "@/lib/employeeNames";
 
 // Without this, Vercel caps the function at its platform default (well
 // under a minute) — this route now does a full catalog/stock/supply resync
@@ -414,6 +415,8 @@ async function handle(request: Request) {
     }
     const catalog = skipCatalog ? null : await syncCatalogAndStock();
     const result = await runSync(date);
+    // Имена сотрудников в истории продаж и планах — как сейчас в МойСклад (сбой не мешает синхронизации).
+    await syncEmployeeNamesEverywhere().catch((e) => console.error("syncEmployeeNames:", getErrorMessage(e)));
     await supabaseAdmin
       .from("moysklad_sync_state")
       .update({ last_synced_at: new Date().toISOString(), last_status: "ok", last_error: null })
