@@ -12,7 +12,7 @@ import {
 import { REGISTER_STORE, SAYA_PARK_RETIRED_FROM, registerCounts } from "@/lib/registers";
 import { WAREHOUSES } from "@/lib/warehouses";
 import { escapeHtml } from "@/lib/telegram";
-import { money, num, pre } from "@/lib/reports/sales";
+import { money, num, pre, shortName } from "@/lib/reports/sales";
 
 export type CheckKind = "sales" | "consistency" | "traffic" | "snapshot" | "sync";
 // store — город, которого касается проверка (point_1/point_3), "all" — всех сразу, null — отчётов не касается.
@@ -36,11 +36,21 @@ const empty = (): Totals => ({ revenue: 0, receipts: 0, items: 0 });
 
 // Выручка, чеки и товары по городам прямо из МойСклад — по тем же правилам, что и синхронизация
 // (возвраты вычитаются в день возврата; чек аннулируется, если вернули всё, что в нём было).
-async function freshFromMoysklad(date: string): Promise<Record<string, Totals>> {
+type EmpTotals = Totals & { name: string };
+async function freshFromMoysklad(date: string): Promise<{ byCity: Record<string, Totals>; byEmployee: Map<string, EmpTotals> }> {
   const demands = await fetchRetailDemandsForDate(date);
   const returns = await fetchRetailSalesReturnsForDate(date);
   const byCity: Record<string, Totals> = {};
   const of = (city: string) => (byCity[city] ??= empty());
+  // по сотрудникам: ключ «id сотрудника|город»
+  const byEmployee = new Map<string, EmpTotals>();
+  const ofEmp = (ownerId: string | undefined, name: string | undefined, city: string) => {
+    if (!ownerId) return null;
+    const key = `${ownerId}|${city}`;
+    let t = byEmployee.get(key);
+    if (!t) byEmployee.set(key, (t = { ...empty(), name: name ?? "" }));
+    return t;
+  };
 
   for (const d of demands) {
     const id = d.retailStore?.id;
@@ -48,7 +58,14 @@ async function freshFromMoysklad(date: string): Promise<Record<string, Totals>> 
     const t = of(REGISTER_STORE[id]);
     t.revenue += (d.sum ?? 0) / 100;
     t.receipts += 1;
-    t.items += (d.positions?.rows ?? []).reduce((a, p) => a + (p.quantity ?? 0), 0);
+    const dItems = (d.positions?.rows ?? []).reduce((a, p) => a + (p.quantity ?? 0), 0);
+    t.items += dItems;
+    const e = ofEmp(d.owner?.id, d.owner?.name, REGISTER_STORE[id]);
+    if (e) {
+      e.revenue += (d.sum ?? 0) / 100;
+      e.receipts += 1;
+      e.items += dItems;
+    }
   }
   for (const r of returns) {
     const id = r.retailStore?.id;
@@ -57,14 +74,22 @@ async function freshFromMoysklad(date: string): Promise<Record<string, Totals>> 
     const rItems = (r.positions?.rows ?? []).reduce((a, p) => a + (p.quantity ?? 0), 0);
     t.revenue -= (r.sum ?? 0) / 100;
     t.items -= rItems;
+    const e = ofEmp(r.owner?.id, r.owner?.name, REGISTER_STORE[id]);
+    if (e) {
+      e.revenue -= (r.sum ?? 0) / 100;
+      e.items -= rItems;
+    }
     const href = r.demand?.meta?.href;
     if (href) {
       const { items: original, moment } = await fetchDemandInfo(href);
       const before = await fetchReturnedItemsBefore(href, moment, r);
-      if (original > 0 && before < original && before + rItems >= original) t.receipts -= 1;
+      if (original > 0 && before < original && before + rItems >= original) {
+        t.receipts -= 1;
+        if (e) e.receipts -= 1;
+      }
     }
   }
-  return byCity;
+  return { byCity, byEmployee };
 }
 
 function addDays(date: string, n: number): string {
@@ -99,7 +124,7 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
   }
 
   // 2. Свежие данные МойСклад и сравнение с базой
-  const fresh = await freshFromMoysklad(date);
+  const { byCity: fresh, byEmployee: freshEmployees } = await freshFromMoysklad(date);
   for (const c of CITIES) {
     const a = db[c.code] ?? empty();
     const b = fresh[c.code] ?? empty();
@@ -113,15 +138,34 @@ export async function reconcileDay(date: string): Promise<ReconcileResult> {
   // 3. Внутренняя согласованность: сотрудники и товары против касс
   const { data: empRows, error: empError } = await supabaseAdmin
     .from("moysklad_employee_sales_daily")
-    .select("store, revenue, receipts_count, items_count")
+    .select("employee_ms_id, employee_name, store, revenue, receipts_count, items_count")
     .eq("sale_date", date);
   if (empError) throw empError;
   const emp: Record<string, Totals> = {};
-  for (const r of (empRows ?? []) as { store: string; revenue: number; receipts_count: number; items_count: number }[]) {
+  const dbEmployees = new Map<string, EmpTotals>();
+  for (const r of (empRows ?? []) as { employee_ms_id: string; employee_name: string; store: string; revenue: number; receipts_count: number; items_count: number }[]) {
     const t = (emp[r.store] ??= empty());
     t.revenue += Number(r.revenue) || 0;
     t.receipts += Number(r.receipts_count) || 0;
     t.items += Number(r.items_count) || 0;
+    dbEmployees.set(`${r.employee_ms_id}|${r.store}`, { name: r.employee_name, revenue: Number(r.revenue) || 0, receipts: Number(r.receipts_count) || 0, items: Number(r.items_count) || 0 });
+  }
+
+  // 3а. Сотрудники: каждая строка базы против свежих данных МойСклад (ответственный в чеках мог поменяться)
+  for (const c of CITIES) {
+    const keys = new Set<string>();
+    for (const k of dbEmployees.keys()) if (k.endsWith(`|${c.code}`)) keys.add(k);
+    for (const k of freshEmployees.keys()) if (k.endsWith(`|${c.code}`)) keys.add(k);
+    const diffs: string[] = [];
+    for (const k of keys) {
+      const a = dbEmployees.get(k);
+      const b = freshEmployees.get(k);
+      const same = a && b && Math.abs(a.revenue - b.revenue) <= MONEY_TOLERANCE && a.receipts === b.receipts && Math.abs(a.items - b.items) <= 0.001;
+      if (same) continue;
+      const name = shortName((b ?? a)?.name || "—");
+      diffs.push(`${name}: в базе ${a ? `${money(a.revenue)} · ${num(a.receipts)} чек.` : "нет"}, в МойСклад ${b ? `${money(b.revenue)} · ${num(b.receipts)} чек.` : "нет"}`);
+    }
+    push(diffs.length === 0, "sales", c.code, `${c.name}: продажи по сотрудникам совпадают с МойСклад`, diffs.join("; "));
   }
   const { data: prodRows, error: prodError } = await supabaseAdmin
     .from("moysklad_product_sales_daily")

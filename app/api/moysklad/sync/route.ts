@@ -120,6 +120,23 @@ async function runSync(date: string) {
     if (employeeSalesError) throw employeeSalesError;
   }
 
+  // Синхронизация раньше только добавляла и обновляла строки: если у чека сменили ответственного, у прежнего
+  // сотрудника за этот день оставалась старая строка. Теперь всё, чего за день в МойСклад больше нет, убираем.
+  const { data: oldRegisterRows, error: oldRegErr } = await supabaseAdmin.from("moysklad_sales_daily").select("register_id").eq("sale_date", date);
+  if (oldRegErr) throw oldRegErr;
+  for (const r of oldRegisterRows ?? []) {
+    if (byRegister.has(r.register_id as string)) continue;
+    const { error } = await supabaseAdmin.from("moysklad_sales_daily").delete().eq("sale_date", date).eq("register_id", r.register_id);
+    if (error) throw error;
+  }
+  const { data: oldEmployeeRows, error: oldEmpErr } = await supabaseAdmin.from("moysklad_employee_sales_daily").select("employee_ms_id, store").eq("sale_date", date);
+  if (oldEmpErr) throw oldEmpErr;
+  for (const r of oldEmployeeRows ?? []) {
+    if (byEmployee.has(`${r.employee_ms_id}|${r.store}`)) continue;
+    const { error } = await supabaseAdmin.from("moysklad_employee_sales_daily").delete().eq("sale_date", date).eq("employee_ms_id", r.employee_ms_id).eq("store", r.store);
+    if (error) throw error;
+  }
+
   const products = await syncProductSales(date);
 
   return {
