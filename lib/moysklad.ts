@@ -13,17 +13,30 @@ async function moyskladFetch(path: string, searchParams?: Record<string, string>
   if (searchParams) {
     for (const [key, value] of Object.entries(searchParams)) url.searchParams.set(key, value);
   }
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${getToken()}`,
-      Accept: "application/json;charset=utf-8",
-    },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`МойСклад API ${res.status}: ${body.slice(0, 500)}`);
+  // МойСклад иногда отвечает отказом (429 «слишком много запросов», 502/503/504) или обрывает соединение —
+  // повторяем запрос сразу, без ожидания расписания: до 4 попыток с короткой паузой (0,7 / 1,4 / 2,1 с).
+  let lastError = "МойСклад не отвечает";
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    let res: Response | null = null;
+    try {
+      res = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+          Accept: "application/json;charset=utf-8",
+        },
+      });
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e); // обрыв соединения — повторяем
+    }
+    if (res) {
+      if (res.ok) return res.json();
+      const body = await res.text().catch(() => "");
+      lastError = `МойСклад API ${res.status}: ${body.slice(0, 500)}`;
+      if (![429, 502, 503, 504].includes(res.status)) throw new Error(lastError);
+    }
+    if (attempt < 4) await new Promise((r) => setTimeout(r, 700 * attempt));
   }
-  return res.json();
+  throw new Error(lastError);
 }
 
 async function fetchAllPages<T>(path: string, filter: string): Promise<T[]> {

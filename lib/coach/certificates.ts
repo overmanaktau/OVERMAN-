@@ -124,6 +124,28 @@ function addMonthsIso(from: Date, months: number): string {
 
 const isExpired = (c: Pick<Cert, "expires_at">) => new Date(c.expires_at).getTime() < Date.now();
 
+// МойСклад иногда не отвечает. Бот не сдаётся сразу: один раз пишет пользователю, что запрашивает ещё раз, и тут же
+// повторяет запрос, пока не получится (в пределах ~40 секунд — дольше Telegram ждать не даёт). Не получилось — ошибка
+// уходит наружу, а пользователь получает сообщение с кнопкой «Повторить».
+async function msRetry<T>(t: Transport, chat: number, fn: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  let told = false;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= 6 || Date.now() - started > 40_000) throw e;
+      if (!told) {
+        told = true;
+        await t.send(chat, "МойСклад не ответил — запрашиваю ещё раз…");
+      }
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+  }
+}
+const retryMarkup = (callback: string): ReplyMarkup => ({ inline_keyboard: [[{ text: "🔄 Повторить", callback_data: callback }], [{ text: "✖️ Отмена", callback_data: "cs:x" }]] });
+const MS_DOWN = "МойСклад не ответил даже после нескольких попыток.";
+
 async function logEvent(certificateId: number, actor: string, action: string, note?: string) {
   const { error } = await supabaseAdmin.from("certificate_events").insert({ certificate_id: certificateId, actor, action, note: note ?? null });
   if (error) console.error("certificate_events:", error.message);
@@ -210,9 +232,9 @@ async function citySellers(store: string): Promise<{ id: string; name: string }[
 async function startSell(t: Transport, user: CertUser) {
   let sellers: { id: string; name: string }[];
   try {
-    sellers = await citySellers(user.store);
+    sellers = await msRetry(t, user.telegram_chat_id, () => citySellers(user.store));
   } catch {
-    await t.send(user.telegram_chat_id, "Не удалось получить список сотрудников из МойСклад. Попробуйте ещё раз через минуту.");
+    await t.send(user.telegram_chat_id, `${MS_DOWN} Нажмите «Повторить».`, retryMarkup("cs:sell"));
     return;
   }
   if (sellers.length === 0) {
@@ -433,9 +455,9 @@ async function showChecks(t: Transport, user: CertUser, certId: number, page: nu
   const date = businessDate();
   let checks: CheckInfo[];
   try {
-    checks = (await fetchChecksForDate(date)).filter((c) => sameCity(user.store, c));
+    checks = (await msRetry(t, chat, () => fetchChecksForDate(date))).filter((c) => sameCity(user.store, c));
   } catch {
-    await t.send(chat, "Не удалось получить чеки из МойСклад. Нажмите «Использовать» ещё раз через минуту.", menuFor(user));
+    await t.send(chat, `${MS_DOWN} Нажмите «Повторить».`, retryMarkup(`cs:uc:${certId}:${page}`));
     return;
   }
   checks.sort((a, b) => b.moment.localeCompare(a.moment));
@@ -504,9 +526,9 @@ async function pickCheck(t: Transport, user: CertUser, certId: number, demandId:
   }
   let demand: CheckInfo | null;
   try {
-    demand = await fetchCheckById(demandId);
+    demand = await msRetry(t, chat, () => fetchCheckById(demandId));
   } catch {
-    await t.send(chat, "Не удалось получить чек из МойСклад. Выберите чек ещё раз через минуту.");
+    await t.send(chat, `${MS_DOWN} Нажмите «Повторить».`, retryMarkup(`cs:ud:${certId}:${demandId}`));
     return;
   }
   if (!demand || !sameCity(user.store, demand)) {
@@ -569,7 +591,14 @@ async function finishUse(t: Transport, user: CertUser) {
     return;
   }
   const cert = await getCert(Number(draft.data.certId));
-  const demand = cert ? await fetchCheckById(String(draft.data.demandId)) : null;
+  let demand: CheckInfo | null = null;
+  try {
+    demand = cert ? await msRetry(t, chat, () => fetchCheckById(String(draft.data.demandId))) : null;
+  } catch {
+    // черновик остаётся — достаточно нажать «Повторить»
+    await t.send(chat, `${MS_DOWN} Нажмите «Повторить» — данные сохранены.`, retryMarkup("cs:uy"));
+    return;
+  }
   await clearCertDraft(user.id);
   if (!cert || !demand || cert.status !== "active") {
     await t.send(chat, "Не удалось оформить: сертификат или чек уже изменились. Начните заново.", menuFor(user));
@@ -617,7 +646,13 @@ async function requestOwner(t: Transport, user: CertUser) {
     return;
   }
   const cert = await getCert(Number(draft.data.certId));
-  const demand = cert ? await fetchCheckById(String(draft.data.demandId)) : null;
+  let demand: CheckInfo | null = null;
+  try {
+    demand = cert ? await msRetry(t, chat, () => fetchCheckById(String(draft.data.demandId))) : null;
+  } catch {
+    await t.send(chat, `${MS_DOWN} Нажмите «Повторить» — данные сохранены.`, retryMarkup("cs:ur"));
+    return;
+  }
   if (!cert || !demand || cert.status !== "active") {
     await clearCertDraft(user.id);
     await t.send(chat, "Сертификат или чек уже изменились. Начните заново.", menuFor(user));
@@ -703,7 +738,13 @@ export async function handleCertCallback(data: string, t: Transport, user: CertU
   const draft = await getDraft(user.id);
   if (action === "se") {
     if (!draft || draft.step !== "seller") return void (await t.send(chat, "Начните заново: нажмите «Сертификат».", menuFor(user)));
-    const sellers = await citySellers(user.store).catch(() => []);
+    let sellers: { id: string; name: string }[];
+    try {
+      sellers = await msRetry(t, chat, () => citySellers(user.store));
+    } catch {
+      await t.send(chat, `${MS_DOWN} Нажмите «Повторить».`, retryMarkup(`cs:se:${a}`));
+      return;
+    }
     const seller = sellers.find((s) => s.id === a);
     if (!seller) return void (await t.send(chat, "Не нашёл этого сотрудника. Начните заново.", menuFor(user)));
     await saveDraft(user.id, "amount", { seller_id: seller.id, seller_name: seller.name }, true);
@@ -774,8 +815,13 @@ export async function handleCertOwnerCallback(
       return;
     }
     // Проверить чек ещё раз: оплату могли исправить в МойСклад.
-    const demand = cert.use_demand_id ? await fetchCheckById(cert.use_demand_id) : null;
-    if (!demand) return void (await t.send(chatId, "Не удалось получить чек из МойСклад. Нажмите ещё раз через минуту."));
+    let demand: CheckInfo | null = null;
+    try {
+      demand = cert.use_demand_id ? await msRetry(t, chatId, () => fetchCheckById(cert.use_demand_id as string)) : null;
+    } catch {
+      return void (await t.send(chatId, `${MS_DOWN} Нажмите «Проверить чек ещё раз» чуть позже.`));
+    }
+    if (!demand) return void (await t.send(chatId, "Чек не найден в МойСклад."));
     const res = checkPayment(cert, demand, await attachedOthers(demand.id, cert.id));
     if (!res.ok) {
       await t.send(chatId, `Пока не совпадает (чек №${escapeHtml(demand.name)}: нал ${money(demand.cash)}, безнал ${money(demand.noncash)}; сертификат: ${payText(cert)}):\n${res.problems.map((p) => `• ${p}`).join("\n")}\nИсправьте оплату в МойСклад и нажмите «Проверить чек ещё раз» снова.`);
