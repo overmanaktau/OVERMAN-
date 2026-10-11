@@ -193,7 +193,7 @@ function scenariosText(own: PerShift, need: number): string {
   ].join("\n");
 }
 
-function weekLines(w: WeekSummary): { last: string; next: string } {
+function weekLines(w: WeekSummary, conv?: string | null): { last: string; next: string } {
   const l = w.lastWeek;
   const period = `${shortDate(l.from)}–${shortDate(l.to)}`;
   // Факт показываем всегда, план — как сравнение, если он был внесён.
@@ -205,6 +205,7 @@ function weekLines(w: WeekSummary): { last: string; next: string } {
           line("Чеков", num(l.receipts)),
           line("Средний чек", l.receipts > 0 ? money(l.fact / l.receipts) : "—"),
           line("Глубина чека", l.receipts > 0 ? (l.items / l.receipts).toFixed(2) : "—"),
+          ...(conv ? [line("Конверсия", conv)] : []),
         ]
       : [];
   const planRow = line("План недели", l.plan === null ? "не внесён" : money(l.plan));
@@ -239,8 +240,8 @@ function weekLines(w: WeekSummary): { last: string; next: string } {
   return { last, next };
 }
 
-export function weekMessage(emp: EmployeeRef, w: WeekSummary, forMonday = false): string {
-  const { last, next } = weekLines(w);
+export function weekMessage(emp: EmployeeRef, w: WeekSummary, forMonday = false, conv?: string | null): string {
+  const { last, next } = weekLines(w, conv);
   const t = w.thisWeek;
   const head = `📅 <b>${forMonday ? "Новая неделя" : "План на неделю"}</b>\n${escapeHtml(emp.name)}`;
   let text = `${head}\n\n${next}`;
@@ -251,11 +252,11 @@ export function weekMessage(emp: EmployeeRef, w: WeekSummary, forMonday = false)
   return text;
 }
 
-export function lastWeekMessage(emp: EmployeeRef, w: WeekSummary): string {
-  return `📊 <b>Итоги прошлой недели</b>\n${escapeHtml(emp.name)}\n\n${weekLines(w).last}`;
+export function lastWeekMessage(emp: EmployeeRef, w: WeekSummary, conv?: string | null): string {
+  return `📊 <b>Итоги прошлой недели</b>\n${escapeHtml(emp.name)}\n\n${weekLines(w, conv).last}`;
 }
 
-export function dailyMessage(emp: EmployeeRef, date: string, day: DayRow, s: MonthStatus, a: Advice): string {
+export function dailyMessage(emp: EmployeeRef, date: string, day: DayRow, s: MonthStatus, a: Advice, conv?: string | null): string {
   const avgCheck = day.receipts > 0 ? day.revenue / day.receipts : 0;
   const depth = day.receipts > 0 ? day.items / day.receipts : 0;
   let text = `📊 <b>Итоги вашей смены · ${shortDate(date)}</b>\n${escapeHtml(emp.name)}\n${pre(
@@ -264,6 +265,7 @@ export function dailyMessage(emp: EmployeeRef, date: string, day: DayRow, s: Mon
       line("Чеков", num(day.receipts)),
       line("Средний чек", day.receipts > 0 ? money(avgCheck) : "—"),
       line("Глубина чека", day.receipts > 0 ? depth.toFixed(2) : "—"),
+      ...(conv ? [line("Конверсия", conv)] : []),
     ].join("\n")
   )}`;
   if (s.plan === null) return `${text}\n${NO_PLAN_TEXT}`;

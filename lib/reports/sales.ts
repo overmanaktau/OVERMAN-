@@ -312,7 +312,7 @@ async function freshEmployeeNames(): Promise<Map<string, string>> {
 }
 
 // Сотрудники, у которых в отчётах не показываем конверсию и трафик (решение владельца 2026-10-08).
-const NO_CONVERSION_EMPLOYEE_IDS = new Set(["4d408fda-490d-11f1-0a80-1a3e0018b649"]); // Болат Наргиза
+export const NO_CONVERSION_EMPLOYEE_IDS = new Set(["4d408fda-490d-11f1-0a80-1a3e0018b649"]); // Болат Наргиза
 
 // Для недели и месяца (from < to) метка «бигчек» не ставится — отчёт за период
 // только суммирует сотрудников.
