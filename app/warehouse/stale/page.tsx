@@ -228,30 +228,50 @@ function SizeBreakdown({
   loading,
   rows,
   openLightbox,
+  mobile,
 }: {
   loading: boolean;
   rows: SkuRow[] | undefined;
   openLightbox: (state: LightboxState) => void;
+  mobile: boolean;
 }) {
   if (loading) return <div className="text-[12.5px] text-muted py-2 pl-3 sm:pl-11">Загрузка размеров…</div>;
   if (!rows || rows.length === 0) return <div className="text-[12.5px] text-mutedLight py-2 pl-3 sm:pl-11">Нет данных по размерам.</div>;
+  const days = (s: SkuRow) => (s.daysSinceLastSale === null ? "не продавался" : `${s.daysSinceLastSale} дн.`);
+  // Мобильная версия: название на всю ширину, цифры строкой под ним. Раскладка выбирается по тому же признаку,
+  // что и карточки (mobileLayout), а не по ширине экрана — иначе в карточке на телефоне название сжималось в столбик.
+  if (mobile) {
+    return (
+      <div className="flex flex-col gap-3 py-2 pl-3 pr-2">
+        {rows.map((s) => (
+          <div key={s.id} className="flex flex-col gap-1 text-[12.5px]">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Thumb src={s.imageUrl} fullHref={s.imageFullHref} alt={s.name} onOpen={openLightbox} />
+              <div className="break-words text-muted min-w-0 flex-1">{s.name}</div>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 pl-[46px]">
+              <span className="num">{s.stock.toLocaleString("ru-RU")} шт</span>
+              <span className="num text-mutedLight">{money(s.money)}</span>
+              <span className="num text-mutedLight">{money(s.saleValue)}</span>
+              <span className="num text-mutedLight">{days(s)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
-    <div className="flex flex-col gap-2 py-2 pl-3 md:pl-0 pr-2 md:pr-0">
+    <div className="flex flex-col gap-2 py-2">
       {rows.map((s) => (
-        <div
-          key={s.id}
-          className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12.5px] md:grid md:grid-cols-[1.6fr_0.6fr_0.9fr_0.9fr_1fr] md:gap-3"
-        >
-          <div className="flex items-center gap-2.5 flex-1 basis-[150px] min-w-[150px] md:min-w-0 md:pl-11">
+        <div key={s.id} className="grid grid-cols-[1.6fr_0.6fr_0.9fr_0.9fr_1fr] gap-3 items-center text-[12.5px]">
+          <div className="flex items-center gap-2.5 min-w-0 pl-11">
             <Thumb src={s.imageUrl} fullHref={s.imageFullHref} alt={s.name} onOpen={openLightbox} />
             <div className="break-words text-muted min-w-0">{s.name}</div>
           </div>
-          <div className="flex items-center gap-3 flex-none ml-auto md:contents">
-            <div className="num">{s.stock.toLocaleString("ru-RU")} шт</div>
-            <div className="num text-mutedLight">{money(s.money)}</div>
-            <div className="num text-mutedLight">{money(s.saleValue)}</div>
-            <div className="num text-mutedLight">{s.daysSinceLastSale === null ? "не продавался" : `${s.daysSinceLastSale} дн.`}</div>
-          </div>
+          <div className="num">{s.stock.toLocaleString("ru-RU")} шт</div>
+          <div className="num text-mutedLight">{money(s.money)}</div>
+          <div className="num text-mutedLight">{money(s.saleValue)}</div>
+          <div className="num text-mutedLight">{days(s)}</div>
         </div>
       ))}
     </div>
@@ -357,7 +377,7 @@ function StaleTable({
               </div>
               {isOpen && (
                 <div className="border-t border-borderSoft mt-1">
-                  <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} openLightbox={openLightbox} />
+                  <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} openLightbox={openLightbox} mobile />
                 </div>
               )}
             </div>
@@ -394,7 +414,7 @@ function StaleTable({
               <div className="num text-muted">{money(r.saleValue)}</div>
               <div className="num text-muted">{r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`}</div>
             </div>
-            {isOpen && <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} openLightbox={openLightbox} />}
+            {isOpen && <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} openLightbox={openLightbox} mobile={false} />}
           </div>
         );
       })}

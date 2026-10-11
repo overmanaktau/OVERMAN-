@@ -230,13 +230,16 @@ function SizeBreakdown({
 }) {
   if (loading) return <div className="text-[12.5px] text-muted py-2 pl-3 sm:pl-11">Загрузка размеров…</div>;
   if (!rows || rows.length === 0) return <div className="text-[12.5px] text-mutedLight py-2 pl-3 sm:pl-11">Нет данных по размерам.</div>;
+  // На телефоне: название на всю ширину, цифры строкой под ним; на широком экране — всё в одну строку.
   return (
-    <div className="flex flex-col gap-2 py-2 pl-3 sm:pl-11 pr-2">
+    <div className="flex flex-col gap-3 sm:gap-2 py-2 pl-3 sm:pl-11 pr-2">
       {rows.map((s) => (
-        <div key={s.id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12.5px]">
-          <Thumb src={s.imageUrl} fullHref={s.imageFullHref} alt={s.name} onOpen={openLightbox} />
-          <div className="flex-1 basis-[150px] min-w-[150px] break-words text-muted">{s.name}</div>
-          <div className="flex items-center gap-3 flex-none ml-auto">
+        <div key={s.id} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-x-2.5 text-[12.5px]">
+          <div className="flex items-center gap-2.5 min-w-0 sm:flex-1">
+            <Thumb src={s.imageUrl} fullHref={s.imageFullHref} alt={s.name} onOpen={openLightbox} />
+            <div className="break-words text-muted min-w-0 flex-1">{s.name}</div>
+          </div>
+          <div className="flex items-center gap-4 sm:gap-3 flex-wrap pl-[46px] sm:pl-0 sm:flex-none sm:ml-auto">
             <div className="num">{s.quantity.toLocaleString("ru-RU")} шт</div>
             <div className="num text-mutedLight text-right">{money(s.revenue)}</div>
           </div>
