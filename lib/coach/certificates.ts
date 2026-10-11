@@ -145,6 +145,9 @@ async function msRetry<T>(t: Transport, chat: number, fn: () => Promise<T>): Pro
 }
 const retryMarkup = (callback: string): ReplyMarkup => ({ inline_keyboard: [[{ text: "🔄 Повторить", callback_data: callback }], [{ text: "✖️ Отмена", callback_data: "cs:x" }]] });
 const MS_DOWN = "МойСклад не ответил даже после нескольких попыток.";
+const waitingText = (number: string, check: string) =>
+  `⏳ <b>Ждём ответа руководителя</b>\nЗапрос по сертификату №<b>${escapeHtml(number)}</b> (чек №${escapeHtml(check)}) отправлен. Сертификат пока не считается использованным. Как только руководитель ответит — одобрит или откажет, — вам придёт сообщение.\n\nЕсли запрос больше не нужен, нажмите «Отменить запрос».`;
+const cancelRequestMarkup = (certId: number): ReplyMarkup => ({ inline_keyboard: [[{ text: "❌ Отменить запрос", callback_data: `cs:uq:${certId}` }]] });
 
 async function logEvent(certificateId: number, actor: string, action: string, note?: string) {
   const { error } = await supabaseAdmin.from("certificate_events").insert({ certificate_id: certificateId, actor, action, note: note ?? null });
@@ -350,6 +353,10 @@ export async function handleCertText(t: Transport, user: CertUser, text: string)
     const why = unusableReason(cert, forReturn);
     if (why) {
       await clearCertDraft(user.id);
+      if (!forReturn && cert.status === "pending_use" && cert.use_requested_by === user.id) {
+        await t.send(chat, waitingText(cert.number, cert.use_demand_name ?? ""), cancelRequestMarkup(cert.id));
+        return true;
+      }
       await t.send(chat, `Сертификат №<b>${escapeHtml(cert.number)}</b> ${why}.`, menuFor(user));
       return true;
     }
@@ -690,7 +697,42 @@ async function requestOwner(t: Transport, user: CertUser) {
   }
   await logEvent(cert.id, user.employee_name, "use_requested", `чек №${demand.name}; ${res.problems.join("; ")}`);
   await sendRequestToOwner(t, user, cert, demand, res.problems);
-  await t.send(chat, `Запрос по сертификату №<b>${escapeHtml(cert.number)}</b> отправлен руководителю. Пока он не решит, сертификат не считается использованным — вам придёт сообщение.`, menuFor(user));
+  await t.send(chat, waitingText(cert.number, demand.name), cancelRequestMarkup(cert.id));
+}
+
+// ───────── отмена запроса руководителю ─────────
+
+// Консультант сам отменяет запрос, который ждёт ответа: сертификат снова обычный, руководителю — сообщение.
+async function cancelOwnRequest(t: Transport, user: CertUser, certId: number) {
+  const chat = user.telegram_chat_id;
+  const { data, error } = await supabaseAdmin
+    .from("certificates")
+    .update({
+      status: "active",
+      use_demand_id: null,
+      use_demand_name: null,
+      use_demand_moment: null,
+      use_demand_sum: null,
+      use_demand_cash: null,
+      use_demand_noncash: null,
+      use_demand_cashier: null,
+      use_requested_by: null,
+      use_requested_at: null,
+      use_problem: null,
+    })
+    .eq("id", certId)
+    .eq("store", user.store)
+    .eq("status", "pending_use")
+    .eq("use_requested_by", user.id)
+    .select("number");
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    await t.send(chat, "Руководитель уже ответил на этот запрос (или он отменён) — решение придёт отдельным сообщением.", menuFor(user));
+    return;
+  }
+  await logEvent(certId, user.employee_name, "use_cancelled", "запрос отменён консультантом");
+  await t.send(chat, `Запрос по сертификату №<b>${escapeHtml(data[0].number)}</b> отменён. Сертификат остался неиспользованным.`, menuFor(user));
+  for (const owner of await ownerChats()) await t.send(owner, `Консультант ${escapeHtml(user.employee_name)} отменил запрос по сертификату №<b>${escapeHtml(data[0].number)}</b>. Решать ничего не нужно.`);
 }
 
 // ───────── возврат ─────────
@@ -768,6 +810,7 @@ export async function handleCertCallback(data: string, t: Transport, user: CertU
   if (action === "ud") return pickCheck(t, user, Number(a), String(b));
   if (action === "uy") return finishUse(t, user);
   if (action === "ur") return requestOwner(t, user);
+  if (action === "uq") return cancelOwnRequest(t, user, Number(a));
   if (action === "ry") {
     if (!draft || draft.step !== "confirm_return" || Number(draft.data.certId) !== Number(a)) return void (await t.send(chat, "Возврат уже оформлен или отменён.", menuFor(user)));
     return finishReturn(t, user, Number(a));
