@@ -104,7 +104,7 @@ function StorePicker() {
       </button>
 
       {open && (
-        <div className="absolute z-20 top-full left-2 right-2 mt-1 bg-[#232019] border border-[#3A362E] rounded-lg p-2 flex flex-col gap-1 shadow-lg max-h-[280px] overflow-y-auto">
+        <div className="absolute z-20 top-full left-2 right-2 mt-1 bg-[#232019] border border-[#3A362E] rounded-lg p-2 flex flex-col gap-1 shadow-lg max-h-[280px] overflow-y-auto no-scrollbar">
           <label className="flex items-center gap-2 text-[13px] text-sidebarText py-1.5 px-1.5 rounded-md hover:bg-[#2C2820] cursor-pointer font-semibold">
             <input
               type="checkbox"
@@ -241,7 +241,7 @@ export default function Sidebar() {
       </div>
 
       <div
-        className={`w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6 overflow-y-auto fixed inset-y-0 left-0 z-50 transition-transform duration-200 ${
+        className={`w-[248px] flex-none bg-sidebar text-sidebarText box-border p-8 px-5 flex flex-col gap-6 overflow-y-auto no-scrollbar fixed inset-y-0 left-0 z-50 transition-transform duration-200 ${
           mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
         }`}
       >
