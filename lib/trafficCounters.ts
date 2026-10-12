@@ -10,10 +10,11 @@ const STORE_BY_OBJECT_CODE: Record<string, string> = {
   "Overman Aktobe": "point_3", // Актобе
 };
 
-// Считаются только часы рабочего времени 10:00–23:59 (часы с 10 по 23) —
-// одинаково для всех точек, сейчас и в будущем (решение владельца). Всё, что
-// счётчик насчитал до 10:00, в трафик не идёт.
+// Считаются только часы рабочего времени 10:00–22:59 (часы с 10 по 22) —
+// одинаково для всех точек, сейчас и в будущем, как в кабинете GSM Counters
+// (решение владельца). Всё, что счётчик насчитал до 10:00 и с 23:00, в трафик не идёт.
 const WORK_FROM_HOUR = 10;
+const WORK_TO_HOUR = 23; // не включая: час «23:00» в трафик не входит
 
 // Сколько процентов «вошло» вычитается по точке. Актау: счётчик у входа
 // считает и тех, кто зашёл не за покупкой (сотрудники и т.п.), — по решению
@@ -71,7 +72,7 @@ export async function fetchTrafficUntilHour(
     for (const item of device.Items) {
       if (item.DTime.slice(0, 10) !== dateYmd) continue;
       const hour = Number(item.DTime.slice(11, 13));
-      if (hour < fromHour || hour >= untilHour) continue;
+      if (hour < fromHour || hour >= Math.min(untilHour, WORK_TO_HOUR)) continue;
       incomeByStore.set(store, (incomeByStore.get(store) ?? 0) + (Number(item.Income) || 0));
     }
   }
@@ -85,7 +86,7 @@ export async function fetchTrafficUntilHour(
 
 // «Вошло» (Income) по суткам для каждой точки за последние `days` дней
 // (максимум 20 — ограничение метода сервиса). Текущие незавершённые сутки в
-// ответ не включаются. Суммируются часы с 10:00 до 23:59 (WORK_FROM_HOUR);
+// ответ не включаются. Суммируются часы с 10:00 до 22:59 (WORK_FROM_HOUR … WORK_TO_HOUR);
 // собственный фильтр рабочего времени сервиса не используется — у него своё
 // расписание по каждому счётчику.
 export async function fetchDailyTraffic(days: number, todayYmd: string, fromYmd?: string): Promise<DailyTraffic[]> {
@@ -102,7 +103,8 @@ export async function fetchDailyTraffic(days: number, todayYmd: string, fromYmd?
     if (!info || !store) continue;
     const byDate = new Map<string, number>();
     for (const item of device.Items) {
-      if (Number(item.DTime.slice(11, 13)) < WORK_FROM_HOUR) continue;
+      const hour = Number(item.DTime.slice(11, 13));
+      if (hour < WORK_FROM_HOUR || hour >= WORK_TO_HOUR) continue;
       const date = item.DTime.slice(0, 10);
       byDate.set(date, (byDate.get(date) ?? 0) + (Number(item.Income) || 0));
     }
@@ -111,9 +113,9 @@ export async function fetchDailyTraffic(days: number, todayYmd: string, fromYmd?
       if (fromYmd && date < fromYmd) continue; // более ранние дни не трогаем
       const percent = DEDUCT_PERCENT[store] ?? 0;
       const fact = Math.round(income * (1 - percent / 100) * 100) / 100;
-      // Данные суток полные, если последняя запись счётчика не раньше 23:00
-      // этих суток (счётчик передаёт почасовые значения).
-      const complete = info.DtDataTo >= `${date}T23:00:00`;
+      // Данные суток полные, если счётчик передал данные хотя бы до 22:59
+      // этих суток — последний рабочий час (22:00–22:59) уже в сумме.
+      const complete = info.DtDataTo >= `${date}T22:59:00`;
       result.push({ store, date, income, fact, complete });
     }
   }

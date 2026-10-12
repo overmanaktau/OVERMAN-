@@ -778,7 +778,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
   ]);
 }
 
-// Вечерняя конверсия (ежедневно в 01:00): трафик счётчиков за 17:00–00:00 и чеки с 17:00 до 01:00 —
+// Вечерняя конверсия (ежедневно в 01:00): трафик счётчиков за 17:00–23:00 и чеки с 17:00 до 01:00 —
 // чеки, пробитые уже после закрытия, всё равно относятся к вечеру. Время в МойСклад на 2 часа раньше
 // Алматы: 17:00 → 15:00, 01:00 следующих суток → 23:00 того же дня. `date` — день смены (вчера в 01:00).
 export async function buildEveningReport(scope: ReportScope, date: string): Promise<string[]> {
@@ -802,11 +802,11 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
   const visitors = traffic ? scope.cityCodes.reduce((a, c) => a + (traffic.get(c)?.fact ?? 0), 0) : 0;
   const line = (label: string, value: string) => `${label.padEnd(18)}${value.padStart(14)}`;
   const title = `📊 <b>Вечерняя конверсия · ${escapeHtml(scope.title)}</b>
-<i>за ${shortDate(date)}: трафик 17:00–00:00, чеки до 01:00</i>`;
+<i>за ${shortDate(date)}: трафик 17:00–23:00, чеки до 01:00</i>`;
   const body = pre(
     [
       line("Чеков 17:00–01:00", num(receipts)),
-      line("Трафик 17:00–00:00", traffic ? dec2(visitors) : "нет данных"),
+      line("Трафик 17:00–23:00", traffic ? dec2(visitors) : "нет данных"),
       line("Конверсия", traffic ? (visitors > 0 ? `${pct2((receipts / visitors) * 100)}` : "нет трафика") : "нет данных"),
     ].join("\n")
   );
