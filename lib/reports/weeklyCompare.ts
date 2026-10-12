@@ -277,10 +277,10 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
       signed(r2.atv - r1.atv, int),
       { content: diffPP(r1.revPct, r2.revPct), rowSpan: 2 },
       { content: diffPP(r1.trafPct, r2.trafPct), rowSpan: 2 },
-      { content: signed(r2.cr - r1.cr, (x) => pct(x)), rowSpan: 2 },
+      signed(r2.cr - r1.cr, (x) => pct(x)),
       signed(r2.depth - r1.depth, (x) => dec(x, 2)),
     ],
-    ["%", rel(t1.revenue, t2.revenue), rel(t1.visitors, t2.visitors), rel(t1.receipts, t2.receipts), rel(t1.items, t2.items), rel(r1.atv, r2.atv), rel(r1.depth, r2.depth)],
+    ["%", rel(t1.revenue, t2.revenue), rel(t1.visitors, t2.visitors), rel(t1.receipts, t2.receipts), rel(t1.items, t2.items), rel(r1.atv, r2.atv), rel(r1.cr, r2.cr), rel(r1.depth, r2.depth)],
   ];
 
   autoTable(pdf, {
