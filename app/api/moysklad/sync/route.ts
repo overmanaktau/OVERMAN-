@@ -139,6 +139,22 @@ async function runSync(date: string) {
 
   const products = await syncProductSales(date);
 
+  // Пустой чек (сумма 0 ₸ и нет товаров) — обычно случайный: он попадает в количество чеков и конверсию, а в отчёте МойСклад
+  // по сотрудникам его нет. Владельцу пишем о нём после ночной синхронизации (только за вчера — не при пересчёте старых дней).
+  if (date === yesterdayInAlmaty()) {
+    const emptyChecks = demands.filter((d) => (d.sum ?? 0) === 0 && (d.positions?.rows ?? []).length === 0 && REGISTER_STORE[d.retailStore?.id ?? ""]);
+    if (emptyChecks.length > 0) {
+      const lines = emptyChecks.map((d) => {
+        const almaty = new Date(new Date(`${d.moment.slice(0, 10)}T${d.moment.slice(11, 16)}:00Z`).getTime() + 2 * 3600000);
+        const stamp = `${almaty.toISOString().slice(8, 10)}.${almaty.toISOString().slice(5, 7)}.${almaty.toISOString().slice(0, 4)} ${almaty.toISOString().slice(11, 16)}`;
+        return `• чек № ${d.name ?? "—"} · ${d.retailStore?.name ?? "касса"} · ${stamp}`;
+      });
+      await notifyOwner(
+        `⚠️ <b>Пустой чек в МойСклад</b>\n${lines.join("\n")}\nСумма 0 ₸, товаров нет. Такой чек попадает в количество чеков и конверсию отчётов, а в отчёте МойСклад по сотрудникам его нет. Если он случайный — удалите его в МойСклад и пересчитайте день.`
+      );
+    }
+  }
+
   return {
     date,
     registers: byRegister.size,
