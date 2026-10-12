@@ -25,7 +25,7 @@ export type PermissionGroupKey = (typeof PERMISSION_GROUPS)[number]["key"];
 // into the confusing "view unchecked, edit checked" state the UI used to
 // allow.
 export const SECTIONS = [
-  { key: "warehouse.stock", label: "Склад (АВС/XYZ, Зависшие остатки)", group: "warehouse", hasEdit: false },
+  { key: "warehouse.stock", label: "Склад (АВС/XYZ, Зависшие остатки, По поставщикам)", group: "warehouse", hasEdit: false },
 
   { key: "marketing.statistics", label: "Статистика (+ Обзор, Продажа)", group: "marketing", hasEdit: false },
   { key: "marketing.data_entry", label: "Внесение данных", group: "marketing", hasEdit: true },
