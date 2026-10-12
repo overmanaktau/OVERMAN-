@@ -26,14 +26,16 @@ export async function coachApi(method: string, body: Record<string, unknown>): P
 }
 
 // Отправить файл (например, PDF) в личный чат бота-помощника.
-export async function sendCoachDocument(chatId: number | string, fileName: string, bytes: Uint8Array, caption?: string): Promise<void> {
+// Возвращает номер отправленного сообщения (нужен, чтобы при необходимости удалить его).
+export async function sendCoachDocument(chatId: number | string, fileName: string, bytes: Uint8Array, caption?: string): Promise<number | null> {
   const form = new FormData();
   form.append("chat_id", String(chatId));
   if (caption) form.append("caption", caption);
   form.append("document", new Blob([Buffer.from(bytes)], { type: "application/pdf" }), fileName);
   const res = await fetch(`${API}/bot${token()}/sendDocument`, { method: "POST", body: form });
-  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
   if (!res.ok || !data.ok) throw new Error(`Telegram: ${data.description ?? "не удалось отправить файл"}`);
+  return data.result?.message_id ?? null;
 }
 
 export type ReplyMarkup = Record<string, unknown>;

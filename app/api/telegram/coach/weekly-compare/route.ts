@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getErrorMessage } from "@/lib/errors";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendCoachDocument } from "@/lib/coach/bot";
+import { coachApi, sendCoachDocument } from "@/lib/coach/bot";
 import { stable } from "@/lib/reports/stable";
 import { activeHoldFor } from "@/lib/verify/holds";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
@@ -16,6 +16,22 @@ export const maxDuration = 60;
 // (так по понедельникам в 9:00 PDF уходит Картбаеву Нуржану).
 // ?sendAdmins=1 — отправить всем подтверждённым администраторам города (is_admin, admin_scope = city, их store = ?store);
 // так PDF по Актобе уходит Айдане, как только она зарегистрируется в боте. Нет ни одного — пишем владельцу.
+// ?replace=1 (вместе с send / sendAdmins) — после отправки удалить прежние копии этого же PDF в том же чате: среди
+// 6 сообщений перед новым ищем документы с точно такой же подписью (повторное редактирование подписи тем же текстом
+// Telegram отклоняет как «не изменено» — так отличаем свой PDF от других сообщений, ничего не меняя).
+async function removeOlderCopies(chatId: number | string, newId: number | null, caption: string): Promise<number> {
+  if (!newId) return 0;
+  let removed = 0;
+  for (let id = newId - 1; id > Math.max(newId - 7, 0); id--) {
+    const r = await coachApi("editMessageCaption", { chat_id: chatId, message_id: id, caption });
+    if (!r.ok && /not modified/i.test(r.description ?? "")) {
+      const del = await coachApi("deleteMessage", { chat_id: chatId, message_id: id });
+      if (del.ok) removed += 1;
+    }
+  }
+  return removed;
+}
+
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || (request.headers.get("authorization") ?? "") !== `Bearer ${cronSecret}`) {
@@ -52,8 +68,9 @@ async function handle(request: Request) {
       const { data: user, error } = await supabaseAdmin.from("coach_users").select("telegram_chat_id, employee_name").eq("id", sendTo).eq("status", "approved").maybeSingle();
       if (error) throw error;
       if (!user) return NextResponse.json({ error: "Пользователь не найден." }, { status: 404 });
-      await sendCoachDocument(user.telegram_chat_id, fileName, pdf, caption);
-      return NextResponse.json({ sent: true, to: user.employee_name, weeks: [weeks[0].from, weeks[1].from] });
+      const newId = await sendCoachDocument(user.telegram_chat_id, fileName, pdf, caption);
+      const removed = url.searchParams.get("replace") === "1" ? await removeOlderCopies(user.telegram_chat_id, newId, caption) : 0;
+      return NextResponse.json({ sent: true, to: user.employee_name, weeks: [weeks[0].from, weeks[1].from], messageId: newId, removedOld: removed });
     }
     if (url.searchParams.get("sendAdmins") === "1") {
       const { data: admins, error } = await supabaseAdmin
@@ -69,7 +86,10 @@ async function handle(request: Request) {
 Нет подтверждённого администратора города в боте-помощнике: администратор ещё не зарегистрировался или заявку не подтвердили.`);
         return NextResponse.json({ sent: false, reason: "нет администратора города" }, { status: 404 });
       }
-      for (const admin of admins) await sendCoachDocument(admin.telegram_chat_id, fileName, pdf, caption);
+      for (const admin of admins) {
+        const newId = await sendCoachDocument(admin.telegram_chat_id, fileName, pdf, caption);
+        if (url.searchParams.get("replace") === "1") await removeOlderCopies(admin.telegram_chat_id, newId, caption);
+      }
       return NextResponse.json({ sent: true, to: admins.map((a) => a.employee_name), weeks: [weeks[0].from, weeks[1].from] });
     }
     return new NextResponse(Buffer.from(pdf), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="weeks-${store}.pdf"` } });
