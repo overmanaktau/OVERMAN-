@@ -97,7 +97,11 @@ async function handle(request: Request) {
         if (dry) {
           results.push({ chat: route.label, scope: scopeKey, messages: messages.length, preview: messages });
         } else {
-          await sendTelegramMessages(route.chatId, messages);
+          await sendTelegramMessages(route.chatId, messages, {
+            kind: evening ? "evening" : intraday ? "intraday" : period ?? "day",
+            date,
+            scope: scopeKey,
+          });
           results.push({ chat: route.label, scope: scopeKey, messages: messages.length });
         }
       } catch (e) {

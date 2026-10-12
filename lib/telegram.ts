@@ -1,3 +1,5 @@
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
 const API = "https://api.telegram.org";
 const MAX_MESSAGE = 4000; // Telegram's hard limit is 4096; keep a margin for entity overhead
 
@@ -24,7 +26,10 @@ export function packSections(sections: string[]): string[] {
   return messages;
 }
 
-export async function sendTelegramMessage(chatId: string, html: string): Promise<void> {
+// Что за отчёт отправляется — для журнала отправленных сообщений (telegram_sent_messages).
+export type SentMeta = { kind?: string; date?: string; scope?: string };
+
+export async function sendTelegramMessage(chatId: string, html: string, meta?: SentMeta): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан.");
   const res = await fetch(`${API}/bot${token}/sendMessage`, {
@@ -34,11 +39,27 @@ export async function sendTelegramMessage(chatId: string, html: string): Promise
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) throw new Error(`Telegram: ${data.description ?? res.status}`);
+  // Номер сообщения запоминаем, чтобы лишнее можно было удалить (история чата боту недоступна).
+  // Сбой записи не должен ломать отправку отчёта.
+  try {
+    const messageId = data.result?.message_id;
+    if (messageId) {
+      await supabaseAdmin.from("telegram_sent_messages").insert({
+        chat_id: chatId,
+        message_id: messageId,
+        report_kind: meta?.kind ?? null,
+        report_date: meta?.date ?? null,
+        scope: meta?.scope ?? null,
+      });
+    }
+  } catch {
+    // журнал необязателен
+  }
 }
 
-export async function sendTelegramMessages(chatId: string, messages: string[]): Promise<void> {
+export async function sendTelegramMessages(chatId: string, messages: string[], meta?: SentMeta): Promise<void> {
   for (const message of messages) {
-    await sendTelegramMessage(chatId, message);
+    await sendTelegramMessage(chatId, message, meta);
     // Telegram allows ~20 messages a minute per group; a short pause keeps a
     // multi-message report well under that.
     await new Promise((resolve) => setTimeout(resolve, 400));
