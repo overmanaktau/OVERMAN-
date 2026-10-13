@@ -49,7 +49,7 @@ export default function KassaPage() {
         <div className="w-full max-w-xl rounded-3xl border border-border bg-surface p-8 text-center shadow-sm">
           <div className="font-serif text-[26px] font-semibold tracking-wide">OVERMAN</div>
           <div className="mt-2 text-[22px] font-extrabold">Выберите город</div>
-          <div className="mt-1 text-[14px] text-muted">Клиенты и сертификаты будут только по выбранному городу</div>
+          <div className="mt-1 text-[14px] text-muted">Бонусы и сертификаты будут только по выбранному городу</div>
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             {codes.map((c) => (
               <button key={c} type="button" onClick={() => setStore(c)} className={`h-24 rounded-2xl text-2xl font-extrabold shadow-md transition hover:brightness-110 active:scale-[0.98] ${cityTone(c)}`}>

@@ -86,7 +86,7 @@ export default function ClientsTab() {
       </div>
 
       <div className="mt-3 flex items-center justify-between px-1 text-[13px] text-muted">
-        <span>{q ? `Найдено: ${num(total)}` : `Последние покупатели · всего клиентов ${num(total)}`}</span>
+        <span>{q ? `Найдено: ${num(total)}` : `Последние покупатели · всего ${num(total)}`}</span>
         {loading && <span className="animate-pulse">обновляю…</span>}
       </div>
 
@@ -158,7 +158,7 @@ function ClientPanel({ id, onClose }: { id: string; onClose: () => void }) {
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <aside className="kassa-slide relative flex h-full w-full max-w-[640px] flex-col overflow-y-auto bg-paper shadow-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-[color-mix(in_srgb,var(--color-paper)_90%,transparent)] px-6 py-4 backdrop-blur">
-          <div className="text-[13px] font-semibold uppercase tracking-widest text-muted">Карточка клиента</div>
+          <div className="text-[13px] font-semibold uppercase tracking-widest text-muted">Бонусы клиента</div>
           <button type="button" onClick={onClose} className="rounded-full bg-borderSoft p-2.5 text-ink hover:bg-border" aria-label="Закрыть">
             <CloseIcon className="h-5 w-5" />
           </button>
