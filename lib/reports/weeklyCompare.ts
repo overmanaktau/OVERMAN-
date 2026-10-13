@@ -264,7 +264,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   const r1 = ratios(t1);
   const r2 = ratios(t2);
   const rel = (a: number, b: number) => (a > 0 ? pct(((b - a) / a) * 100) : "—");
-  const diffPP = (a: number | null, b: number | null) => (a === null || b === null ? "—" : signed(b - a, (x) => pct(x)));
+  const relOrDash = (a: number | null, b: number | null) => (a === null || b === null ? "—" : rel(a, b));
   type Cell = string | { content: string; colSpan?: number; rowSpan?: number };
   const diffRows: Cell[][] = [
     [
@@ -275,8 +275,8 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
       signed(t2.receipts - t1.receipts, int),
       signed(t2.items - t1.items, int),
       signed(r2.atv - r1.atv, int),
-      { content: diffPP(r1.revPct, r2.revPct), rowSpan: 2 },
-      { content: diffPP(r1.trafPct, r2.trafPct), rowSpan: 2 },
+      { content: relOrDash(r1.revPct, r2.revPct), rowSpan: 2 },
+      { content: relOrDash(r1.trafPct, r2.trafPct), rowSpan: 2 },
       { content: rel(r1.cr, r2.cr), rowSpan: 2 },
       signed(r2.depth - r1.depth, (x) => dec(x, 2)),
     ],
