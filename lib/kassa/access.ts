@@ -2,7 +2,7 @@
 // возврат сертификатов) и город входа: у кассира один город (из доступов роли), у админа и владельца — любой.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-export type KassaCaller = { userId: string; name: string; stores: string[]; canEdit: boolean };
+export type KassaCaller = { userId: string; name: string; stores: string[]; canEdit: boolean; admin: boolean };
 
 export async function requireKassa(request: Request, need: "view" | "edit"): Promise<KassaCaller | null> {
   const token = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
@@ -17,7 +17,7 @@ export async function requireKassa(request: Request, need: "view" | "edit"): Pro
   const stores = (allStores ?? []) as { id: number; city_id: number; code: string }[];
 
   if (roleRow.role === "admin" || roleRow.role === "owner") {
-    return { userId: userData.user.id, name, stores: stores.map((s) => s.code), canEdit: true };
+    return { userId: userData.user.id, name, stores: stores.map((s) => s.code), canEdit: true, admin: true };
   }
   if (!roleRow.role_id) return null;
   const { data: perm } = await supabaseAdmin.from("role_permissions").select("can_view, can_edit").eq("role_id", roleRow.role_id).eq("section", "kassa").maybeSingle();
@@ -29,5 +29,5 @@ export async function requireKassa(request: Request, need: "view" | "edit"): Pro
     ? stores.map((s) => s.code)
     : stores.filter((s) => g.some((x) => (x.scope === "city" && x.city_id === s.city_id) || (x.scope === "store" && x.store_id === s.id))).map((s) => s.code);
   if (codes.length === 0) return null;
-  return { userId: userData.user.id, name, stores: codes, canEdit: !!perm.can_edit };
+  return { userId: userData.user.id, name, stores: codes, canEdit: !!perm.can_edit, admin: false };
 }

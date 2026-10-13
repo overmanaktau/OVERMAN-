@@ -127,7 +127,7 @@ export async function requestOwner(store: string, certId: number, demandId: stri
   if (error) throw error;
   if (!data || data.length === 0) return { error: "Сертификат уже изменился." };
   await logEvent(r.cert.id, actor, "use_requested", `чек №${r.demand.name}; ${r.res.problems.join("; ")} (с экрана кассы)`);
-  const requester = { employee_name: `${actor} (касса)` } as CertUser;
+  const requester = { employee_name: actor } as CertUser;
   await sendRequestToOwner(telegramTransport, requester, r.cert, r.demand, r.res.problems);
   return { ok: true };
 }
@@ -254,7 +254,7 @@ export async function cancelRequest(store: string, certId: number, actor: string
   if (!data || data.length === 0) return { error: "Руководитель уже ответил на этот запрос (или он отменён)." };
   await logEvent(certId, actor, "use_cancelled", "запрос отменён с экрана кассы");
   for (const owner of await ownerChats()) {
-    await telegramTransport.send(owner, `Касса (${escapeHtml(actor)}) отменила запрос по сертификату №<b>${escapeHtml(data[0].number)}</b>. Решать ничего не нужно.`);
+    await telegramTransport.send(owner, `Запрос по сертификату №<b>${escapeHtml(data[0].number)}</b> отменён с экрана кассы (${escapeHtml(actor)}). Решать ничего не нужно.`);
   }
   return { ok: true, number: data[0].number };
 }

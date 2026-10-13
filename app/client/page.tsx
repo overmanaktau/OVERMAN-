@@ -18,10 +18,12 @@ export default function KassaPage() {
   const canEdit = isAdmin || permissions["kassa"].canEdit;
   const [tab, setTab] = useState<Tab>("clients");
   const codes = accessibleStoreCodes.length ? accessibleStoreCodes : stores.map((s) => s.code);
+  // Общий вход кассы привязан к одному городу — город сразу задан. У тех, кому доступно несколько городов (админ, владелец),
+  // при каждом входе экран «Выберите город»: переключателя в шапке нет, чтобы не пробить за другой город по забывчивости.
   const [store, setStore] = useState<string>("");
 
   useEffect(() => {
-    if (!store && codes.length > 0) setStore(codes[0]);
+    if (!store && codes.length === 1) setStore(codes[0]);
   }, [codes, store]);
 
   async function logout() {
@@ -38,6 +40,27 @@ export default function KassaPage() {
   }
 
   const storeName = (code: string) => stores.find((s) => s.code === code)?.name ?? code;
+  // Цвет города: Актау — зелёный, Актобе — фиолетовый, чтобы с одного взгляда было видно, в каком городе работаешь.
+  const cityTone = (code: string) => (code === "point_1" ? "bg-emerald-600 text-white" : code === "point_3" ? "bg-violet-600 text-white" : "bg-accent text-white");
+
+  if (codes.length > 1 && !store) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-paper p-6 text-ink">
+        <div className="w-full max-w-xl rounded-3xl border border-border bg-surface p-8 text-center shadow-sm">
+          <div className="font-serif text-[26px] font-semibold tracking-wide">OVERMAN</div>
+          <div className="mt-2 text-[22px] font-extrabold">Выберите город</div>
+          <div className="mt-1 text-[14px] text-muted">Клиенты и сертификаты будут только по выбранному городу</div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            {codes.map((c) => (
+              <button key={c} type="button" onClick={() => setStore(c)} className={`h-24 rounded-2xl text-2xl font-extrabold shadow-md transition hover:brightness-110 active:scale-[0.98] ${cityTone(c)}`}>
+                {storeName(c)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-paper text-ink [background-image:radial-gradient(1100px_520px_at_85%_-8%,color-mix(in_srgb,var(--color-accent)_16%,transparent),transparent),radial-gradient(800px_400px_at_-5%_105%,color-mix(in_srgb,var(--color-accent)_10%,transparent),transparent)] bg-no-repeat">
@@ -62,14 +85,11 @@ export default function KassaPage() {
           </nav>
 
           <div className="flex items-center gap-3 text-right">
-            {codes.length > 1 && tab === "certs" ? (
-              <select value={store} onChange={(e) => setStore(e.target.value)} className="rounded-xl border border-border bg-surface px-3 py-2 text-sm font-bold text-ink">
-                {codes.map((c) => (
-                  <option key={c} value={c}>{storeName(c)}</option>
-                ))}
-              </select>
-            ) : (
-              <div className="hidden rounded-xl bg-borderSoft px-3.5 py-2 text-[13px] font-bold text-ink ring-1 ring-border sm:block">{storeName(codes[0] ?? "")}</div>
+            <div className={`rounded-xl px-5 py-2 text-lg font-extrabold shadow-sm ${cityTone(store || codes[0])}`}>{storeName(store || (codes[0] ?? ""))}</div>
+            {codes.length > 1 && (
+              <button type="button" onClick={() => setStore("")} className="text-[12.5px] font-semibold text-mutedLight hover:text-ink">
+                Сменить город
+              </button>
             )}
             <button type="button" onClick={logout} className="text-[12.5px] font-semibold text-mutedLight hover:text-ink" title={fullName ?? email ?? ""}>
               Выйти

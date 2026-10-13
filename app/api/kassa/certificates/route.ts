@@ -5,6 +5,10 @@ import * as cert from "@/lib/kassa/certificates";
 
 export const maxDuration = 60;
 
+const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
+// В журнале сертификатов общий вход кассы пишется как «Касса Актау» / «Касса Актобе»; админ/владелец — своим именем.
+const actorOf = (caller: { name: string; admin: boolean }, store: string) => (caller.admin ? `${caller.name} (касса ${CITY[store] ?? store})` : `Касса ${CITY[store] ?? store}`);
+
 // Сертификаты на кассе. GET: ?store=&number= поиск, ?store=&sellers=1 продавцы, ?store=&checks=1 чеки дня.
 // ?store=&status=1&certId= статус запроса руководителю, ?store=&pending=1 запросы, ждущие ответа.
 // POST: {store, action: verify|use|request|cancelRequest|return|sell, …}. Город — только из доступов входа.
@@ -47,19 +51,19 @@ export async function POST(request: Request) {
         result = await cert.verify(store, certId, demandId);
         break;
       case "use":
-        result = await cert.use(store, certId, demandId, caller.name);
+        result = await cert.use(store, certId, demandId, actorOf(caller, store));
         break;
       case "request":
-        result = await cert.requestOwner(store, certId, demandId, caller.name);
+        result = await cert.requestOwner(store, certId, demandId, actorOf(caller, store));
         break;
       case "cancelRequest":
-        result = await cert.cancelRequest(store, certId, caller.name);
+        result = await cert.cancelRequest(store, certId, actorOf(caller, store));
         break;
       case "return":
-        result = await cert.giveBack(store, certId, caller.name);
+        result = await cert.giveBack(store, certId, actorOf(caller, store));
         break;
       case "sell":
-        result = await cert.sell(store, body as unknown as cert.SellInput, caller.name);
+        result = await cert.sell(store, body as unknown as cert.SellInput, actorOf(caller, store));
         break;
       default:
         return NextResponse.json({ error: "Неизвестное действие." }, { status: 400 });
