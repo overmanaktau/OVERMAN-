@@ -1111,6 +1111,18 @@ export async function fetchClientDocs(clientId: string): Promise<{ demands: MsCl
   return { demands, returns };
 }
 
+// Покупатель (контрагент) документа по ссылке из уведомления МойСклад; null — документ удалён или покупателя в нём нет.
+export async function fetchDocAgentId(href: string): Promise<string | null> {
+  const path = href.replace(BASE_URL, "").split("?")[0];
+  try {
+    const doc = (await moyskladFetch(path)) as { agent?: { meta?: { href?: string } } };
+    return idOfHref(doc.agent?.meta?.href) || null;
+  } catch (e) {
+    if (e instanceof Error && e.message.includes(" 404")) return null;
+    throw e;
+  }
+}
+
 export async function fetchClientBasic(clientId: string): Promise<MsClientBasic | null> {
   try {
     const r = (await moyskladFetch(`/entity/counterparty/${clientId}`)) as { id: string; name?: string; phone?: string; tags?: string[]; created?: string; updated?: string; archived?: boolean };
