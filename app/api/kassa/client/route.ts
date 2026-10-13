@@ -20,6 +20,9 @@ export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Неверный клиент." }, { status: 400 });
   try {
+    // клиент чужого города (не из доступов входа) не открывается
+    const { data: own } = await supabaseAdmin.from("kassa_clients").select("city").eq("ms_id", id).maybeSingle();
+    if (!own || !caller.stores.includes(own.city as string)) return NextResponse.json({ error: "Клиент не найден." }, { status: 404 });
     const [client, tx, docs] = await Promise.all([fetchClientBasic(id), fetchClientBonusTransactions(id), fetchClientDocs(id)]);
     if (!client) return NextResponse.json({ error: "Клиент не найден." }, { status: 404 });
     const today = todayAlmaty();

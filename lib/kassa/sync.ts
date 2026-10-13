@@ -1,4 +1,4 @@
-// Ночная загрузка клиентов для экрана кассы: контрагенты с тегом «клиенты», их покупки (отчёт «Контрагенты»)
+// Ночная загрузка клиентов для экрана кассы: контрагенты с тегом «клиенты» (Актау) или «актобе» (Актобе), их покупки (отчёт «Контрагенты»)
 // и бонусы по партиям. Только чтение из МойСклад, запись — в таблицы портала (kassa_clients, kassa_bonus_tx).
 //
 // Бонусные операции МойСклад отдаёт медленно (≈0,3 с на строку), поэтому их копим у себя: первая загрузка идёт
@@ -9,6 +9,9 @@ import { fetchAllCounterpartiesBasic, fetchBonusTransactionsPage, fetchClientSta
 import { computeBonus, type BonusTx } from "@/lib/kassa/bonus";
 
 export const CLIENT_TAG = "клиенты";
+export const AKTOBE_TAG = "актобе";
+// Город клиента — по тегу в МойСклад: «актобе» — Актобе, остальные (тег «клиенты») — Актау.
+export const cityOfTags = (tags: string[]) => (tags.includes(AKTOBE_TAG) ? "point_3" : "point_1");
 const TX_BUDGET_MS = 140_000;
 const PAGE = 100;
 
@@ -65,7 +68,7 @@ async function syncBonusTx(): Promise<{ done: boolean; loaded: number }> {
 export async function syncKassaClients(): Promise<{ clients: number; txLoaded: number; txDone: boolean; withBonus: number; expiredClients: number; expiredTotal: number }> {
   const startedAt = new Date().toISOString();
   const [all, stats] = await Promise.all([fetchAllCounterpartiesBasic(), fetchClientStats()]);
-  const clients = all.filter((c) => !c.archived && c.tags.includes(CLIENT_TAG));
+  const clients = all.filter((c) => !c.archived && (c.tags.includes(CLIENT_TAG) || c.tags.includes(AKTOBE_TAG)));
 
   const tx = await syncBonusTx();
 
@@ -108,6 +111,7 @@ export async function syncKassaClients(): Promise<{ clients: number; txLoaded: n
       phone: c.phone,
       phone_digits: c.phone.replace(/\D/g, ""),
       tags: c.tags,
+      city: cityOfTags(c.tags),
       demands_count: s?.demandsCount ?? 0,
       demands_sum: s?.demandsSum ?? 0,
       first_demand_at: s?.firstDemandAt ?? null,

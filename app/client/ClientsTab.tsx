@@ -37,7 +37,7 @@ type Card = {
   purchases: Purchase[];
 };
 
-export default function ClientsTab() {
+export default function ClientsTab({ store }: { store: string }) {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<ClientRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -47,11 +47,12 @@ export default function ClientsTab() {
   const seq = useRef(0);
 
   const load = useCallback(async (query: string) => {
+    if (!store) return;
     const my = ++seq.current;
     setLoading(true);
     setError(null);
     try {
-      const res = await kassaApi<{ clients: ClientRow[]; total: number }>(`/api/kassa/clients?q=${encodeURIComponent(query)}`);
+      const res = await kassaApi<{ clients: ClientRow[]; total: number }>(`/api/kassa/clients?store=${store}&q=${encodeURIComponent(query)}`);
       if (my !== seq.current) return;
       setRows(res.clients);
       setTotal(res.total);
@@ -60,9 +61,10 @@ export default function ClientsTab() {
     } finally {
       if (my === seq.current) setLoading(false);
     }
-  }, []);
+  }, [store]);
 
   useEffect(() => {
+    setOpenId(null);
     const t = setTimeout(() => load(q), q ? 250 : 0);
     return () => clearTimeout(t);
   }, [q, load]);
