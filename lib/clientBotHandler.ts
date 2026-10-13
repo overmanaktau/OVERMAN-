@@ -19,9 +19,8 @@ const SHARE_MARKUP = { keyboard: [[{ text: "📱 Поделиться номер
 const NO_KEYBOARD = { remove_keyboard: true };
 
 const WELCOME =
-  "Сәлеметсіз бе! Здравствуйте! Это бот <b>OVERMAN</b>.\n\n" +
-  "Нажмите кнопку «Поделиться номером» внизу — так мы узнаем вас и сможем сообщать о ваших бонусах.\n" +
-  "Бонустарыңыз туралы хабарлау үшін төмендегі «Поделиться номером» батырмасын басыңыз.";
+  "Здравствуйте! Это бот <b>OVERMAN</b>.\n\n" +
+  "Нажмите кнопку «Поделиться номером» внизу — так мы узнаем вас и сможем сообщать о ваших бонусах.";
 
 function normalizePhone(raw: string): { phone: string; digits: string } | null {
   let d = raw.replace(/\D/g, "");
@@ -101,7 +100,7 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
     const hello = client?.name ? `, ${escapeHtml(client.name)}` : "";
     await t.send(
       chatId,
-      `Рахмет${hello}! Спасибо${hello}! Теперь мы сможем сообщать вам о ваших бонусах OVERMAN.\n\nОтписаться: /stop`,
+      `Спасибо${hello}! Теперь мы сможем сообщать вам о ваших бонусах OVERMAN.\n\nОтписаться: /stop`,
       NO_KEYBOARD
     );
     return;
@@ -112,7 +111,7 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
     const { data, error } = await supabaseAdmin.from("client_bot_subscribers").select("status, phone").eq("telegram_user_id", userId).maybeSingle();
     if (error) throw error;
     if (data?.status === "active") {
-      await t.send(chatId, "Вы уже подписаны. Отписаться: /stop\nСіз тіркелгенсіз. Бас тарту: /stop", NO_KEYBOARD);
+      await t.send(chatId, "Вы уже подписаны. Отписаться: /stop", NO_KEYBOARD);
       return;
     }
     await t.send(chatId, WELCOME, SHARE_MARKUP);
@@ -124,7 +123,7 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
       .update({ status: "stopped", stopped_at: now, updated_at: now })
       .eq("telegram_user_id", userId);
     if (error) throw error;
-    await t.send(chatId, "Вы отписались, сообщений больше не будет. Вернуться: /start\nБас тарттыңыз. Қайта қосылу: /start", NO_KEYBOARD);
+    await t.send(chatId, "Вы отписались, сообщений больше не будет. Вернуться: /start", NO_KEYBOARD);
   }
   // всё остальное — молчим: у бота для клиентов нет меню и кнопок
 }

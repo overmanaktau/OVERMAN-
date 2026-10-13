@@ -21,8 +21,8 @@ async function handle(request: Request) {
     });
     const commands = await clientBotApi("setMyCommands", {
       commands: [
-        { command: "start", description: "Подписаться / Тіркелу" },
-        { command: "stop", description: "Отписаться / Бас тарту" },
+        { command: "start", description: "Подписаться" },
+        { command: "stop", description: "Отписаться" },
       ],
     });
     const info = await clientBotApi("getWebhookInfo", {});
