@@ -72,7 +72,7 @@ export default function KassaPage() {
           </div>
 
           <nav className="flex rounded-2xl bg-borderSoft p-1.5 ring-1 ring-border">
-            {([["clients", "Клиенты"], ["certs", "Сертификаты"]] as const).map(([k, label]) => (
+            {([["clients", "Бонусы"], ["certs", "Сертификаты"]] as const).map(([k, label]) => (
               <button
                 key={k}
                 type="button"
