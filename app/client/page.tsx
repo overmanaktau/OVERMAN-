@@ -10,7 +10,7 @@ import CertificatesTab from "./CertificatesTab";
 type Tab = "clients" | "certs";
 
 // Экран кассы: два раздела — «Клиенты» и «Сертификаты». Кассир видит свой город (по доступам входа);
-// админу и владельцу, у которых городов несколько, доступен переключатель города (клиенты и сертификаты).
+// админу и владельцу, у которых городов несколько, доступен переключатель города для сертификатов.
 export default function KassaPage() {
   const router = useRouter();
   const { isAdmin, permissions, stores, accessibleStoreCodes, fullName, email } = useAuth();
@@ -62,7 +62,7 @@ export default function KassaPage() {
           </nav>
 
           <div className="flex items-center gap-3 text-right">
-            {codes.length > 1 ? (
+            {codes.length > 1 && tab === "certs" ? (
               <select value={store} onChange={(e) => setStore(e.target.value)} className="rounded-xl border border-border bg-surface px-3 py-2 text-sm font-bold text-ink">
                 {codes.map((c) => (
                   <option key={c} value={c}>{storeName(c)}</option>
@@ -79,7 +79,7 @@ export default function KassaPage() {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 pb-16 pt-8">
-        {tab === "clients" && <ClientsTab store={store || codes[0]} />}
+        {tab === "clients" && <ClientsTab />}
         {tab === "certs" && (canEdit ? <CertificatesTab store={store || codes[0]} /> : <div className="rounded-3xl border border-border bg-surface p-8 text-center text-muted">Для сертификатов нужен доступ на редактирование.</div>)}
       </main>
     </div>
