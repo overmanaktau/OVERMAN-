@@ -223,7 +223,7 @@ function PanelBody({ card }: { card: Card }) {
                 "Первая покупка — бонусы откроются через 14 дней"
               )}
             </div>
-            <div className="mt-1 text-[13px] text-mutedLight">Не больше 50% суммы чека</div>
+            <div className="mt-1 text-[13px] text-mutedLight">Можно оплатить до 100% суммы чека</div>
           </div>
         </div>
         <div className="mt-5 grid grid-cols-3 gap-3 text-center">
