@@ -268,8 +268,10 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   type Cell = string | { content: string; colSpan?: number; rowSpan?: number };
   const diffRows: Cell[][] = [
     [
-      { content: wi[0].month === wi[1].month ? `разница недели ${wi[1].n} от ${wi[0].n}` : `разница недели ${wi[1].n} (${MONTH_SHORT[wi[1].month]}) от ${wi[0].n} (${MONTH_SHORT[wi[0].month]})`, colSpan: 3, rowSpan: 2 },
+      { content: wi[0].month === wi[1].month ? `разница недели ${wi[1].n} от ${wi[0].n}` : `разница недели ${wi[1].n} (${MONTH_SHORT[wi[1].month]}) от ${wi[0].n} (${MONTH_SHORT[wi[0].month]})`, rowSpan: 2 },
       "цифра",
+      t1.planRevenue > 0 ? signed(t2.planRevenue - t1.planRevenue, int) : "—",
+      t1.planTraffic > 0 ? signed(t2.planTraffic - t1.planTraffic, int) : "—",
       signed(t2.revenue - t1.revenue, int),
       signed(t2.visitors - t1.visitors, int),
       signed(t2.receipts - t1.receipts, int),
@@ -280,7 +282,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
       { content: rel(r1.cr, r2.cr), rowSpan: 2 },
       signed(r2.depth - r1.depth, (x) => dec(x, 2)),
     ],
-    ["%", rel(t1.revenue, t2.revenue), rel(t1.visitors, t2.visitors), rel(t1.receipts, t2.receipts), rel(t1.items, t2.items), rel(r1.atv, r2.atv), rel(r1.depth, r2.depth)],
+    ["%", rel(t1.planRevenue, t2.planRevenue), rel(t1.planTraffic, t2.planTraffic), rel(t1.revenue, t2.revenue), rel(t1.visitors, t2.visitors), rel(t1.receipts, t2.receipts), rel(t1.items, t2.items), rel(r1.atv, r2.atv), rel(r1.depth, r2.depth)],
   ];
 
   autoTable(pdf, {
@@ -323,6 +325,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
       if (row.kind === "diff") {
         cell.styles.fillColor = COLOR.total;
         cell.styles.fontStyle = "bold";
+        if (col === 0) cell.styles.fontSize = 6.5;
         return;
       }
       // день недели: факт (оборот, посетители, чеки, товары) — сиреневым, ATV и проценты, CR, глубина — голубым
