@@ -3,6 +3,8 @@
 //  · бонусы сгорают через 4 месяца со дня начисления;
 //  · списания (оплата бонусами, возврат покупки) уменьшают партии, самые старые первыми; списание по
 //    возврату сначала уменьшает партию той покупки, которую вернули.
+//  · всё по факту: если при возврате нужно списать больше бонусов, чем осталось (клиент уже потратил заработанные на этот товар),
+//    разница не теряется — баланс уходит в минус (долг), и следующие начисления сначала гасят его.
 // Максимум оплаты бонусами (100% чека) контролирует сама бонусная программа МойСклад.
 
 export const ACTIVATION_DAYS = 14;
@@ -30,11 +32,12 @@ export type Lot = {
 };
 
 export type BonusSummary = {
-  balance: number; // всё, что есть у клиента (без сгоревших)
+  balance: number; // всё, что есть у клиента (без сгоревших); может быть отрицательным, если по возврату списано больше, чем было
   available: number; // можно списать сейчас
   waiting: number; // ждёт активации
   nextActivation: string | null; // когда откроется ближайшая партия
   expired: number; // срок вышел, ещё не списано
+  debt: number; // сколько списано по возвратам сверх остатка партий (долг клиента); balance уже учитывает его
   lots: Lot[];
 };
 
@@ -75,6 +78,7 @@ export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, 
       };
     });
 
+  let debt = 0;
   for (const t of done.filter((x) => x.kind === "spend")) {
     let left = t.value;
     if (t.parentType === "retailsalesreturn") {
@@ -92,6 +96,8 @@ export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, 
       lot.remaining -= take;
       left -= take;
     }
+    // остаток списания, которому не хватило партий (бонусы уже потрачены, а товар вернули) — это долг, а не потеря
+    if (left > 0) debt += left;
   }
 
   let balance = 0;
@@ -115,5 +121,17 @@ export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, 
       if (!nextActivation || lot.activatesOn < nextActivation) nextActivation = lot.activatesOn;
     }
   }
-  return { balance, available, waiting, nextActivation, expired, lots };
+  // долг гасится сначала из доступных бонусов, потом из ждущих; что не покрыто — отрицательный баланс
+  let rest = debt;
+  const fromAvailable = Math.min(available, rest);
+  available -= fromAvailable;
+  balance -= fromAvailable;
+  rest -= fromAvailable;
+  const fromWaiting = Math.min(waiting, rest);
+  waiting -= fromWaiting;
+  balance -= fromWaiting;
+  rest -= fromWaiting;
+  if (waiting <= 0) nextActivation = null;
+  balance -= rest;
+  return { balance, available, waiting, nextActivation, expired, debt, lots };
 }

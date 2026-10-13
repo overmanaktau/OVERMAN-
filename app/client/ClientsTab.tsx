@@ -117,7 +117,7 @@ export default function ClientsTab() {
             </div>
             <div className="min-w-[116px] rounded-xl bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] px-3.5 py-2 text-right">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-accent dark:text-emerald-300">Бонусы</div>
-              <div className="text-xl font-extrabold tabular-nums text-ink">{tg(c.bonus_balance)}</div>
+              <div className={`text-xl font-extrabold tabular-nums ${c.bonus_balance < 0 ? "text-red-600" : "text-ink"}`}>{tg(c.bonus_balance)}</div>
             </div>
           </button>
         ))}
