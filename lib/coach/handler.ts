@@ -8,6 +8,7 @@ import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, set
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfCancel, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
 import { TEST_EMPLOYEE_ID, TEST_LABEL, expireTestUser, isTestExpired } from "@/lib/coach/testmode";
 import { handleVerifyCallback } from "@/lib/verify/botActions";
+import { handleEditRequestCallback } from "@/lib/editRequests";
 import { clearCertDraft, handleCertAdminCallback, handleCertCallback, handleCertOwnerCallback, handleCertText, sendCertAdminMenu, sendConsultantMenu } from "@/lib/coach/certificates";
 import {
   AUTO_ONLY_TEXT,
@@ -387,6 +388,14 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     // Решения по сертификатам (запросы на подтверждение, возвраты по чекам) — только главный владелец.
     if (!existing || existing.status !== "approved" || !existing.is_protected) return;
     await handleCertOwnerCallback(cb.data, t, chatId, existing.employee_name, clearCurrent);
+    return;
+  }
+
+  if (cb.data.startsWith("er:")) {
+    // Запросы на правку внесённых данных (одобрить / отклонить) — только главный владелец.
+    if (!existing || existing.status !== "approved" || !existing.is_protected) return;
+    await clearCurrent();
+    await t.send(chatId, await handleEditRequestCallback(cb.data, existing.employee_name));
     return;
   }
 
