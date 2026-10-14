@@ -167,6 +167,30 @@ export default function SalesPage() {
   // нет смены, такой день в его трафик не входит), как и в телеграм-отчётах.
   const [trafficByStore, setTrafficByStore] = useState<Map<string, number>>(new Map());
   const [showGross, setShowGross] = useState(false);
+  // Годовой LTV — не зависит от выбранного периода: за последние 365 дней по выбранным городам (считается ночью, таблица client_ltv_year)
+  const [ltvYear, setLtvYear] = useState<{ clients: number; purchases: number; to: string } | null>(null);
+  const [ltvLoading, setLtvLoading] = useState(true);
+  const ltvKey = selectedStores.join(",");
+  useEffect(() => {
+    let cancelled = false;
+    setLtvLoading(true);
+    supabase
+      .from("client_ltv_year")
+      .select("store, clients, purchases, period_to")
+      .in("store", selectedStores)
+      .then(({ data, error: e }) => {
+        if (cancelled) return;
+        const rows = (data ?? []) as { store: string; clients: number; purchases: number; period_to: string }[];
+        // клиент, купивший в двух городах, считается в каждом из них — в общем итоге это отдельные клиенты городов
+        setLtvYear(e || rows.length === 0 ? null : { clients: rows.reduce((a, r) => a + r.clients, 0), purchases: rows.reduce((a, r) => a + r.purchases, 0), to: rows.map((r) => r.period_to).sort().pop() ?? "" });
+        setLtvLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ltvKey]);
+  const ltvValue = ltvYear && ltvYear.clients > 0 ? ltvYear.purchases / ltvYear.clients : null;
   // Lets you tick a register out of "Продажи по кассам" to isolate what the
   // rest do without it (or tick everything else off to isolate just one) —
   // client-side only, affects nothing but this table's own totals.
@@ -776,6 +800,7 @@ export default function SalesPage() {
                 { label: "Оборот", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: avg(totalRevenue, totalReceipts) },
+                ...(ltvValue !== null ? [{ label: "Годовой LTV", value: ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), note: "покупок на клиента за 365 дней" }] : []),
                 { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
               ],
               sections,
@@ -786,6 +811,7 @@ export default function SalesPage() {
 
       <SalesPlanWindow stores={selectedStores} refreshKey={planVersion} range={planRange} />
 
+      <div className="flex items-stretch gap-4 flex-wrap">
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-1.5 w-fit">
         <div className="text-xs text-muted">Конверсия (чек / посетитель)</div>
         <div className="font-serif text-[26px] font-semibold num">
@@ -798,6 +824,21 @@ export default function SalesPage() {
               ? `${totalReceipts.toLocaleString("ru-RU")} чек из ${totalTraffic.toLocaleString("ru-RU")} посетителей`
               : "нет данных по трафику за этот период"}
         </div>
+      </div>
+
+      <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-1.5 w-fit" title="Не зависит от выбранного периода: всегда последние 365 дней">
+        <div className="text-xs text-muted">Годовой LTV (покупок на клиента)</div>
+        <div className="font-serif text-[26px] font-semibold num">
+          {ltvLoading ? "…" : ltvValue !== null ? ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
+        </div>
+        <div className="text-xs text-mutedLight">
+          {ltvLoading
+            ? "Загрузка…"
+            : ltvYear && ltvValue !== null
+              ? `${ltvYear.purchases.toLocaleString("ru-RU")} чеков у ${ltvYear.clients.toLocaleString("ru-RU")} клиентов за 365 дней · повторных ${(ltvValue - 1).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : "данные ещё не посчитаны"}
+        </div>
+      </div>
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">

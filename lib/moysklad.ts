@@ -1172,3 +1172,26 @@ export async function fetchReturnDemandMap(fromIso: string): Promise<Map<string,
   }
   return out;
 }
+
+// «Розничный покупатель» — общий покупатель для чеков без регистрации клиента (в МойСклад их может быть несколько записей с таким именем).
+export async function fetchRetailBuyerIds(): Promise<Set<string>> {
+  const page = await moyskladFetch("/entity/counterparty", { filter: "name=Розничный покупатель", limit: "100" });
+  return new Set(((page.rows ?? []) as { id: string }[]).map((r) => r.id));
+}
+
+// Чеки за несколько дней подряд: кто покупатель (id), на какой кассе и когда. Без expand — страницами по 1000, как fetchRetailDemandSummariesForDate.
+export type ClientCheck = { agentId: string; retailStoreId: string; moment: string };
+
+export async function fetchClientChecksForRange(fromDate: string, toDate: string): Promise<ClientCheck[]> {
+  const filter = `moment>=${dayWindow(fromDate).from};moment<${dayWindow(toDate).to}`;
+  const limit = 1000;
+  const all: ClientCheck[] = [];
+  type Raw = { moment: string; agent?: { meta?: { href?: string } } | null; retailStore?: { meta?: { href?: string } } | null };
+  for (let offset = 0; ; offset += limit) {
+    const page = await moyskladFetch("/entity/retaildemand", { filter, limit: String(limit), offset: String(offset), order: "moment,asc" });
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) all.push({ agentId: idOfHref(r.agent?.meta?.href), retailStoreId: idOfHref(r.retailStore?.meta?.href), moment: r.moment });
+    if (rows.length < limit) break;
+  }
+  return all;
+}
