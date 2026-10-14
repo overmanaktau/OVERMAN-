@@ -1,8 +1,9 @@
 // Годовой LTV по городам: сколько раз в среднем покупает у нас один клиент за последние 365 дней.
-// Клиент — покупатель в чеке, кроме «Розничного покупателя» (чеки без регистрации в LTV не входят). Считается по чекам МойСклад
+// Клиент — покупатель в чеке, кроме «Розничного покупателя» (чеки без регистрации в LTV не входят). Чек, который вернули полностью
+// (сумма возвратов по нему не меньше суммы чека), не считается покупкой — это не повторная покупка; частичный возврат чек оставляет. Считается по чекам МойСклад
 // и записывается в client_ltv_year (читает страница «Продажа»); пересчёт — каждую ночь, от выбранного на сайте периода не зависит.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { fetchClientChecksForRange, fetchRetailBuyerIds } from "@/lib/moysklad";
+import { fetchClientChecksForRange, fetchRetailBuyerIds, fetchReturnedSumsByDemand } from "@/lib/moysklad";
 import { registerCounts, REGISTER_STORE } from "@/lib/registers";
 import { todayAlmaty } from "@/lib/kassa/sync";
 
@@ -13,16 +14,21 @@ function addDays(date: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
-export async function refreshYearLtv(): Promise<{ from: string; to: string; checks: number; cities: Record<string, { clients: number; purchases: number }> }> {
+export async function refreshYearLtv(): Promise<{ from: string; to: string; checks: number; fullyReturned: number; cities: Record<string, { clients: number; purchases: number }> }> {
   const to = todayAlmaty();
   const from = addDays(to, -(LTV_DAYS - 1));
-  const [checks, retailIds] = await Promise.all([fetchClientChecksForRange(from, to), fetchRetailBuyerIds()]);
+  const [checks, retailIds, returned] = await Promise.all([fetchClientChecksForRange(from, to), fetchRetailBuyerIds(), fetchReturnedSumsByDemand(from, to)]);
 
   const byCity = new Map<string, { clients: Set<string>; purchases: number }>();
+  let fullyReturned = 0;
   for (const c of checks) {
     const city = REGISTER_STORE[c.retailStoreId];
     if (!city || !registerCounts(c.retailStoreId, c.moment.slice(0, 10))) continue;
     if (!c.agentId || retailIds.has(c.agentId)) continue;
+    if (c.sum > 0 && (returned.get(c.id) ?? 0) >= c.sum - 1) {
+      fullyReturned++;
+      continue;
+    }
     const agg = byCity.get(city) ?? { clients: new Set<string>(), purchases: 0 };
     agg.clients.add(c.agentId);
     agg.purchases++;
@@ -38,5 +44,5 @@ export async function refreshYearLtv(): Promise<{ from: string; to: string; chec
     if (error) throw error;
     cities[city] = { clients: row.clients, purchases: row.purchases };
   }
-  return { from, to, checks: checks.length, cities };
+  return { from, to, checks: checks.length, fullyReturned, cities };
 }

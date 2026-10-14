@@ -1179,19 +1179,42 @@ export async function fetchRetailBuyerIds(): Promise<Set<string>> {
   return new Set(((page.rows ?? []) as { id: string }[]).map((r) => r.id));
 }
 
-// Чеки за несколько дней подряд: кто покупатель (id), на какой кассе и когда. Без expand — страницами по 1000, как fetchRetailDemandSummariesForDate.
-export type ClientCheck = { agentId: string; retailStoreId: string; moment: string };
+// Чеки за несколько дней подряд: id чека, покупатель (id), касса, момент и сумма (копейки). Без expand — страницами по 1000: первая сообщает общее
+// число, остальные берём по 3 параллельно (больше трёх МойСклад не любит — 429).
+export type ClientCheck = { id: string; agentId: string; retailStoreId: string; moment: string; sum: number };
+
+async function fetchAllLight<Raw>(path: string, filter: string, map: (r: Raw) => void): Promise<void> {
+  const limit = 1000;
+  const page = (offset: number) => moyskladFetch(path, { filter, limit: String(limit), offset: String(offset), order: "moment,asc" });
+  const first = await page(0);
+  for (const r of (first.rows ?? []) as Raw[]) map(r);
+  const size: number = first.meta?.size ?? (first.rows ?? []).length;
+  const offsets: number[] = [];
+  for (let o = limit; o < size; o += limit) offsets.push(o);
+  for (let i = 0; i < offsets.length; i += 3) {
+    const pages = await Promise.all(offsets.slice(i, i + 3).map(page));
+    for (const p of pages) for (const r of (p.rows ?? []) as Raw[]) map(r);
+  }
+}
 
 export async function fetchClientChecksForRange(fromDate: string, toDate: string): Promise<ClientCheck[]> {
   const filter = `moment>=${dayWindow(fromDate).from};moment<${dayWindow(toDate).to}`;
-  const limit = 1000;
+  type Raw = { id: string; sum?: number; moment: string; agent?: { meta?: { href?: string } } | null; retailStore?: { meta?: { href?: string } } | null };
   const all: ClientCheck[] = [];
-  type Raw = { moment: string; agent?: { meta?: { href?: string } } | null; retailStore?: { meta?: { href?: string } } | null };
-  for (let offset = 0; ; offset += limit) {
-    const page = await moyskladFetch("/entity/retaildemand", { filter, limit: String(limit), offset: String(offset), order: "moment,asc" });
-    const rows: Raw[] = page.rows ?? [];
-    for (const r of rows) all.push({ agentId: idOfHref(r.agent?.meta?.href), retailStoreId: idOfHref(r.retailStore?.meta?.href), moment: r.moment });
-    if (rows.length < limit) break;
-  }
+  await fetchAllLight<Raw>("/entity/retaildemand", filter, (r) =>
+    all.push({ id: r.id, agentId: idOfHref(r.agent?.meta?.href), retailStoreId: idOfHref(r.retailStore?.meta?.href), moment: r.moment, sum: r.sum ?? 0 })
+  );
   return all;
+}
+
+// Сколько вернули по каждому чеку за период (копейки, id чека → сумма возвратов). Возврат ссылается на чек полем demand.
+export async function fetchReturnedSumsByDemand(fromDate: string, toDate: string): Promise<Map<string, number>> {
+  const filter = `moment>=${dayWindow(fromDate).from};moment<${dayWindow(toDate).to}`;
+  type Raw = { sum?: number; demand?: { meta?: { href?: string } } | null };
+  const out = new Map<string, number>();
+  await fetchAllLight<Raw>("/entity/retailsalesreturn", filter, (r) => {
+    const id = idOfHref(r.demand?.meta?.href);
+    if (id) out.set(id, (out.get(id) ?? 0) + (r.sum ?? 0));
+  });
+  return out;
 }
