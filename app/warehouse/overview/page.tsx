@@ -422,7 +422,7 @@ export default function WarehouseOverviewPage() {
   const prevCategoriesOn = prevData ? prevData.cat.filter((r) => !excludedCategories.has(r.name)) : null;
   const prevSum = prevData ? total(prevCategoriesOn && prevCategoriesOn.length > 0 ? prevCategoriesOn : prevData.sto) : null;
   const prevSumM = prevSum ? metrics(prevSum) : null;
-  const storeLabels = stores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? (c === "frozen" ? "Заморозка" : c));
+  const storeLabels = stores.filter((c) => c !== "saya_park").map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? (c === "frozen" ? "Заморозка" : c));
 
   function toggleStore(code: string) {
     setStoreFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
@@ -440,17 +440,8 @@ export default function WarehouseOverviewPage() {
     return [money(r.stockEnd), money(r.revenue), money(r.cogs), money(m.profit), pctText(m.margin), pctText(m.turnover)];
   };
   const tableRow = (r: Row): (string | number)[] => [r.name, ...metricCells(r)];
-  // Разница в PDF: цифра и % (как в недельном отчёте). У денежных показателей цифра — в тенге, у «Валовый %» и «Оборачиваемость» — в п.п.
-  const signedMoney = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
-  const signedPp = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} п.п.`;
-  const diffCells = (r: Row, pr: Row | null | undefined): string[] => {
-    if (!pr) return ["—", "—", "—", "—", "—", "—"];
-    const m = metrics(r);
-    const pm = metrics(pr);
-    const money2 = (cur: number, old: number) => `${signedMoney(cur - old)} (${deltaText(deltaPct(cur, old))})`;
-    const pp = (cur: number | null, old: number | null) => (cur === null || old === null ? "—" : `${signedPp(cur - old)} (${deltaText(deltaPct(cur, old))})`);
-    return [money2(r.stockEnd, pr.stockEnd), money2(r.revenue, pr.revenue), money2(r.cogs, pr.cogs), money2(m.profit, pm.profit), pp(m.margin, pm.margin), pp(m.turnover, pm.turnover)];
-  };
+  const plain2 = (n: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const sign = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "");
   const excelRow = (r: Row, pr?: Row | null): (string | number)[] => {
     const m = metrics(r);
     const base: (string | number)[] = [r.name, Math.round(r.stockEnd * 100) / 100, Math.round(r.revenue * 100) / 100, Math.round(r.cogs * 100) / 100, Math.round(m.profit * 100) / 100, m.margin === null ? "" : Math.round(m.margin * 10) / 10, m.turnover === null ? "" : Math.round(m.turnover * 10) / 10];
@@ -483,37 +474,55 @@ export default function WarehouseOverviewPage() {
     ...(diffOn ? ["Остаток, разница %", "Продано, разница %", "Себестоимость, разница %", "Валовая прибыль, разница %", "Валовый, разница %", "Оборачиваемость, разница %"] : []),
   ];
 
-  // Блоки «Сравнение периодов» для PDF (по галочке в окне «Что скачать», по умолчанию выключены): предыдущий период, выбранный и разница — как в недельном отчёте.
+  // Блоки «Сравнение периодов» для PDF (по галочке в окне «Что скачать», по умолчанию выключены). Как в недельном отчёте: у каждого показателя три колонки —
+  // предыдущий период, выбранный и разница (цифра и % — двумя строками). Показатели: остаток, продано, валовая прибыль, оборачиваемость.
   const comparisonSections = (d: PrevSet | null): PdfSection[] => {
     if (!prevRange || !d) return [];
-    const headers = (first: string) => [first, "Остаток", "Продано", "Себестоимость", "Валовая прибыль", "Валовый %", "Оборачиваемость"];
-    const widths = [2.4, 1.9, 1.9, 1.9, 1.9, 1.5, 1.5];
+    const subs = ["Пред.", "Выбр.", "Разница"];
+    const groups = ["Остаток, ₸", "Продано, ₸", "Валовая прибыль, ₸", "Оборачиваемость, %"];
+    const widths = [2.1, 1.45, 1.45, 1.5, 1.45, 1.45, 1.5, 1.45, 1.45, 1.5, 0.9, 0.9, 1.25];
+    // показатели строки: остаток, продано, валовая прибыль — деньги; оборачиваемость — %
+    const vals = (r: Row): (number | null)[] => [r.stockEnd, r.revenue, r.revenue - r.cogs, metrics(r).turnover];
+    const cells = (r: Row, pr: Row | null | undefined): string[] => {
+      const cur = vals(r);
+      const old = pr ? vals(pr) : null;
+      const out: string[] = [];
+      cur.forEach((c, i) => {
+        const isPct = i === 3;
+        const fmt = (n: number | null) => (n === null ? "—" : isPct ? pctText(n) : plain2(n));
+        const o = old ? old[i] : null;
+        let diff = "—";
+        if (c !== null && o !== null) {
+          const abs = c - o;
+          // знак — по округлённому значению, чтобы «+0,0» не появлялось
+          const rounded = isPct ? Math.round(abs * 10) / 10 : Math.round(abs * 100) / 100;
+          const absText = isPct ? `${sign(rounded)}${Math.abs(rounded).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} п.п.` : `${sign(rounded)}${plain2(Math.abs(rounded))}`;
+          diff = `${absText}
+${deltaText(deltaPct(c, o))}`;
+        }
+        out.push(fmt(o), fmt(c), diff);
+      });
+      return out;
+    };
     return blocks.map((b) => {
       const pm = prevOf(b, d);
       const cur = [...b.rows].sort((x, y) => y.stockEnd - x.stockEnd);
       const prevRows = cur.map((r) => pm.get(r.name)).filter((r): r is Row => !!r);
-      const curTotal = total(b.rows);
-      const prevTotal = totalPrev(b, d) ?? total(prevRows);
-      const rows: (string | number)[][] = [];
-      const kinds: PdfRowKind[] = [];
-      const push = (kind: PdfRowKind, row: (string | number)[]) => {
-        rows.push(row);
-        kinds.push(kind);
+      const rows: (string | number)[][] = cur.map((r) => [r.name, ...cells(r, pm.get(r.name))]);
+      rows.push(["Итого", ...cells(total(b.rows), totalPrev(b, d) ?? total(prevRows))]);
+      return {
+        title: `${b.title} — сравнение периодов`,
+        hint: "По каждому показателю: предыдущий период, выбранный и разница (цифра и %), как в недельном отчёте.",
+        note: `Пред. — ${prevRange.label}; выбр. — ${range.label}. Разница — выбранный период минус предыдущий; у оборачиваемости — в процентных пунктах и в %.`,
+        optional: true,
+        headers: [b.nameHeader, ...groups.flatMap((g) => subs.map((sName) => `${g.split(",")[0]} · ${sName.toLowerCase()}`))],
+        headGroups: [{ label: b.nameHeader, span: 1 }, ...groups.map((g) => ({ label: g, span: 3, subs }))],
+        rows,
+        rowKinds: rows.map((_, i) => (i === rows.length - 1 ? ("total" as const) : ("normal" as const))),
+        widths,
+        fontSize: 7.2,
+        signColors: true,
       };
-      const blank = ["", "", "", "", "", ""];
-      push("group", [`Предыдущий период · ${prevRange.label}`, ...blank]);
-      for (const r of cur) {
-        const pr = pm.get(r.name);
-        push("normal", pr ? tableRow(pr) : [r.name, "—", "—", "—", "—", "—", "—"]);
-      }
-      push("total", ["Итого", ...metricCells(prevTotal)]);
-      push("group", [`Выбранный период · ${range.label}`, ...blank]);
-      for (const r of cur) push("normal", tableRow(r));
-      push("total", ["Итого", ...metricCells(curTotal)]);
-      push("group", ["Разница выбранного периода от предыдущего (цифра и %)", ...blank]);
-      for (const r of cur) push("normal", [r.name, ...diffCells(r, pm.get(r.name))]);
-      push("total", ["Итого", ...diffCells(curTotal, prevTotal)]);
-      return { title: `${b.title} — сравнение периодов`, hint: "Предыдущий период, выбранный и разница между ними — цифра и %, как в недельном отчёте.", optional: true, headers: headers(b.nameHeader), rows, rowKinds: kinds, widths };
     });
   };
 

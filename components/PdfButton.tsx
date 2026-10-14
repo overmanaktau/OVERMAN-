@@ -121,10 +121,24 @@ function applyCfg(sec: PdfSection, cfg: SecCfg, withNotes: boolean, show: Record
     rowsIdx.push(i);
   });
   const pickCols = <T,>(arr: T[] | undefined) => (arr ? arr.filter((_, i) => keepCols[i]) : undefined);
+  // двухэтажная шапка: после снятия колонок пересобираем группы (пустые убираем, подписи оставшихся колонок сохраняем)
+  let headGroups = sec.headGroups;
+  if (headGroups) {
+    let pos = 0;
+    const next: NonNullable<PdfSection["headGroups"]> = [];
+    for (const g of headGroups) {
+      const kept: number[] = [];
+      for (let k = 0; k < g.span; k++) if (keepCols[pos + k]) kept.push(k);
+      if (kept.length > 0) next.push({ label: g.label, span: kept.length, subs: g.subs ? kept.map((k) => g.subs![k]) : undefined });
+      pos += g.span;
+    }
+    headGroups = next;
+  }
   return {
     ...sec,
     note: withNotes ? sec.note : undefined,
     headers: sec.headers.filter((_, i) => keepCols[i]),
+    headGroups,
     rows: rowsIdx.map((i) => sec.rows[i].filter((_, c) => keepCols[c])),
     align: pickCols(sec.align),
     widths: pickCols(sec.widths),

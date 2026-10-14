@@ -19,6 +19,10 @@ export type PdfSection = {
   align?: ("left" | "right" | "center")[]; // по колонкам; по умолчанию первая слева, остальные справа
   widths?: number[]; // относительные ширины колонок (необязательно)
   rowKinds?: PdfRowKind[]; // оформление строк: подгруппа, итог
+  // двухэтажная шапка: группа без subs занимает оба этажа (обычно первая колонка), группа с subs — объединяет span колонок и показывает под собой подписи subs
+  headGroups?: { label: string; span: number; subs?: string[] }[];
+  fontSize?: number; // размер текста таблицы (по умолчанию 8.4) — для широких таблиц
+  signColors?: boolean; // ячейки, начинающиеся с «+» / «−», красятся зелёным / красным (разница к прошлому периоду)
   indent?: number[]; // отступ первой колонки (уровень вложенности) по строкам
   // — для окна «Что скачать» (PdfButton): —
   optional?: boolean; // по умолчанию не отмечена (например, краткая сводка рядом с подробной)
@@ -207,18 +211,29 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
       if (section.widths && weightSum > 0) columnStyles[i].cellWidth = (contentW * section.widths[i]) / weightSum;
     });
 
+    // шапка: обычная или двухэтажная (группы колонок)
+    const hg = section.headGroups;
+    let head: (string | { content: string; colSpan?: number; rowSpan?: number })[][] = [section.headers.map(clean)];
+    if (hg && hg.length > 0) {
+      head = [
+        hg.map((g) => (g.subs ? { content: clean(g.label), colSpan: g.span } : { content: clean(g.label), rowSpan: 2 })),
+        hg.flatMap((g) => (g.subs ? g.subs.map(clean) : [])),
+      ];
+    }
+    const bodyFont = section.fontSize ?? 8.4;
+    const tightPad = section.fontSize !== undefined && section.fontSize < 8;
     autoTable(pdf, {
       startY: y,
       margin: { top: contTop, left: M, right: M, bottom: 16 },
-      head: [section.headers.map(clean)],
+      head,
       body: section.rows.map((r) => r.map(clean)),
       theme: "plain",
       tableWidth: contentW,
       styles: {
         font: "NotoSans",
-        fontSize: 8.4,
+        fontSize: bodyFont,
         textColor: C.ink,
-        cellPadding: { top: 2.1, bottom: 2.1, left: 2.6, right: 2.6 },
+        cellPadding: { top: 2.1, bottom: 2.1, left: tightPad ? 1.6 : 2.6, right: tightPad ? 1.6 : 2.6 },
         lineColor: C.soft,
         lineWidth: 0,
         overflow: "linebreak",
@@ -235,7 +250,14 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
       columnStyles,
       didParseCell: (data) => {
         if (data.section === "head") {
-          data.cell.styles.halign = align[data.column.index];
+          data.cell.styles.halign = hg && data.cell.colSpan > 1 ? "center" : align[data.column.index];
+          if (hg && data.row.index === 1) {
+            // второй этаж шапки — светлее, чтобы группы колонок читались
+            data.cell.styles.fillColor = C.accentSoft;
+            data.cell.styles.textColor = C.accent;
+            data.cell.styles.fontSize = 7;
+          }
+          if (hg && data.row.index === 0) data.cell.styles.valign = "middle";
           return;
         }
         const kind = section.rowKinds?.[data.row.index] ?? "normal";
@@ -249,6 +271,11 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
         } else if (kind === "sub") {
           data.cell.styles.textColor = C.muted;
           data.cell.styles.fontSize = 8;
+        }
+        if (section.signColors && (kind === "normal" || kind === "total")) {
+          const first = String(data.cell.raw ?? "").trim();
+          if (first.startsWith("+")) data.cell.styles.textColor = [47, 107, 79];
+          else if (first.startsWith("−") || first.startsWith("-")) data.cell.styles.textColor = [163, 75, 54];
         }
         const indent = section.indent?.[data.row.index] ?? 0;
         if (data.column.index === 0 && indent > 0) {
