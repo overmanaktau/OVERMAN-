@@ -1173,10 +1173,15 @@ export async function fetchReturnDemandMap(fromIso: string): Promise<Map<string,
   return out;
 }
 
-// «Розничный покупатель» — общий покупатель для чеков без регистрации клиента (в МойСклад их может быть несколько записей с таким именем).
+// «Розничный покупатель» — общий покупатель для чеков без регистрации клиента. В МойСклад эта запись в архиве, а обычный список
+// контрагентов архивные не отдаёт — поэтому ищем и среди активных, и среди архивных (записей с таким именем может быть несколько).
 export async function fetchRetailBuyerIds(): Promise<Set<string>> {
-  const page = await moyskladFetch("/entity/counterparty", { filter: "name=Розничный покупатель", limit: "100" });
-  return new Set(((page.rows ?? []) as { id: string }[]).map((r) => r.id));
+  const ids = new Set<string>();
+  for (const archived of ["false", "true"]) {
+    const page = await moyskladFetch("/entity/counterparty", { filter: `name=Розничный покупатель;archived=${archived}`, limit: "100" });
+    for (const r of (page.rows ?? []) as { id: string }[]) ids.add(r.id);
+  }
+  return ids;
 }
 
 // Чеки за несколько дней подряд: id чека, покупатель (id), касса, момент и сумма (копейки). Без expand — страницами по 1000: первая сообщает общее
