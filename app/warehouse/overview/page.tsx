@@ -124,7 +124,7 @@ const COLS: { key: SortKey; label: string }[] = [
   { key: "revenue", label: "Продано" },
   { key: "cogs", label: "Себестоимость" },
   { key: "profit", label: "Валовая прибыль" },
-  { key: "margin", label: "Маржа" },
+  { key: "margin", label: "Валовый %" },
   { key: "turnover", label: "Оборачиваемость" },
 ];
 const GRID = "grid-cols-[minmax(150px,1.6fr)_repeat(8,minmax(104px,1fr))]";
@@ -244,7 +244,7 @@ export default function WarehouseOverviewPage() {
   const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes).filter((c) => !stocked || stocked.has(c));
   const frozenAvailable = !stocked || stocked.has("frozen");
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
-  const [frozen, setFrozen] = useState(true); // заморозка — отдельная корзина остатков, в остатки входит
+  const [frozen, setFrozen] = useState(false); // заморозка — отдельная корзина остатков, по умолчанию выключена
   const baseStores = storeFilter.length > 0 ? storeFilter : accessibleWarehouseCodes;
   const stores = useMemo(() => (frozen && frozenAvailable ? [...baseStores, "frozen"] : baseStores), [baseStores, frozen, frozenAvailable]);
   const storesKey = stores.join(",");
@@ -345,7 +345,7 @@ export default function WarehouseOverviewPage() {
     { title: "По поставщикам", nameHeader: "Поставщик", rows: bySupplier },
     { title: "По складам", nameHeader: "Склад", rows: byStore },
   ];
-  const excelHeaders = (first: string) => [first, "Остаток (себестоимость)", "Средний остаток", "Продано (выручка)", "Себестоимость продаж", "Валовая прибыль", "Маржа, %", "Оборачиваемость, %"];
+  const excelHeaders = (first: string) => [first, "Остаток (себестоимость)", "Средний остаток", "Продано (выручка)", "Себестоимость продаж", "Валовая прибыль", "Валовый, %", "Оборачиваемость, %"];
 
   function exportXls() {
     const rows: (string | number)[][] = [];
@@ -462,7 +462,7 @@ export default function WarehouseOverviewPage() {
                 const body = [...sorted.map(tableRow), tableRow(total(b.rows))];
                 return {
                   title: b.title,
-                  headers: [b.nameHeader, "Остаток", "Ср. остаток", "Продано", "Себестоимость", "Валовая прибыль", "Маржа", "Оборачиваемость"],
+                  headers: [b.nameHeader, "Остаток", "Ср. остаток", "Продано", "Себестоимость", "Валовая прибыль", "Валовый %", "Оборачиваемость"],
                   rows: body,
                   rowKinds: body.map((_, i) => (i === body.length - 1 ? "total" : "normal")),
                   widths: [2.4, 1.6, 1.6, 1.6, 1.6, 1.6, 0.9, 1.3],
@@ -481,7 +481,7 @@ export default function WarehouseOverviewPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {kpi("Остаток (себестоимость)", money(sum.stockEnd), "по факту на конец периода")}
         {kpi("Продано", money(sum.revenue), `себестоимость ${money(sum.cogs)}`)}
-        {kpi("Валовая прибыль", money(sumM.profit), sumM.margin === null ? undefined : `маржа ${pctText(sumM.margin)}`)}
+        {kpi("Валовая прибыль", money(sumM.profit), sumM.margin === null ? undefined : `валовый ${pctText(sumM.margin)}`)}
         {kpi("Оборачиваемость", pctText(sumM.turnover), `средний остаток ${money(sum.stockAvg)}`)}
       </div>
 

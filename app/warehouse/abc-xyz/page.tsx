@@ -823,7 +823,7 @@ export default function AbcXyzPage() {
                     title: "Позиции",
                     hint: filtered.length <= ROWS_WITH_SIZES_BY_DEFAULT ? "Без размеров (подробная версия — ниже)." : undefined,
                     optional: filtered.length <= ROWS_WITH_SIZES_BY_DEFAULT,
-                    headers: ["Артикул", "Категория", "ABC", "XYZ", "Оборот", "Штук", "Дней", "Маржа %", "Решение"],
+                    headers: ["Артикул", "Категория", "ABC", "XYZ", "Оборот", "Штук", "Дней", "Валовый %", "Решение"],
                     align: ["left", "left", "center", "center", "right", "right", "right", "right", "left"],
                     widths: [2.6, 1.5, 0.5, 0.5, 1.4, 0.8, 0.6, 0.9, 3.2],
                     rows: filtered.map((r) => [
@@ -846,7 +846,7 @@ export default function AbcXyzPage() {
                     optional: filtered.length > ROWS_WITH_SIZES_BY_DEFAULT,
                     units: filtered.map((r) => r.name),
                     levelLabels: ["Только артикулы", "+ размеры"],
-                    headers: ["Артикул / размер", "Категория", "ABC", "XYZ", "Оборот", "Штук", "Дней", "Маржа %", "Решение"],
+                    headers: ["Артикул / размер", "Категория", "ABC", "XYZ", "Оборот", "Штук", "Дней", "Валовый %", "Решение"],
                     align: ["left", "left", "center", "center", "right", "right", "right", "right", "left"],
                     widths: [2.6, 1.5, 0.5, 0.5, 1.4, 0.8, 0.6, 0.9, 3.2],
                     rows: [],
@@ -937,7 +937,7 @@ export default function AbcXyzPage() {
                         <span className="num">{r.daysWithSales}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-muted">Маржа %</span>
+                        <span className="text-muted">Валовый %</span>
                         <span className="num">{marginPct.toFixed(0)}%</span>
                       </div>
                       <div className="text-mutedLight text-[12.5px] mt-1">{DECISIONS[`${r.abc}${r.xyz}`]}</div>
@@ -960,7 +960,7 @@ export default function AbcXyzPage() {
                   <div>Оборот</div>
                   <div>Штук</div>
                   <div>Дней</div>
-                  <div>Маржа %</div>
+                  <div>Валовый %</div>
                   <div>Решение</div>
                 </div>
                 {filtered.map((r) => {

@@ -13,7 +13,7 @@ import { aggregateSales } from "@/lib/salesAggregate";
 import { REGISTER_STORE, SAYA_PARK_REGISTER_ID, SAYA_PARK_RETIRED_FROM } from "@/lib/registers";
 import { fetchTrafficUntilHour } from "@/lib/trafficCounters";
 
-// compact: укороченный формат — без маржи, Instagram, публикаций, рекламы и
+// compact: укороченный формат — без валового, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. У Актау и Актобе
 // (одинаковый формат); общий отчёт «all» остаётся полным и сейчас никуда не уходит.
 export type ReportScope = { key: string; title: string; cityCodes: string[]; compact?: boolean };
@@ -174,7 +174,7 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
         line("Чеков", num(receipts)),
         line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
         line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
-        line("Маржа", pct(revenue, cost)),
+        line("Валовый", pct(revenue, cost)),
         conversion,
       ];
   return pre(lines.join("\n"));
@@ -288,7 +288,7 @@ function kassaBlock(rows: SalesRow[], compact: boolean): string {
     num(a.items),
     pct(a.revenue, sumCost(a.costs.map((c) => ({ cost: c })))),
   ]);
-  return pre(table(["Касса", "Оборот", "Шт", "Маржа"], list, [16, 7, 3, 5], 1));
+  return pre(table(["Касса", "Оборот", "Шт", "Валовый"], list, [16, 7, 3, 7], 1));
 }
 
 // Сотрудники по убыванию выручки за день. «Бигчек» — самый крупный одиночный
@@ -600,9 +600,9 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
       ? `<i>за день продаж нет</i>`
       : pre(
           table(
-            ["Категория", "Оборот", "Шт", "Маржа"],
+            ["Категория", "Оборот", "Шт", "Валовый"],
             categories.map((c) => [c.category, num(c.revenue), num(c.quantity), pct(c.revenue, c.cost)]),
-            [16, 7, 3, 5],
+            [16, 7, 3, 7],
             1
           )
         );

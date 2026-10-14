@@ -813,7 +813,7 @@ export default function SuppliersPage() {
   const frozenAvailable = !stocked || stocked.has("frozen");
   const [tab, setTab] = useState<Tab>("stock");
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
-  const [frozenStock, setFrozenStock] = useState(true); // для остатков заморозка входит в общий себес
+  const [frozenStock, setFrozenStock] = useState(false); // заморозка — отдельная корзина, по умолчанию выключена
   const [frozenStale, setFrozenStale] = useState(false); // зависшие считаем по складам, заморозка — отдельная корзина
   const [search, setSearch] = useState("");
 

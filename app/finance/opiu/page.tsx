@@ -208,7 +208,7 @@ function Inner() {
     const indent = items.map(({ depth }) => depth);
     const kpis = [
       { label: "Оборот", value: revenue ? fmtMoney(revenue.fact) : "—" },
-      { label: "Валовая прибыль", value: gross ? fmtMoney(gross.fact) : "—", note: marginPct === null ? undefined : `маржа ${marginPct.toFixed(1)}%` },
+      { label: "Валовая прибыль", value: gross ? fmtMoney(gross.fact) : "—", note: marginPct === null ? undefined : `валовый ${marginPct.toFixed(1)}%` },
       { label: "Расходы", value: total ? fmtMoney(total.expenses.fact) : "—", note: expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от оборота` },
       { label: "Рентабельность", value: net ? fmtMoney(net.fact) : "—", note: netPct === null ? undefined : `${netPct.toFixed(1)}% от оборота` },
     ];
@@ -325,7 +325,7 @@ function Inner() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <KpiCard label="Оборот" value={revenue ? fmtMoney(revenue.fact) : "—"} note={view === "planfact" && revenue?.plan ? `${fmtPct(pct(revenue))} от плана` : "за выбранный период"} />
-        <KpiCard label="Валовая прибыль" value={gross ? fmtMoney(gross.fact) : "—"} note={marginPct === null ? undefined : `маржа ${marginPct.toFixed(1)}%`} />
+        <KpiCard label="Валовая прибыль" value={gross ? fmtMoney(gross.fact) : "—"} note={marginPct === null ? undefined : `валовый ${marginPct.toFixed(1)}%`} />
         <KpiCard label="Расходы" value={total ? fmtMoney(total.expenses.fact) : "—"} note={expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от оборота`} />
         <KpiCard label="Рентабельность" value={net ? fmtMoney(net.fact) : "—"} valueTone={(net?.fact ?? 0) < 0 ? "negative" : "positive"} note={netPct === null ? undefined : `${netPct.toFixed(1)}% от оборота`} />
       </div>
