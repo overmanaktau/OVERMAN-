@@ -9,7 +9,7 @@ import { WAREHOUSES, FILTER_WAREHOUSES, warehousesForCities } from "@/lib/wareho
 import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 import PdfButton from "@/components/PdfButton";
 import SortHead, { type SortState } from "@/components/SortHead";
-import type { PdfDoc } from "@/lib/downloadPdf";
+import type { PdfDoc, PdfRowKind, PdfSection } from "@/lib/downloadPdf";
 
 // Склад → «Обзор»: за выбранный период и склады — остаток (по факту на последний день периода, как в МойСклад),
 // сколько продано, себестоимость, валовая прибыль и оборачиваемость (себестоимость продаж ÷ средний остаток) —
@@ -338,9 +338,45 @@ export default function WarehouseOverviewPage() {
   const [byStore, setByStore] = useState<Row[]>([]);
   // то же за предыдущий период — для разницы (null — период без сравнения или данные ещё не пришли)
   const [prevData, setPrevData] = useState<{ cat: Row[]; sup: Row[]; sto: Row[] } | null>(null);
+  // кнопка «Показать разницу» — по умолчанию выключена; в PDF сравнение выбирается галочкой в окне «Что скачать» независимо от неё
+  const [showDiff, setShowDiff] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const seq = useRef(0);
+
+    // выключенные галочками категории (названия на экране → верхние категории каталога, как их хранит база)
+    const exclude = [...excludedCategories].map((label) => TOP_CATEGORIES.find((c) => c.label === label)?.key ?? label);
+    type Cat = { category: string; cogs: number; stock_value: number; revenue: number; stock_value_end: number };
+    type Sup = { supplier_name: string; revenue: number; cogs: number; stock_value: number; stock_value_end: number };
+    type Sto = { store: string; revenue: number; cogs: number; stock_value: number; stock_value_end: number };
+    const label = (key: string) => TOP_CATEGORIES.find((c) => c.key === key)?.label ?? key;
+    const order = (key: string) => {
+      const i = TOP_CATEGORIES.findIndex((c) => c.key === key);
+      return i === -1 ? 99 : i;
+    };
+    const mk = (name: string, r: { stock_value_end: number; stock_value: number; revenue: number; cogs: number }): Row => ({
+      name,
+      stockEnd: Number(r.stock_value_end),
+      stockAvg: Number(r.stock_value),
+      revenue: Number(r.revenue),
+      cogs: Number(r.cogs),
+    });
+    async function fetchSet(from: string, to: string) {
+      const args = { p_stores: stores, p_from: from, p_to: to };
+      const argsEx = { ...args, p_exclude: exclude };
+      const [cat, sup, sto] = await Promise.all([
+        fetchAllRows<Cat>((a, b) => supabase.rpc("stock_turnover_by_category", args).range(a, b)),
+        fetchAllRows<Sup>((a, b) => supabase.rpc("warehouse_overview_by_supplier", argsEx).range(a, b)),
+        fetchAllRows<Sto>((a, b) => supabase.rpc("warehouse_overview_by_store", argsEx).range(a, b)),
+      ]);
+      return {
+        cat: [...cat].sort((x, y) => order(x.category) - order(y.category)).map((r) => mk(label(r.category), r)),
+        sup: sup.map((r) => mk(r.supplier_name, r)),
+        sto: sto
+          .filter((r) => Number(r.stock_value_end) !== 0 || Number(r.stock_value) !== 0 || Number(r.revenue) !== 0 || Number(r.cogs) !== 0)
+          .map((r) => mk(WAREHOUSES.find((w) => w.code === r.store)?.label ?? (r.store === "frozen" ? "Заморозка" : r.store), r)),
+      };
+    }
 
   useEffect(() => {
     if (!canView) return;
@@ -354,42 +390,10 @@ export default function WarehouseOverviewPage() {
     const my = ++seq.current;
     setLoading(true);
     setError(null);
+    if (!showDiff) setPrevData(null);
     (async () => {
       try {
-        // выключенные галочками категории (названия на экране → верхние категории каталога, как их хранит база)
-        const exclude = [...excludedCategories].map((label) => TOP_CATEGORIES.find((c) => c.label === label)?.key ?? label);
-        type Cat = { category: string; cogs: number; stock_value: number; revenue: number; stock_value_end: number };
-        type Sup = { supplier_name: string; revenue: number; cogs: number; stock_value: number; stock_value_end: number };
-        type Sto = { store: string; revenue: number; cogs: number; stock_value: number; stock_value_end: number };
-        const label = (key: string) => TOP_CATEGORIES.find((c) => c.key === key)?.label ?? key;
-        const order = (key: string) => {
-          const i = TOP_CATEGORIES.findIndex((c) => c.key === key);
-          return i === -1 ? 99 : i;
-        };
-        const mk = (name: string, r: { stock_value_end: number; stock_value: number; revenue: number; cogs: number }): Row => ({
-          name,
-          stockEnd: Number(r.stock_value_end),
-          stockAvg: Number(r.stock_value),
-          revenue: Number(r.revenue),
-          cogs: Number(r.cogs),
-        });
-        const fetchSet = async (from: string, to: string) => {
-          const args = { p_stores: stores, p_from: from, p_to: to };
-          const argsEx = { ...args, p_exclude: exclude };
-          const [cat, sup, sto] = await Promise.all([
-            fetchAllRows<Cat>((a, b) => supabase.rpc("stock_turnover_by_category", args).range(a, b)),
-            fetchAllRows<Sup>((a, b) => supabase.rpc("warehouse_overview_by_supplier", argsEx).range(a, b)),
-            fetchAllRows<Sto>((a, b) => supabase.rpc("warehouse_overview_by_store", argsEx).range(a, b)),
-          ]);
-          return {
-            cat: [...cat].sort((x, y) => order(x.category) - order(y.category)).map((r) => mk(label(r.category), r)),
-            sup: sup.map((r) => mk(r.supplier_name, r)),
-            sto: sto
-              .filter((r) => Number(r.stock_value_end) !== 0 || Number(r.stock_value) !== 0 || Number(r.revenue) !== 0 || Number(r.cogs) !== 0)
-              .map((r) => mk(WAREHOUSES.find((w) => w.code === r.store)?.label ?? (r.store === "frozen" ? "Заморозка" : r.store), r)),
-          };
-        };
-        const [now, before] = await Promise.all([fetchSet(range.from, range.to), prevRange ? fetchSet(prevRange.from, prevRange.to) : Promise.resolve(null)]);
+        const [now, before] = await Promise.all([fetchSet(range.from, range.to), showDiff && prevRange ? fetchSet(prevRange.from, prevRange.to) : Promise.resolve(null)]);
         if (my !== seq.current) return;
         setByCategory(now.cat);
         setBySupplier(now.sup);
@@ -402,7 +406,7 @@ export default function WarehouseOverviewPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canView, storesKey, range.from, range.to, prevRange?.from, prevRange?.to, [...excludedCategories].sort().join("|")]);
+  }, [canView, storesKey, range.from, range.to, showDiff, prevRange?.from, prevRange?.to, [...excludedCategories].sort().join("|")]);
 
   if (!canView) {
     return (
@@ -414,6 +418,7 @@ export default function WarehouseOverviewPage() {
 
   const sum = total(byCategory.length > 0 ? categoriesOn : byStore);
   const sumM = metrics(sum);
+  const diffOn = showDiff && !!prevRange && !!prevData;
   const prevCategoriesOn = prevData ? prevData.cat.filter((r) => !excludedCategories.has(r.name)) : null;
   const prevSum = prevData ? total(prevCategoriesOn && prevCategoriesOn.length > 0 ? prevCategoriesOn : prevData.sto) : null;
   const prevSumM = prevSum ? metrics(prevSum) : null;
@@ -430,22 +435,33 @@ export default function WarehouseOverviewPage() {
     const pm = metrics(pr);
     return [deltaPct(r.stockEnd, pr.stockEnd), deltaPct(r.revenue, pr.revenue), deltaPct(r.cogs, pr.cogs), deltaPct(m.profit, pm.profit), deltaPct(m.margin, pm.margin), deltaPct(m.turnover, pm.turnover)];
   };
-  const withDelta = (text: string, d: number | null) => (prevRange ? `${text} (${deltaText(d)})` : text);
-  const tableRow = (r: Row, pr?: Row | null): (string | number)[] => {
+  const metricCells = (r: Row): string[] => {
     const m = metrics(r);
-    const d = deltasOf(r, pr);
-    return [r.name, withDelta(money(r.stockEnd), d[0]), withDelta(money(r.revenue), d[1]), withDelta(money(r.cogs), d[2]), withDelta(money(m.profit), d[3]), withDelta(pctText(m.margin), d[4]), withDelta(pctText(m.turnover), d[5])];
+    return [money(r.stockEnd), money(r.revenue), money(r.cogs), money(m.profit), pctText(m.margin), pctText(m.turnover)];
+  };
+  const tableRow = (r: Row): (string | number)[] => [r.name, ...metricCells(r)];
+  // Разница в PDF: цифра и % (как в недельном отчёте). У денежных показателей цифра — в тенге, у «Валовый %» и «Оборачиваемость» — в п.п.
+  const signedMoney = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
+  const signedPp = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} п.п.`;
+  const diffCells = (r: Row, pr: Row | null | undefined): string[] => {
+    if (!pr) return ["—", "—", "—", "—", "—", "—"];
+    const m = metrics(r);
+    const pm = metrics(pr);
+    const money2 = (cur: number, old: number) => `${signedMoney(cur - old)} (${deltaText(deltaPct(cur, old))})`;
+    const pp = (cur: number | null, old: number | null) => (cur === null || old === null ? "—" : `${signedPp(cur - old)} (${deltaText(deltaPct(cur, old))})`);
+    return [money2(r.stockEnd, pr.stockEnd), money2(r.revenue, pr.revenue), money2(r.cogs, pr.cogs), money2(m.profit, pm.profit), pp(m.margin, pm.margin), pp(m.turnover, pm.turnover)];
   };
   const excelRow = (r: Row, pr?: Row | null): (string | number)[] => {
     const m = metrics(r);
     const base: (string | number)[] = [r.name, Math.round(r.stockEnd * 100) / 100, Math.round(r.revenue * 100) / 100, Math.round(r.cogs * 100) / 100, Math.round(m.profit * 100) / 100, m.margin === null ? "" : Math.round(m.margin * 10) / 10, m.turnover === null ? "" : Math.round(m.turnover * 10) / 10];
-    if (!prevRange) return base;
+    if (!diffOn) return base;
     return [...base, ...deltasOf(r, pr).map((v) => (v === null ? "" : Math.round(v * 10) / 10))];
   };
-  const blockPrev = (b: { nameHeader: string }) => (prevData ? (b.nameHeader === "Категория" ? prevData.cat : b.nameHeader === "Поставщик" ? prevData.sup : prevData.sto) : null);
-  const prevOf = (b: { nameHeader: string }) => new Map((blockPrev(b) ?? []).map((r) => [r.name, r]));
-  const totalPrev = (b: { nameHeader: string; rows: Row[] }): Row | null => {
-    const pr = blockPrev(b);
+  type PrevSet = { cat: Row[]; sup: Row[]; sto: Row[] };
+  const blockPrev = (b: { nameHeader: string }, d: PrevSet | null = prevData) => (d ? (b.nameHeader === "Категория" ? d.cat : b.nameHeader === "Поставщик" ? d.sup : d.sto) : null);
+  const prevOf = (b: { nameHeader: string }, d: PrevSet | null = prevData) => new Map((blockPrev(b, d) ?? []).map((r) => [r.name, r]));
+  const totalPrev = (b: { nameHeader: string; rows: Row[] }, d: PrevSet | null = prevData): Row | null => {
+    const pr = blockPrev(b, d);
     if (!pr) return null;
     // у блока категорий в итог входят только включённые строки (b.rows уже отфильтрованы) — для прошлого периода те же категории
     const names = new Set(b.rows.map((r) => r.name));
@@ -464,8 +480,42 @@ export default function WarehouseOverviewPage() {
     "Валовая прибыль",
     "Валовый, %",
     "Оборачиваемость, %",
-    ...(prevRange ? ["Остаток, разница %", "Продано, разница %", "Себестоимость, разница %", "Валовая прибыль, разница %", "Валовый, разница %", "Оборачиваемость, разница %"] : []),
+    ...(diffOn ? ["Остаток, разница %", "Продано, разница %", "Себестоимость, разница %", "Валовая прибыль, разница %", "Валовый, разница %", "Оборачиваемость, разница %"] : []),
   ];
+
+  // Блоки «Сравнение периодов» для PDF (по галочке в окне «Что скачать», по умолчанию выключены): предыдущий период, выбранный и разница — как в недельном отчёте.
+  const comparisonSections = (d: PrevSet | null): PdfSection[] => {
+    if (!prevRange || !d) return [];
+    const headers = (first: string) => [first, "Остаток", "Продано", "Себестоимость", "Валовая прибыль", "Валовый %", "Оборачиваемость"];
+    const widths = [2.4, 1.9, 1.9, 1.9, 1.9, 1.5, 1.5];
+    return blocks.map((b) => {
+      const pm = prevOf(b, d);
+      const cur = [...b.rows].sort((x, y) => y.stockEnd - x.stockEnd);
+      const prevRows = cur.map((r) => pm.get(r.name)).filter((r): r is Row => !!r);
+      const curTotal = total(b.rows);
+      const prevTotal = totalPrev(b, d) ?? total(prevRows);
+      const rows: (string | number)[][] = [];
+      const kinds: PdfRowKind[] = [];
+      const push = (kind: PdfRowKind, row: (string | number)[]) => {
+        rows.push(row);
+        kinds.push(kind);
+      };
+      const blank = ["", "", "", "", "", ""];
+      push("group", [`Предыдущий период · ${prevRange.label}`, ...blank]);
+      for (const r of cur) {
+        const pr = pm.get(r.name);
+        push("normal", pr ? tableRow(pr) : [r.name, "—", "—", "—", "—", "—", "—"]);
+      }
+      push("total", ["Итого", ...metricCells(prevTotal)]);
+      push("group", [`Выбранный период · ${range.label}`, ...blank]);
+      for (const r of cur) push("normal", tableRow(r));
+      push("total", ["Итого", ...metricCells(curTotal)]);
+      push("group", ["Разница выбранного периода от предыдущего (цифра и %)", ...blank]);
+      for (const r of cur) push("normal", [r.name, ...diffCells(r, pm.get(r.name))]);
+      push("total", ["Итого", ...diffCells(curTotal, prevTotal)]);
+      return { title: `${b.title} — сравнение периодов`, hint: "Предыдущий период, выбранный и разница между ними — цифра и %, как в недельном отчёте.", optional: true, headers: headers(b.nameHeader), rows, rowKinds: kinds, widths };
+    });
+  };
 
   function exportXls() {
     const rows: (string | number)[][] = [];
@@ -554,6 +604,10 @@ export default function WarehouseOverviewPage() {
             )}
           </div>
         </div>
+        <label className={`${checkbox} pb-2`} title="Сравнить с предыдущим периодом такой же длины">
+          <input type="checkbox" className="accent-accent" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} />
+          Показать разницу
+        </label>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -565,11 +619,13 @@ export default function WarehouseOverviewPage() {
           </button>
           <PdfButton
             disabled={byCategory.length === 0 && bySupplier.length === 0}
-            build={(): PdfDoc => ({
+            build={async (): Promise<PdfDoc> => {
+              const cmpData = prevData ?? (prevRange ? await fetchSet(prevRange.from, prevRange.to) : null);
+              return {
               fileName: "Склад_обзор",
               orientation: "landscape",
               title: "Склад — обзор",
-              subtitle: `Период: ${range.label}${prevRange ? ` · разница к периоду ${prevRange.label}` : ""} · склады: ${storeLabels.join(", ")}`,
+              subtitle: `Период: ${range.label} · склады: ${storeLabels.join(", ")}`,
               meta: [
                 "Остаток — по факту на последний день периода, как в МойСклад",
                 "Оборачиваемость — себестоимость продаж ÷ средний остаток за период",
@@ -581,26 +637,26 @@ export default function WarehouseOverviewPage() {
                 { label: "Валовая прибыль", value: money(sumM.profit) },
                 { label: "Оборачиваемость", value: pctText(sumM.turnover) },
               ],
-              sections: blocks.map((b) => {
+              sections: [...blocks.map((b) => {
                 const sorted = [...b.rows].sort((x, y) => y.stockEnd - x.stockEnd);
-                const pm = prevOf(b);
-                const body = [...sorted.map((r) => tableRow(r, pm.get(r.name))), tableRow(total(b.rows), totalPrev(b))];
+                const body = [...sorted.map((r) => tableRow(r)), tableRow(total(b.rows))];
                 return {
                   title: b.title,
                   headers: [b.nameHeader, "Остаток", "Продано", "Себестоимость", "Валовая прибыль", "Валовый %", "Оборачиваемость"],
                   rows: body,
-                  rowKinds: body.map((_, i) => (i === body.length - 1 ? "total" : "normal")),
+                  rowKinds: body.map((_, i) => (i === body.length - 1 ? ("total" as const) : ("normal" as const))),
                   widths: [2.4, 1.6, 1.6, 1.6, 1.6, 0.9, 1.3],
                 };
-              }),
-            })}
+              }), ...comparisonSections(cmpData)],
+              };
+            }}
           />
         </div>
       </div>
 
       <div className="text-xs text-muted">
         Период: {range.label}
-        {prevRange ? ` · разница к периоду ${prevRange.label}` : " · для «Всё время» разницы нет"}
+        {showDiff ? (prevRange ? ` · разница к периоду ${prevRange.label}` : " · для «Всё время» разницы нет") : ""}
         {loading && " · загрузка…"}
       </div>
 
@@ -619,7 +675,7 @@ export default function WarehouseOverviewPage() {
           rows={b.nameHeader === "Категория" ? byCategory : b.rows}
           excluded={b.nameHeader === "Категория" ? excludedCategories : undefined}
           onToggle={b.nameHeader === "Категория" ? toggleCategory : undefined}
-          prev={prevData ? (b.nameHeader === "Категория" ? prevData.cat : b.nameHeader === "Поставщик" ? prevData.sup : prevData.sto) : null}
+          prev={showDiff && prevData ? (b.nameHeader === "Категория" ? prevData.cat : b.nameHeader === "Поставщик" ? prevData.sup : prevData.sto) : null}
           hint={
             b.nameHeader === "Поставщик"
               ? "Поставщик — из карточки товара в МойСклад. Стрелки у колонок — сортировка."
