@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabaseClient";
 import type { SectionKey } from "@/lib/permissions";
 
 const WAREHOUSE_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
+  { label: "Обзор", href: "/warehouse/overview", section: "warehouse.stock" },
   { label: "АВС/XYZ анализ", href: "/warehouse/abc-xyz", section: "warehouse.stock" },
   { label: "Зависшие остатки", href: "/warehouse/stale", section: "warehouse.stock" },
   { label: "По поставщикам", href: "/warehouse/suppliers", section: "warehouse.stock" },
