@@ -18,7 +18,7 @@ const STALE_DAYS = 45;
 const STALE_DAYS_QUERY = STALE_DAYS - 1; // SQL сравнивает строго «>»
 
 function money(n: number) {
-  return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
+  return `${n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
 }
 function num(n: number) {
   return Math.round(n).toLocaleString("ru-RU");

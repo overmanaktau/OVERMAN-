@@ -24,7 +24,7 @@ const STALE_DAYS = 45;
 const STALE_DAYS_QUERY = STALE_DAYS - 1;
 
 function money(n: number) {
-  return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
+  return `${n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
 }
 function friendlyError(e: unknown): string {
   const message = getErrorMessage(e);

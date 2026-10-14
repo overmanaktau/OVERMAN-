@@ -56,6 +56,10 @@ function parseYmd(s: string): Date {
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
+// Остатки и себестоимость — с копейками, как в МойСклад.
+function money2(n: number) {
+  return `${n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
+}
 function friendlyError(e: unknown): string {
   const message = getErrorMessage(e);
   if (/fetch|network|failed to fetch/i.test(message)) {
@@ -564,12 +568,12 @@ export default function ObzorPage() {
             if (turnoverByBucket.length > 0) {
               const body: (string | number)[][] = turnoverByBucket.map((r) => [
                 r.label,
-                money(r.cogs),
-                money(r.stockValueEnd),
-                money(r.stockValue),
+                money2(r.cogs),
+                money2(r.stockValueEnd),
+                money2(r.stockValue),
                 r.stockValue > 0 ? `${((r.cogs / r.stockValue) * 100).toFixed(0)}%` : "—",
               ]);
-              body.push(["Итого", money(turnoverCogsTotal), money(stockEndTotal), money(turnoverStockValueTotal), turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—"]);
+              body.push(["Итого", money2(turnoverCogsTotal), money2(stockEndTotal), money2(turnoverStockValueTotal), turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—"]);
               sections.push({
                 title: "Оборачиваемость по категориям",
                 group: "cost",
@@ -679,23 +683,23 @@ export default function ObzorPage() {
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
                           <span>Продано (себест.)</span>
-                          <span className="num">{money(r.cogs)}</span>
+                          <span className="num">{money2(r.cogs)}</span>
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
                           <span>Остаток (себест.)</span>
-                          <span className="num">{money(r.stockValueEnd)}</span>
+                          <span className="num">{money2(r.stockValueEnd)}</span>
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
                           <span>Средний остаток за период</span>
-                          <span className="num">{money(r.stockValue)}</span>
+                          <span className="num">{money2(r.stockValue)}</span>
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
                           <span>Продано (прод. цена)</span>
-                          <span className="num">{money(r.revenue)}</span>
+                          <span className="num">{money2(r.revenue)}</span>
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
                           <span>Остаток (прод. цена)</span>
-                          <span className="num">{money(r.stockSaleValueEnd)}</span>
+                          <span className="num">{money2(r.stockSaleValueEnd)}</span>
                         </div>
                       </div>
                     );
@@ -707,23 +711,23 @@ export default function ObzorPage() {
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
                       <span>Продано (себест.)</span>
-                      <span className="num">{money(turnoverCogsTotal)}</span>
+                      <span className="num">{money2(turnoverCogsTotal)}</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
                       <span>Остаток (себест.)</span>
-                      <span className="num">{money(stockEndTotal)}</span>
+                      <span className="num">{money2(stockEndTotal)}</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
                       <span>Средний остаток за период</span>
-                      <span className="num">{money(turnoverStockValueTotal)}</span>
+                      <span className="num">{money2(turnoverStockValueTotal)}</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
                       <span>Продано (прод. цена)</span>
-                      <span className="num">{money(turnoverRevenueTotal)}</span>
+                      <span className="num">{money2(turnoverRevenueTotal)}</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
                       <span>Остаток (прод. цена)</span>
-                      <span className="num">{money(stockSaleEndTotal)}</span>
+                      <span className="num">{money2(stockSaleEndTotal)}</span>
                     </div>
                   </div>
                 </div>
@@ -733,7 +737,7 @@ export default function ObzorPage() {
                     продажная цена as a smaller line right under it, so the
                     extra figures sit "рядом" without widening the table. */}
                 <div className="hidden sm:flex sm:flex-col">
-                  <div className="grid grid-cols-[1fr_90px_130px_130px_130px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
+                  <div className="grid grid-cols-[1fr_80px_150px_150px_150px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
                     <div>Категория</div>
                     <div className="text-right">Оборачив.</div>
                     <div className="text-right">Продано, ₸ (себест. / прод.)</div>
@@ -745,37 +749,37 @@ export default function ObzorPage() {
                     return (
                       <div
                         key={r.label}
-                        className="grid grid-cols-[1fr_90px_130px_130px_130px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
+                        className="grid grid-cols-[1fr_80px_150px_150px_150px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
                       >
                         <div className="font-semibold truncate self-center">{r.label}</div>
                         <div className="text-right num self-center">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
                         <div className="text-right">
-                          <div className="num text-muted">{money(r.cogs)}</div>
-                          <div className="num text-[11px] text-mutedLight">{money(r.revenue)}</div>
+                          <div className="num text-muted">{money2(r.cogs)}</div>
+                          <div className="num text-[11px] text-mutedLight">{money2(r.revenue)}</div>
                         </div>
                         <div className="text-right">
-                          <div className="num text-muted">{money(r.stockValueEnd)}</div>
-                          <div className="num text-[11px] text-mutedLight">{money(r.stockSaleValueEnd)}</div>
+                          <div className="num text-muted">{money2(r.stockValueEnd)}</div>
+                          <div className="num text-[11px] text-mutedLight">{money2(r.stockSaleValueEnd)}</div>
                         </div>
                         <div className="text-right self-center">
-                          <div className="num text-muted">{money(r.stockValue)}</div>
+                          <div className="num text-muted">{money2(r.stockValue)}</div>
                         </div>
                       </div>
                     );
                   })}
-                  <div className="grid grid-cols-[1fr_90px_130px_130px_130px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
+                  <div className="grid grid-cols-[1fr_80px_150px_150px_150px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
                     <div className="self-center">Итого</div>
                     <div className="text-right num self-center">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</div>
                     <div className="text-right">
-                      <div className="num">{money(turnoverCogsTotal)}</div>
-                      <div className="num text-[11px] font-normal text-mutedLight">{money(turnoverRevenueTotal)}</div>
+                      <div className="num">{money2(turnoverCogsTotal)}</div>
+                      <div className="num text-[11px] font-normal text-mutedLight">{money2(turnoverRevenueTotal)}</div>
                     </div>
                     <div className="text-right">
-                      <div className="num">{money(stockEndTotal)}</div>
-                      <div className="num text-[11px] font-normal text-mutedLight">{money(stockSaleEndTotal)}</div>
+                      <div className="num">{money2(stockEndTotal)}</div>
+                      <div className="num text-[11px] font-normal text-mutedLight">{money2(stockSaleEndTotal)}</div>
                     </div>
                     <div className="text-right self-center">
-                      <div className="num">{money(turnoverStockValueTotal)}</div>
+                      <div className="num">{money2(turnoverStockValueTotal)}</div>
                     </div>
                   </div>
                 </div>
