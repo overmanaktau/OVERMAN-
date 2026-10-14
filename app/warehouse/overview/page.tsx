@@ -154,9 +154,25 @@ function sortValue(r: Row, key: SortKey, stockTotal: number): number | string | 
   }
 }
 
-function Block({ title, hint, rows, nameHeader }: { title: string; hint: string; rows: Row[]; nameHeader: string }) {
+function Block({
+  title,
+  hint,
+  rows,
+  nameHeader,
+  excluded,
+  onToggle,
+}: {
+  title: string;
+  hint: string;
+  rows: Row[];
+  nameHeader: string;
+  excluded?: Set<string>; // выключенные галочками строки (только у блока с галочками)
+  onToggle?: (name: string) => void;
+}) {
   const [sort, setSort] = useState<Sort>(null);
-  const sum = total(rows);
+  const selectable = !!onToggle;
+  const isOn = (name: string) => !excluded?.has(name);
+  const sum = total(selectable ? rows.filter((r) => isOn(r.name)) : rows);
   const sumM = metrics(sum);
   const sorted = useMemo(() => {
     const base = [...rows];
@@ -193,8 +209,15 @@ function Block({ title, hint, rows, nameHeader }: { title: string; hint: string;
             {sorted.map((r) => {
               const m = metrics(r);
               return (
-                <div key={r.name} className={`grid ${GRID} gap-3 py-2.5 items-center text-[13px] border-b border-border/60`}>
-                  <div className="font-medium break-words">{r.name}</div>
+                <div key={r.name} className={`grid ${GRID} gap-3 py-2.5 items-center text-[13px] border-b border-border/60 ${selectable && !isOn(r.name) ? "opacity-45" : ""}`}>
+                  {selectable ? (
+                    <label className="flex items-center gap-2 font-medium break-words cursor-pointer">
+                      <input type="checkbox" className="accent-accent flex-none" checked={isOn(r.name)} onChange={() => onToggle?.(r.name)} />
+                      {r.name}
+                    </label>
+                  ) : (
+                    <div className="font-medium break-words">{r.name}</div>
+                  )}
                   <div className="num text-right">{money(r.stockEnd)}</div>
                   <div className="num text-right text-muted">{pctText(sum.stockEnd > 0 ? (r.stockEnd / sum.stockEnd) * 100 : null)}</div>
                   <div className="num text-right text-muted">{money(r.stockAvg)}</div>
@@ -245,6 +268,17 @@ export default function WarehouseOverviewPage() {
   const range = rangeOf(period, custom);
 
   const [byCategory, setByCategory] = useState<Row[]>([]);
+  // категории, выключенные галочками (по умолчанию — «Бесплатный» и «Без категории»); итоги блока и карточек считаются по включённым
+  const [excludedCategories, setExcludedCategories] = useState<Set<string>>(() => new Set(["Бесплатный", "Без категории"]));
+  function toggleCategory(name: string) {
+    setExcludedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+  const categoriesOn = byCategory.filter((r) => !excludedCategories.has(r.name));
   const [bySupplier, setBySupplier] = useState<Row[]>([]);
   const [byStore, setByStore] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -314,7 +348,7 @@ export default function WarehouseOverviewPage() {
     );
   }
 
-  const sum = total(byCategory.length > 0 ? byCategory : byStore);
+  const sum = total(byCategory.length > 0 ? categoriesOn : byStore);
   const sumM = metrics(sum);
   const storeLabels = stores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? (c === "frozen" ? "Заморозка" : c));
 
@@ -331,7 +365,7 @@ export default function WarehouseOverviewPage() {
     return [r.name, Math.round(r.stockEnd * 100) / 100, Math.round(r.stockAvg * 100) / 100, Math.round(r.revenue * 100) / 100, Math.round(r.cogs * 100) / 100, Math.round(m.profit * 100) / 100, m.margin === null ? "" : Math.round(m.margin * 10) / 10, m.turnover === null ? "" : Math.round(m.turnover * 10) / 10];
   };
   const blocks: { title: string; nameHeader: string; rows: Row[] }[] = [
-    { title: "По категориям", nameHeader: "Категория", rows: byCategory },
+    { title: "По категориям", nameHeader: "Категория", rows: categoriesOn },
     { title: "По поставщикам", nameHeader: "Поставщик", rows: bySupplier },
     { title: "По складам", nameHeader: "Склад", rows: byStore },
   ];
@@ -480,13 +514,15 @@ export default function WarehouseOverviewPage() {
           key={b.title}
           title={b.title}
           nameHeader={b.nameHeader}
-          rows={b.rows}
+          rows={b.nameHeader === "Категория" ? byCategory : b.rows}
+          excluded={b.nameHeader === "Категория" ? excludedCategories : undefined}
+          onToggle={b.nameHeader === "Категория" ? toggleCategory : undefined}
           hint={
             b.nameHeader === "Поставщик"
               ? "Поставщик — из карточки товара в МойСклад. Стрелки у колонок — сортировка."
               : b.nameHeader === "Склад"
               ? "Каждый склад отдельно (заморозка — отдельная корзина остатков). Стрелки у колонок — сортировка."
-              : "Верхние категории каталога. Стрелки у колонок — сортировка."
+              : "Верхние категории каталога. Галочки — какие категории учитывать в итогах и карточках (поставщики и склады считаются по всем). Стрелки у колонок — сортировка."
           }
         />
       ))}
