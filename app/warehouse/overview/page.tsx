@@ -478,7 +478,13 @@ export default function WarehouseOverviewPage() {
   // предыдущий период, выбранный и разница (цифра и % — двумя строками). Показатели: остаток, продано, валовая прибыль, оборачиваемость.
   const comparisonSections = (d: PrevSet | null): PdfSection[] => {
     if (!prevRange || !d) return [];
-    const subs = ["Пред.", "Выбр.", "Разница"];
+    // подписи колонок — конкретные даты периодов (один день — «12.10.2026», период — две строки «01.09.26 –» / «30.09.26»)
+    const dateLabel = (from: string, to: string) => {
+      if (from === to) return fmtRuDate(from);
+      const short = (iso: string) => fmtRuDate(iso).replace(/\.20(\d\d)$/, ".$1");
+      return `${short(from)} –\n${short(to)}`;
+    };
+    const subs = [dateLabel(prevRange.from, prevRange.to), dateLabel(range.from, range.to), "Разница"];
     const groups = ["Остаток, ₸", "Продано, ₸", "Валовая прибыль, ₸", "Оборачиваемость, %"];
     const widths = [2.1, 1.45, 1.45, 1.5, 1.45, 1.45, 1.5, 1.45, 1.45, 1.5, 0.9, 0.9, 1.25];
     // показатели строки: остаток, продано, валовая прибыль — деньги; оборачиваемость — %
@@ -513,9 +519,9 @@ ${deltaText(deltaPct(c, o))}`;
       return {
         title: `${b.title} — сравнение периодов`,
         hint: "По каждому показателю: предыдущий период, выбранный и разница (цифра и %), как в недельном отчёте.",
-        note: `Пред. — ${prevRange.label}; выбр. — ${range.label}. Разница — выбранный период минус предыдущий; у оборачиваемости — в процентных пунктах и в %.`,
+        note: `Слева — предыдущий период (${prevRange.label}), справа — выбранный (${range.label}). Разница — выбранный минус предыдущий; у оборачиваемости — в процентных пунктах и в %.`,
         optional: true,
-        headers: [b.nameHeader, ...groups.flatMap((g) => subs.map((sName) => `${g.split(",")[0]} · ${sName.toLowerCase()}`))],
+        headers: [b.nameHeader, ...groups.flatMap((g) => subs.map((sName) => `${g.split(",")[0]} · ${sName.replace("\n", " ")}`))],
         headGroups: [{ label: b.nameHeader, span: 1 }, ...groups.map((g) => ({ label: g, span: 3, subs }))],
         rows,
         rowKinds: rows.map((_, i) => (i === rows.length - 1 ? ("total" as const) : ("normal" as const))),
