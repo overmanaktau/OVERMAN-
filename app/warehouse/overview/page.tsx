@@ -121,14 +121,13 @@ type Sort = SortState<SortKey>;
 const COLS: { key: SortKey; label: string }[] = [
   { key: "stockEnd", label: "Остаток" },
   { key: "share", label: "Доля остатка" },
-  { key: "stockAvg", label: "Ср. остаток" },
   { key: "revenue", label: "Продано" },
   { key: "cogs", label: "Себестоимость" },
   { key: "profit", label: "Валовая прибыль" },
   { key: "margin", label: "Валовый %" },
   { key: "turnover", label: "Оборачиваемость" },
 ];
-const GRID = "grid-cols-[minmax(150px,1.6fr)_repeat(8,minmax(104px,1fr))]";
+const GRID = "grid-cols-[minmax(150px,1.6fr)_repeat(7,minmax(104px,1fr))]";
 
 function sortValue(r: Row, key: SortKey, stockTotal: number): number | string | null {
   const m = metrics(r);
@@ -201,7 +200,7 @@ function Block({
         <p className="text-sm text-muted">Нет данных за выбранный период.</p>
       ) : (
         <div className="overflow-x-auto">
-          <div className="min-w-[1000px]">
+          <div className="min-w-[900px]">
             <div className={`grid ${GRID} gap-3 pb-2 text-[11px] font-semibold text-muted border-b border-border`}>
               {head("name", nameHeader, true)}
               {COLS.map((c) => head(c.key, c.label))}
@@ -220,7 +219,6 @@ function Block({
                   )}
                   <div className="num text-right">{money(r.stockEnd)}</div>
                   <div className="num text-right text-muted">{pctText(sum.stockEnd > 0 ? (r.stockEnd / sum.stockEnd) * 100 : null)}</div>
-                  <div className="num text-right text-muted">{money(r.stockAvg)}</div>
                   <div className="num text-right">{money(r.revenue)}</div>
                   <div className="num text-right">{money(r.cogs)}</div>
                   <div className={`num text-right font-semibold ${m.profit < 0 ? "text-[#A34B36]" : ""}`}>{money(m.profit)}</div>
@@ -233,7 +231,6 @@ function Block({
               <div className="pl-2">Итого</div>
               <div className="num text-right">{money(sum.stockEnd)}</div>
               <div className="num text-right text-muted">{sum.stockEnd > 0 ? "100,0%" : "—"}</div>
-              <div className="num text-right">{money(sum.stockAvg)}</div>
               <div className="num text-right">{money(sum.revenue)}</div>
               <div className="num text-right">{money(sum.cogs)}</div>
               <div className="num text-right">{money(sumM.profit)}</div>
@@ -361,27 +358,27 @@ export default function WarehouseOverviewPage() {
 
   const tableRow = (r: Row): (string | number)[] => {
     const m = metrics(r);
-    return [r.name, money(r.stockEnd), money(r.stockAvg), money(r.revenue), money(r.cogs), money(m.profit), pctText(m.margin), pctText(m.turnover)];
+    return [r.name, money(r.stockEnd), money(r.revenue), money(r.cogs), money(m.profit), pctText(m.margin), pctText(m.turnover)];
   };
   const excelRow = (r: Row): (string | number)[] => {
     const m = metrics(r);
-    return [r.name, Math.round(r.stockEnd * 100) / 100, Math.round(r.stockAvg * 100) / 100, Math.round(r.revenue * 100) / 100, Math.round(r.cogs * 100) / 100, Math.round(m.profit * 100) / 100, m.margin === null ? "" : Math.round(m.margin * 10) / 10, m.turnover === null ? "" : Math.round(m.turnover * 10) / 10];
+    return [r.name, Math.round(r.stockEnd * 100) / 100, Math.round(r.revenue * 100) / 100, Math.round(r.cogs * 100) / 100, Math.round(m.profit * 100) / 100, m.margin === null ? "" : Math.round(m.margin * 10) / 10, m.turnover === null ? "" : Math.round(m.turnover * 10) / 10];
   };
   const blocks: { title: string; nameHeader: string; rows: Row[] }[] = [
     { title: "По категориям", nameHeader: "Категория", rows: categoriesOn },
     { title: "По поставщикам", nameHeader: "Поставщик", rows: bySupplier },
     { title: "По складам", nameHeader: "Склад", rows: byStore },
   ];
-  const excelHeaders = (first: string) => [first, "Остаток (себестоимость)", "Средний остаток", "Продано (выручка)", "Себестоимость продаж", "Валовая прибыль", "Валовый, %", "Оборачиваемость, %"];
+  const excelHeaders = (first: string) => [first, "Остаток (себестоимость)", "Продано (выручка)", "Себестоимость продаж", "Валовая прибыль", "Валовый, %", "Оборачиваемость, %"];
 
   function exportXls() {
     const rows: (string | number)[][] = [];
     for (const b of blocks) {
-      rows.push([`— ${b.title} —`, "", "", "", "", "", "", ""]);
+      rows.push([`— ${b.title} —`, "", "", "", "", "", ""]);
       rows.push(excelHeaders(b.nameHeader));
       rows.push(...[...b.rows].sort((x, y) => y.stockEnd - x.stockEnd).map(excelRow));
       rows.push(excelRow(total(b.rows)));
-      rows.push(["", "", "", "", "", "", "", ""]);
+      rows.push(["", "", "", "", "", "", ""]);
     }
     downloadExcel("Склад_обзор", excelHeaders("Название"), rows);
   }
@@ -489,10 +486,10 @@ export default function WarehouseOverviewPage() {
                 const body = [...sorted.map(tableRow), tableRow(total(b.rows))];
                 return {
                   title: b.title,
-                  headers: [b.nameHeader, "Остаток", "Ср. остаток", "Продано", "Себестоимость", "Валовая прибыль", "Валовый %", "Оборачиваемость"],
+                  headers: [b.nameHeader, "Остаток", "Продано", "Себестоимость", "Валовая прибыль", "Валовый %", "Оборачиваемость"],
                   rows: body,
                   rowKinds: body.map((_, i) => (i === body.length - 1 ? "total" : "normal")),
-                  widths: [2.4, 1.6, 1.6, 1.6, 1.6, 1.6, 0.9, 1.3],
+                  widths: [2.4, 1.6, 1.6, 1.6, 1.6, 0.9, 1.3],
                 };
               }),
             })}
@@ -509,7 +506,7 @@ export default function WarehouseOverviewPage() {
         {kpi("Остаток (себестоимость)", money(sum.stockEnd), "по факту на конец периода")}
         {kpi("Продано", money(sum.revenue), `себестоимость ${money(sum.cogs)}`)}
         {kpi("Валовая прибыль", money(sumM.profit), sumM.margin === null ? undefined : `валовый ${pctText(sumM.margin)}`)}
-        {kpi("Оборачиваемость", pctText(sumM.turnover), `средний остаток ${money(sum.stockAvg)}`)}
+        {kpi("Оборачиваемость", pctText(sumM.turnover))}
       </div>
 
       {blocks.map((b) => (
