@@ -34,7 +34,7 @@ export async function snapshotStockForDate(date: string): Promise<number> {
   const moment = `${date} 23:59:59`;
   const supplierOf = await loadSupplierMap();
   const agg = new Map<string, SnapshotRow>();
-  const bySupplier = new Map<string, { snapshot_date: string; store: string; supplier: string; stock_value: number; items: number }>();
+  const bySupplier = new Map<string, { snapshot_date: string; store: string; supplier: string; top_category: string; stock_value: number; items: number }>();
 
   // Отчёт «Остатки» по каждому складу отдельно (как на экране МойСклад): у каждого склада своя себестоимость единицы, а общий
   // отчёт «все склады» даёт одну среднюю цену. Позиции с минусом входят в штуки и сумму продажи (в МойСклад их себестоимость 0).
@@ -52,10 +52,10 @@ export async function snapshotStockForDate(date: string): Promise<number> {
       a.items += p.stock;
       agg.set(key, a);
 
-      // то же по поставщикам (поставщик — из карточки товара в базе портала)
+      // то же по поставщикам и верхней категории (поставщик — из карточки товара в базе портала)
       const supplier = supplierOf.get(p.productMsId) ?? "Без поставщика";
-      const skey = `${store}|${supplier}`;
-      const sa = bySupplier.get(skey) ?? { snapshot_date: date, store, supplier, stock_value: 0, items: 0 };
+      const skey = `${store}|${supplier}|${category}`;
+      const sa = bySupplier.get(skey) ?? { snapshot_date: date, store, supplier, top_category: category, stock_value: 0, items: 0 };
       sa.stock_value += cost;
       sa.items += p.stock;
       bySupplier.set(skey, sa);

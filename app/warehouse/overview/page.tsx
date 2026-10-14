@@ -300,13 +300,16 @@ export default function WarehouseOverviewPage() {
     (async () => {
       try {
         const args = { p_stores: stores, p_from: range.from, p_to: range.to };
+        // выключенные галочками категории (названия на экране → верхние категории каталога, как их хранит база)
+        const exclude = [...excludedCategories].map((label) => TOP_CATEGORIES.find((c) => c.label === label)?.key ?? label);
+        const argsEx = { ...args, p_exclude: exclude };
         type Cat = { category: string; cogs: number; stock_value: number; revenue: number; stock_value_end: number };
         type Sup = { supplier_name: string; revenue: number; cogs: number; stock_value: number; stock_value_end: number };
         type Sto = { store: string; revenue: number; cogs: number; stock_value: number; stock_value_end: number };
         const [cat, sup, sto] = await Promise.all([
           fetchAllRows<Cat>((a, b) => supabase.rpc("stock_turnover_by_category", args).range(a, b)),
-          fetchAllRows<Sup>((a, b) => supabase.rpc("warehouse_overview_by_supplier", args).range(a, b)),
-          fetchAllRows<Sto>((a, b) => supabase.rpc("warehouse_overview_by_store", args).range(a, b)),
+          fetchAllRows<Sup>((a, b) => supabase.rpc("warehouse_overview_by_supplier", argsEx).range(a, b)),
+          fetchAllRows<Sto>((a, b) => supabase.rpc("warehouse_overview_by_store", argsEx).range(a, b)),
         ]);
         if (my !== seq.current) return;
         const label = (key: string) => TOP_CATEGORIES.find((c) => c.key === key)?.label ?? key;
@@ -338,7 +341,7 @@ export default function WarehouseOverviewPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canView, storesKey, range.from, range.to]);
+  }, [canView, storesKey, range.from, range.to, [...excludedCategories].sort().join("|")]);
 
   if (!canView) {
     return (
@@ -522,7 +525,7 @@ export default function WarehouseOverviewPage() {
               ? "Поставщик — из карточки товара в МойСклад. Стрелки у колонок — сортировка."
               : b.nameHeader === "Склад"
               ? "Каждый склад отдельно (заморозка — отдельная корзина остатков). Стрелки у колонок — сортировка."
-              : "Верхние категории каталога. Галочки — какие категории учитывать в итогах и карточках (поставщики и склады считаются по всем). Стрелки у колонок — сортировка."
+              : "Верхние категории каталога. Галочки — какие категории учитывать: от них зависят итоги, карточки и таблицы «По поставщикам» и «По складам». Стрелки у колонок — сортировка."
           }
         />
       ))}
