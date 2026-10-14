@@ -20,7 +20,7 @@ import {
   totalCostKopecks,
   fetchAllProducts,
   fetchStockAll,
-  fetchStockByStore,
+  fetchAllVariants,
   fetchAllSupplies,
   fetchAllEnters,
   fetchAllMoves,
@@ -245,67 +245,122 @@ async function syncCatalogAndStock() {
   const products = await fetchAllProducts();
   const now = new Date().toISOString();
 
-  // /report/stock/all gives one summed-across-everything number per product
-  // plus its name/price/category/photo; /report/stock/bystore gives the
-  // same product split by склад but without those — combine them, resolving
-  // each склад to a city/frozen bucket via WAREHOUSE_STORE (anything
-  // unmapped, e.g. "Кайнар", is dropped rather than guessed at). Fetched
-  // before the catalog upsert below so that upsert can carry each
-  // product's image_url along in the same pass.
-  const [stockAll, stockByStore] = await Promise.all([fetchStockAll(), fetchStockByStore()]);
-  const seenIds = new Set(products.map((p) => p.id));
-  const infoById = new Map(stockAll.map((s) => [s.productMsId, s]));
+  // Остатки — по каждому складу отдельным отчётом «Остатки» (как на экране МойСклад): у каждого склада своя себестоимость,
+  // а общий отчёт «все склады» даёт одну среднюю цену на товар и теряет позиции, у которых остаток в сумме по складам нулевой
+  // (плюс в одном городе, минус в другом). Склады без города (заморозки) сливаются в свою корзину.
+  const stockByWarehouse: { warehouseId: string; store: string; rows: Awaited<ReturnType<typeof fetchStockAll>> }[] = [];
+  for (const [warehouseId, store] of Object.entries(WAREHOUSE_STORE)) {
+    // по очереди: МойСклад отвечает 429, если запросов слишком много сразу
+    stockByWarehouse.push({ warehouseId, store, rows: await fetchStockAll(undefined, warehouseId) });
+  }
+  const variants = await fetchAllVariants();
+  const infoById = new Map<string, Awaited<ReturnType<typeof fetchStockAll>>[number]>();
+  for (const w of stockByWarehouse) for (const r of w.rows) if (!infoById.has(r.productMsId) || (!infoById.get(r.productMsId)!.imageUrl && r.imageUrl)) infoById.set(r.productMsId, r);
 
-  for (const batch of chunk(products, 500)) {
-    const { error } = await supabaseAdmin.from("moysklad_products").upsert(
-      batch.map((p) => ({
-        id: p.id,
-        name: p.name,
-        category: p.category,
-        top_category: p.topCategory,
-        buy_price: p.buyPrice,
-        archived: p.archived,
-        image_url: infoById.get(p.id)?.imageUrl ?? null,
-        image_full_href: infoById.get(p.id)?.imageFullHref ?? null,
-        article: deriveArticle(p.name),
-        supplier: p.supplier,
-        synced_at: now,
-      })),
-      { onConflict: "id" }
-    );
+  const parentOf = new Map(products.map((p) => [p.id, p]));
+  const seenIds = new Set(products.map((p) => p.id));
+  const catalogRows = products.map((p) => ({
+    id: p.id,
+    name: p.name,
+    category: p.category,
+    top_category: p.topCategory,
+    buy_price: p.buyPrice,
+    archived: p.archived,
+    image_url: infoById.get(p.id)?.imageUrl ?? null,
+    image_full_href: infoById.get(p.id)?.imageFullHref ?? null,
+    article: deriveArticle(p.name),
+    supplier: p.supplier,
+    synced_at: now,
+  }));
+  // модификации: поставщик, категория и цена — от основного товара
+  for (const v of variants) {
+    if (seenIds.has(v.id)) continue;
+    const parent = parentOf.get(v.productId);
+    seenIds.add(v.id);
+    catalogRows.push({
+      id: v.id,
+      name: v.name,
+      category: parent?.category ?? infoById.get(v.id)?.category ?? null,
+      top_category: parent?.topCategory ?? infoById.get(v.id)?.topCategory ?? null,
+      buy_price: parent?.buyPrice ?? null,
+      archived: v.archived,
+      image_url: infoById.get(v.id)?.imageUrl ?? infoById.get(v.productId)?.imageUrl ?? null,
+      image_full_href: infoById.get(v.id)?.imageFullHref ?? infoById.get(v.productId)?.imageFullHref ?? null,
+      article: deriveArticle(v.name),
+      supplier: parent?.supplier ?? null,
+      synced_at: now,
+    });
+  }
+  // позиция с остатком, которой нет ни в товарах, ни в модификациях (например, услуга или комплект) — тоже заводим в каталог,
+  // чтобы остаток не терялся
+  for (const [id, r] of infoById) {
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    catalogRows.push({
+      id,
+      name: r.name,
+      category: r.category,
+      top_category: r.topCategory,
+      buy_price: r.buyPrice,
+      archived: false,
+      image_url: r.imageUrl,
+      image_full_href: r.imageFullHref,
+      article: deriveArticle(r.name),
+      supplier: null,
+      synced_at: now,
+    });
+  }
+  for (const batch of chunk(catalogRows, 500)) {
+    const { error } = await supabaseAdmin.from("moysklad_products").upsert(batch, { onConflict: "id" });
     if (error) throw error;
   }
 
-  const byStock = new Map<string, { productMsId: string; store: string; stock: number }>();
-  for (const row of stockByStore) {
-    const store = WAREHOUSE_STORE[row.warehouseId];
-    if (!store || !seenIds.has(row.productMsId)) continue;
-    const key = `${row.productMsId}|${store}`;
-    const existing = byStock.get(key);
-    if (existing) existing.stock += row.stock;
-    else byStock.set(key, { productMsId: row.productMsId, store, stock: row.stock });
+  type Agg = { productMsId: string; store: string; name: string; category: string | null; topCategory: string | null; stock: number; posStock: number; posCost: number; fallbackPrice: number | null; salePrice: number | null; stockDays: number | null };
+  const byStock = new Map<string, Agg>();
+  for (const w of stockByWarehouse) {
+    for (const r of w.rows) {
+      if (!r.stock) continue;
+      const key = `${r.productMsId}|${w.store}`;
+      const a = byStock.get(key) ?? { productMsId: r.productMsId, store: w.store, name: r.name, category: r.category, topCategory: r.topCategory, stock: 0, posStock: 0, posCost: 0, fallbackPrice: r.buyPrice, salePrice: r.salePrice, stockDays: r.stockDays };
+      a.stock += r.stock;
+      if (r.stock > 0) {
+        a.posStock += r.stock;
+        a.posCost += r.stock * (r.buyPrice ?? 0);
+      }
+      if (a.stockDays === null || (r.stockDays ?? -1) > a.stockDays) a.stockDays = r.stockDays;
+      byStock.set(key, a);
+    }
   }
-
-  const stockRows = [...byStock.values()].flatMap(({ productMsId, store, stock }) => {
-    const info = infoById.get(productMsId);
-    if (!info || stock <= 0) return [];
-    return [
-      {
-        product_ms_id: productMsId,
-        product_name: info.name,
-        category: info.category,
-        top_category: info.topCategory,
-        store,
-        stock,
-        buy_price: info.buyPrice,
-        sale_price: info.salePrice,
-        stock_days: info.stockDays,
-        synced_at: now,
-      },
-    ];
-  });
+  // плюсовые остатки — в основную таблицу; минусовые — отдельно (для итогов «как в МойСклад»)
+  const stockRows = [...byStock.values()]
+    .filter((a) => a.stock > 0)
+    .map((a) => ({
+      product_ms_id: a.productMsId,
+      product_name: a.name,
+      category: a.category,
+      top_category: a.topCategory,
+      store: a.store,
+      stock: a.stock,
+      // себестоимость единицы на этом складе (если склад заменяет несколько — средневзвешенная)
+      buy_price: a.posStock > 0 ? a.posCost / a.posStock : a.fallbackPrice,
+      sale_price: a.salePrice,
+      stock_days: a.stockDays,
+      synced_at: now,
+    }));
+  const negativeRows = [...byStock.values()]
+    .filter((a) => a.stock < 0)
+    .map((a) => ({ product_ms_id: a.productMsId, store: a.store, product_name: a.name, stock: a.stock, sale_price: a.salePrice, synced_at: now }));
   for (const batch of chunk(stockRows, 500)) {
     const { error } = await supabaseAdmin.from("moysklad_product_stock").upsert(batch, { onConflict: "product_ms_id,store" });
+    if (error) throw error;
+  }
+  // минусовые позиции пересобираем целиком: то, что перестало быть минусом, из таблицы уходит
+  if (stockRows.length >= 500) {
+    const { error: delNegError } = await supabaseAdmin.from("moysklad_product_stock_negative").delete().lt("synced_at", now);
+    if (delNegError) throw delNegError;
+  }
+  for (const batch of chunk(negativeRows, 500)) {
+    const { error } = await supabaseAdmin.from("moysklad_product_stock_negative").upsert(batch, { onConflict: "product_ms_id,store" });
     if (error) throw error;
   }
 

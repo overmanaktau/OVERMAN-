@@ -494,7 +494,7 @@ export type StockReportRow = {
 
 // moment — «остатки на момент времени» («YYYY-MM-DD HH:mm:ss», время МойСклад): через
 // filter=moment=… (отдельный параметр moment отчёт игнорирует). Без него — остатки сейчас.
-export async function fetchStockAll(moment?: string): Promise<StockReportRow[]> {
+export async function fetchStockAll(moment?: string, warehouseId?: string): Promise<StockReportRow[]> {
   // This report embeds each item's folder by name only, never its id (unlike
   // /entity/product above), so topCategory here is resolved by name through
   // byName — see fetchProductFolders.
@@ -506,7 +506,13 @@ export async function fetchStockAll(moment?: string): Promise<StockReportRow[]> 
     const page = await moyskladFetch("/report/stock/all", {
       limit: String(limit),
       offset: String(offset),
-      ...(moment ? { filter: `moment=${moment}` } : {}),
+      ...(moment || warehouseId
+        ? {
+            filter: [warehouseId ? `store=${BASE_URL}/entity/store/${warehouseId}` : "", moment ? `moment=${moment}` : ""].filter(Boolean).join(";"),
+          }
+        : {}),
+      // по складу берём все позиции, в том числе с минусом (как на экране «Остатки» МойСклад)
+      ...(warehouseId ? { stockMode: "all" } : {}),
     });
     type Raw = {
       meta?: { href?: string };
@@ -538,6 +544,22 @@ export async function fetchStockAll(moment?: string): Promise<StockReportRow[]> 
     }
     if (rows.length < limit) break;
     offset += limit;
+  }
+  return all;
+}
+
+// Модификации товаров (например, размеры у «Футболка 91020»): в отчёте остатков они идут отдельными позициями, а в списке
+// товаров (entity/product) их нет — без них такой остаток терялся.
+export type VariantRow = { id: string; name: string; productId: string; archived: boolean };
+
+export async function fetchAllVariants(): Promise<VariantRow[]> {
+  const all: VariantRow[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const page = await moyskladFetch("/entity/variant", { limit: "1000", offset: String(offset) });
+    type Raw = { id: string; name?: string; archived?: boolean; product?: { meta?: { href?: string } } };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) all.push({ id: r.id, name: r.name ?? "", productId: idOfHref(r.product?.meta?.href), archived: !!r.archived });
+    if (rows.length < 1000) break;
   }
   return all;
 }
