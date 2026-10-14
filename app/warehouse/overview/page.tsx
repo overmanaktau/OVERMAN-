@@ -528,6 +528,7 @@ ${deltaText(deltaPct(c, o))}`;
         widths,
         fontSize: 7.2,
         grid: true,
+        align: ["left", ...Array.from({ length: 12 }, () => "center" as const)],
         signColors: true,
       };
     });

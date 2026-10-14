@@ -273,7 +273,7 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
             data.cell.styles.textColor = C.accent;
             data.cell.styles.fontSize = 7;
           }
-          if (hg && data.row.index === 0) data.cell.styles.valign = "middle";
+          data.cell.styles.valign = "middle";
           return;
         }
         const kind = section.rowKinds?.[data.row.index] ?? "normal";
