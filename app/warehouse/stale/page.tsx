@@ -5,9 +5,10 @@ import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
-import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
+import { WAREHOUSES, FILTER_WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 import PdfButton from "@/components/PdfButton";
+import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
 
 // Products currently in stock with zero recorded sales in this many days —
@@ -149,22 +150,29 @@ function Lightbox({ state, onClose }: { state: LightboxState | null; onClose: ()
   );
 }
 
-const SORT_OPTIONS: { value: "money" | "saleValue" | "stock" | "days"; label: string }[] = [
+const SORT_OPTIONS: { value: "name" | "money" | "saleValue" | "stock" | "days"; label: string }[] = [
   { value: "money", label: "по деньгам (себестоимость)" },
   { value: "saleValue", label: "по цене продажи" },
   { value: "stock", label: "по остатку" },
   { value: "days", label: "по дням без продаж" },
+  { value: "name", label: "по артикулу" },
 ];
 type SortField = (typeof SORT_OPTIONS)[number]["value"];
+type Sort = SortState<SortField>;
 
 // null (never sold at all) sorts as "more stale than any finite count" —
 // treating it as +Infinity puts it first when sorting "days" descending,
 // same place it'd land if we actually knew how long ago it last sold.
-function sortRows(rows: StaleRow[], field: SortField): StaleRow[] {
+// Без выбранной стрелки — по деньгам (себестоимость), от большего к меньшему.
+function sortRows(rows: StaleRow[], sort: Sort): StaleRow[] {
+  const { key, dir } = sort ?? { key: "money" as SortField, dir: "desc" as const };
   const sorted = [...rows];
   sorted.sort((a, b) => {
-    if (field === "days") return (b.daysSinceLastSale ?? Infinity) - (a.daysSinceLastSale ?? Infinity);
-    return b[field] - a[field];
+    let cmp: number;
+    if (key === "name") cmp = a.name.localeCompare(b.name, "ru", { numeric: true });
+    else if (key === "days") cmp = (a.daysSinceLastSale ?? Infinity) - (b.daysSinceLastSale ?? Infinity);
+    else cmp = a[key] - b[key];
+    return dir === "asc" ? cmp : -cmp;
   });
   return sorted;
 }
@@ -285,7 +293,11 @@ function StaleTable({
   staleDays,
   stores,
   openLightbox,
+  sort,
+  onSort,
 }: {
+  sort: Sort;
+  onSort: (s: Sort) => void;
   rows: StaleRow[];
   mobileLayout: boolean;
   emptyText: string;
@@ -389,11 +401,11 @@ function StaleTable({
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[800px] grid grid-cols-[1.6fr_0.6fr_0.9fr_0.9fr_1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-        <div>Артикул</div>
-        <div>Остаток</div>
-        <div>Деньги (себест.)</div>
-        <div>По цене продажи</div>
-        <div>Без продаж</div>
+        <SortHead label="Артикул" k="name" sort={sort} onSort={onSort} left />
+        <SortHead label="Остаток" k="stock" sort={sort} onSort={onSort} left />
+        <SortHead label="Деньги (себест.)" k="money" sort={sort} onSort={onSort} left />
+        <SortHead label="По цене продажи" k="saleValue" sort={sort} onSort={onSort} left />
+        <SortHead label="Без продаж" k="days" sort={sort} onSort={onSort} left />
       </div>
       {rows.map((r) => {
         const isOpen = expanded.has(r.id);
@@ -518,7 +530,7 @@ export default function StaleInventoryPage() {
   const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes).filter((c) => !stocked || stocked.has(c));
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
   const effectiveStores = storeFilter.length > 0 ? storeFilter : accessibleWarehouseCodes;
-  const storeOptions = WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => ({ value: w.code, label: w.label }));
+  const storeOptions = FILTER_WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => ({ value: w.code, label: w.label }));
   function toggleStore(code: string) {
     setStoreFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
   }
@@ -530,11 +542,7 @@ export default function StaleInventoryPage() {
   // its own bucket the business tracks on purpose — always shown, never
   // folded into the store-filtered list above.
   const [frozenRows, setFrozenRows] = useState<StaleRow[]>([]);
-  const [sortField, setSortField] = useState<SortField>("money");
-  function cycleSortField() {
-    const idx = SORT_OPTIONS.findIndex((o) => o.value === sortField);
-    setSortField(SORT_OPTIONS[(idx + 1) % SORT_OPTIONS.length].value);
-  }
+  const [sort, setSort] = useState<Sort>(null);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   const [search, setSearch] = useState("");
   function bySearch(list: StaleRow[]) {
@@ -637,18 +645,18 @@ export default function StaleInventoryPage() {
           build={(): PdfDoc => {
             const labels = effectiveStores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c);
             const toRows = (list: StaleRow[]) =>
-              sortRows(bySearch(list), sortField).map((r) => [r.name, r.stock.toLocaleString("ru-RU"), money(r.money), money(r.saleValue), r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`]);
+              sortRows(bySearch(list), sort).map((r) => [r.name, r.stock.toLocaleString("ru-RU"), money(r.money), money(r.saleValue), r.daysSinceLastSale === null ? "не продавался" : `${r.daysSinceLastSale} дн.`]);
             // размеры каждого артикула — отдельным блоком, подгружается только если выбран
             const sizesSection = (title: string, list: StaleRow[], stores: string[], days: number): PdfDoc["sections"][number] => ({
               title,
               hint: "Как на сайте: артикул → размеры с остатком, деньгами и днями без продаж. Можно выбрать нужные артикулы и уровни.",
-              units: sortRows(bySearch(list), sortField).map((r) => r.name),
+              units: sortRows(bySearch(list), sort).map((r) => r.name),
               levelLabels: ["Только артикулы", "+ размеры"],
               headers: ["Артикул / размер", "Остаток, шт", "Деньги (себестоимость)", "По цене продажи", "Без продаж"],
               widths: [3.4, 1, 1.6, 1.6, 1.2],
               rows: [],
               load: async ({ skip }) => {
-                const arts = sortRows(bySearch(list), sortField).filter((_, i) => !skip.has(i));
+                const arts = sortRows(bySearch(list), sort).filter((_, i) => !skip.has(i));
                 const skus = new Map<string, (string | number)[][]>();
                 let next = 0;
                 const worker = async () => {
@@ -735,22 +743,33 @@ export default function StaleInventoryPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={cycleSortField}
-            className="self-start text-[13px] font-semibold text-accent bg-surface border border-border rounded-md px-3.5 py-2 hover:bg-paper"
-          >
-            Сортировка: {SORT_OPTIONS.find((o) => o.value === sortField)?.label}
-          </button>
+          {mobileLayout && (
+            <label className="flex flex-col gap-1.5 self-start">
+              <span className="text-xs font-semibold text-muted">Сортировка</span>
+              <select
+                value={sort?.key ?? "money"}
+                onChange={(e) => setSort({ key: e.target.value as SortField, dir: e.target.value === "name" ? "asc" : "desc" })}
+                className="bg-paper border border-border rounded-lg px-3 py-2 text-[13px]"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <StaleTable
-              rows={sortRows(bySearch(rows), sortField)}
+              rows={sortRows(bySearch(rows), sort)}
               mobileLayout={mobileLayout}
               emptyText={search ? "Ничего не найдено." : "Нет зависших остатков — всё продаётся вовремя."}
               staleDays={STALE_DAYS_QUERY}
               stores={effectiveStores}
               openLightbox={setLightbox}
+              sort={sort}
+              onSort={setSort}
             />
           </div>
 
@@ -776,12 +795,14 @@ export default function StaleInventoryPage() {
 
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <StaleTable
-              rows={sortRows(bySearch(frozenRows), sortField)}
+              rows={sortRows(bySearch(frozenRows), sort)}
               mobileLayout={mobileLayout}
               emptyText={search ? "Ничего не найдено." : "В заморозке ничего нет."}
               staleDays={-1}
               stores={["frozen"]}
               openLightbox={setLightbox}
+              sort={sort}
+              onSort={setSort}
             />
           </div>
         </>

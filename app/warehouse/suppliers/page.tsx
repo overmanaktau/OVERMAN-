@@ -5,7 +5,7 @@ import { useAuth } from "@/components/AuthGate";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { downloadExcel } from "@/lib/exportExcel";
-import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
+import { WAREHOUSES, FILTER_WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 import PdfButton from "@/components/PdfButton";
 import type { PdfDoc } from "@/lib/downloadPdf";
@@ -1024,14 +1024,14 @@ export default function SuppliersPage() {
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold text-muted">Склады</span>
           <div className="flex items-center gap-4 flex-wrap">
-            {WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => (
+            {FILTER_WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => (
               <label key={w.code} className={checkbox}>
                 <input
                   type="checkbox"
                   className="accent-accent"
                   checked={storeFilter.length === 0 || storeFilter.includes(w.code)}
                   onChange={() => {
-                    if (storeFilter.length === 0) setStoreFilter(accessibleWarehouseCodes.filter((c) => c !== w.code));
+                    if (storeFilter.length === 0) setStoreFilter(accessibleWarehouseCodes.filter((c) => c !== w.code && c !== "saya_park"));
                     else toggleStore(w.code);
                   }}
                 />

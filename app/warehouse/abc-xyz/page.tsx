@@ -5,8 +5,9 @@ import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
-import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
+import { WAREHOUSES, FILTER_WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 import PdfButton from "@/components/PdfButton";
+import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
@@ -373,7 +374,7 @@ export default function AbcXyzPage() {
   const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes);
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
   const effectiveStores = storeFilter.length > 0 ? storeFilter : accessibleWarehouseCodes;
-  const storeOptions = WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => ({ value: w.code, label: w.label }));
+  const storeOptions = FILTER_WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => ({ value: w.code, label: w.label }));
   function toggleStore(code: string) {
     setStoreFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
   }
@@ -578,17 +579,40 @@ export default function AbcXyzPage() {
     setCategoryFilter((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
   }
 
+  const [sort, setSort] = useState<SortState<"name" | "category" | "abc" | "xyz" | "revenue" | "quantity" | "days" | "margin">>(null);
+
   const categoryOptions = [...new Set(rows.map((r) => r.category))]
     .sort((a, b) => a.localeCompare(b, "ru"))
     .map((c) => ({ value: c, label: c }));
 
-  const filtered = rows.filter(
+  const matched = rows.filter(
     (r) =>
       (abcFilter.length === 0 || abcFilter.includes(r.abc)) &&
       (xyzFilter.length === 0 || xyzFilter.includes(r.xyz)) &&
       (categoryFilter.length === 0 || categoryFilter.includes(r.category)) &&
       (!search.trim() || r.name.toLowerCase().includes(search.trim().toLowerCase()))
   );
+  // Стрелки у колонок; без выбранной стрелки — прежний порядок (по обороту).
+  const filtered = sort
+    ? [...matched].sort((a, b) => {
+        const val = (r: ProductRow): number | string => {
+          switch (sort.key) {
+            case "name": return r.name;
+            case "category": return r.category;
+            case "abc": return r.abc;
+            case "xyz": return r.xyz;
+            case "revenue": return r.revenue;
+            case "quantity": return r.quantity;
+            case "days": return r.daysWithSales;
+            case "margin": return r.revenue !== 0 ? (r.revenue - r.cost) / r.revenue : 0;
+          }
+        };
+        const x = val(a);
+        const y = val(b);
+        const cmp = typeof x === "string" ? x.localeCompare(y as string, "ru", { numeric: true }) : x - (y as number);
+        return sort.dir === "asc" ? cmp : -cmp;
+      })
+    : matched;
   const totalFilteredRevenue = filtered.reduce((acc, r) => acc + r.revenue, 0);
 
   // The matrix reflects the category filter (so it stays relevant once
@@ -953,14 +977,14 @@ export default function AbcXyzPage() {
             ) : (
               <div className="overflow-x-auto">
                 <div className="min-w-[1100px] grid grid-cols-[1.4fr_1fr_0.4fr_0.4fr_0.9fr_0.6fr_0.5fr_0.7fr_1.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-                  <div>Артикул</div>
-                  <div>Категория</div>
-                  <div>ABC</div>
-                  <div>XYZ</div>
-                  <div>Оборот</div>
-                  <div>Штук</div>
-                  <div>Дней</div>
-                  <div>Валовый %</div>
+                  <SortHead label="Артикул" k="name" sort={sort} onSort={setSort} left />
+                  <SortHead label="Категория" k="category" sort={sort} onSort={setSort} left />
+                  <SortHead label="ABC" k="abc" sort={sort} onSort={setSort} left />
+                  <SortHead label="XYZ" k="xyz" sort={sort} onSort={setSort} left />
+                  <SortHead label="Оборот" k="revenue" sort={sort} onSort={setSort} left />
+                  <SortHead label="Штук" k="quantity" sort={sort} onSort={setSort} left />
+                  <SortHead label="Дней" k="days" sort={sort} onSort={setSort} left />
+                  <SortHead label="Валовый %" k="margin" sort={sort} onSort={setSort} left />
                   <div>Решение</div>
                 </div>
                 {filtered.map((r) => {

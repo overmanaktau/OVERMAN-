@@ -5,9 +5,10 @@ import { useAuth } from "@/components/AuthGate";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { downloadExcel } from "@/lib/exportExcel";
-import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
+import { WAREHOUSES, FILTER_WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 import PdfButton from "@/components/PdfButton";
+import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
 
 // Склад → «Обзор»: за выбранный период и склады — остаток (по факту на последний день периода, как в МойСклад),
@@ -115,7 +116,7 @@ function total(rows: Row[]): Row {
 }
 
 type SortKey = "name" | "stockEnd" | "share" | "stockAvg" | "revenue" | "cogs" | "profit" | "margin" | "turnover";
-type Sort = { key: SortKey; dir: "asc" | "desc" };
+type Sort = SortState<SortKey>;
 
 const COLS: { key: SortKey; label: string }[] = [
   { key: "stockEnd", label: "Остаток" },
@@ -154,7 +155,7 @@ function sortValue(r: Row, key: SortKey, stockTotal: number): number | string | 
 }
 
 function Block({ title, hint, rows, nameHeader }: { title: string; hint: string; rows: Row[]; nameHeader: string }) {
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort>(null);
   const sum = total(rows);
   const sumM = metrics(sum);
   const sorted = useMemo(() => {
@@ -172,20 +173,7 @@ function Block({ title, hint, rows, nameHeader }: { title: string; hint: string;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, sort]);
 
-  const head = (key: SortKey, label: string, left?: boolean) => {
-    const active = sort?.key === key;
-    return (
-      <button
-        type="button"
-        key={key}
-        onClick={() => setSort(active && sort?.dir === "desc" ? { key, dir: "asc" } : active ? null : { key, dir: "desc" })}
-        className={`flex items-center gap-1 ${left ? "" : "justify-end text-right"} ${active ? "text-ink font-bold" : "hover:text-ink"}`}
-      >
-        <span>{label}</span>
-        <span className="text-[10px] text-accent">{active ? (sort?.dir === "desc" ? "▼" : "▲") : ""}</span>
-      </button>
-    );
-  };
+  const head = (key: SortKey, label: string, left?: boolean) => <SortHead key={key} label={label} k={key} sort={sort} onSort={setSort} left={left} />;
 
   return (
     <section className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
@@ -299,7 +287,9 @@ export default function WarehouseOverviewPage() {
         );
         setBySupplier(sup.map((r) => ({ name: r.supplier_name, stockEnd: Number(r.stock_value_end), stockAvg: Number(r.stock_value), revenue: Number(r.revenue), cogs: Number(r.cogs) })));
         setByStore(
-          sto.map((r) => ({
+          sto
+            .filter((r) => Number(r.stock_value_end) !== 0 || Number(r.stock_value) !== 0 || Number(r.revenue) !== 0 || Number(r.cogs) !== 0)
+            .map((r) => ({
             name: WAREHOUSES.find((w) => w.code === r.store)?.label ?? (r.store === "frozen" ? "Заморозка" : r.store),
             stockEnd: Number(r.stock_value_end),
             stockAvg: Number(r.stock_value),
@@ -408,14 +398,14 @@ export default function WarehouseOverviewPage() {
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold text-muted">Склады</span>
           <div className="flex items-center gap-4 flex-wrap">
-            {WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => (
+            {FILTER_WAREHOUSES.filter((w) => accessibleWarehouseCodes.includes(w.code)).map((w) => (
               <label key={w.code} className={checkbox}>
                 <input
                   type="checkbox"
                   className="accent-accent"
                   checked={storeFilter.length === 0 || storeFilter.includes(w.code)}
                   onChange={() => {
-                    if (storeFilter.length === 0) setStoreFilter(accessibleWarehouseCodes.filter((c) => c !== w.code));
+                    if (storeFilter.length === 0) setStoreFilter(accessibleWarehouseCodes.filter((c) => c !== w.code && c !== "saya_park"));
                     else toggleStore(w.code);
                   }}
                 />
@@ -493,10 +483,10 @@ export default function WarehouseOverviewPage() {
           rows={b.rows}
           hint={
             b.nameHeader === "Поставщик"
-              ? "Поставщик — из карточки товара в МойСклад. Нажмите на заголовок колонки, чтобы отсортировать."
+              ? "Поставщик — из карточки товара в МойСклад. Стрелки у колонок — сортировка."
               : b.nameHeader === "Склад"
-              ? "Каждый склад отдельно (заморозка — отдельная корзина остатков). Нажмите на заголовок колонки, чтобы отсортировать."
-              : "Верхние категории каталога. Нажмите на заголовок колонки, чтобы отсортировать."
+              ? "Каждый склад отдельно (заморозка — отдельная корзина остатков). Стрелки у колонок — сортировка."
+              : "Верхние категории каталога. Стрелки у колонок — сортировка."
           }
         />
       ))}
