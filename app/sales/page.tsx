@@ -190,8 +190,8 @@ export default function SalesPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ltvKey]);
-  // сколько раз в среднем клиент покупает ПОВТОРНО: покупок на клиента минус первая
-  const ltvValue = ltvYear && ltvYear.clients > 0 ? ltvYear.purchases / ltvYear.clients - 1 : null;
+  // сколько продаж (чеков) в среднем делает один клиент за год
+  const ltvValue = ltvYear && ltvYear.clients > 0 ? ltvYear.purchases / ltvYear.clients : null;
   // Lets you tick a register out of "Продажи по кассам" to isolate what the
   // rest do without it (or tick everything else off to isolate just one) —
   // client-side only, affects nothing but this table's own totals.
@@ -801,7 +801,7 @@ export default function SalesPage() {
                 { label: "Оборот", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: avg(totalRevenue, totalReceipts) },
-                ...(ltvValue !== null ? [{ label: "Годовой LTV", value: ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), note: "повторных покупок на клиента за 365 дней" }] : []),
+                ...(ltvValue !== null ? [{ label: "Годовой LTV", value: ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), note: "продаж на клиента за 365 дней" }] : []),
                 { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
               ],
               sections,
@@ -828,7 +828,7 @@ export default function SalesPage() {
       </div>
 
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-1.5 w-fit" title="Не зависит от выбранного периода: всегда последние 365 дней">
-        <div className="text-xs text-muted">Годовой LTV (повторных покупок на клиента)</div>
+        <div className="text-xs text-muted">Годовой LTV (продаж на клиента)</div>
         <div className="font-serif text-[26px] font-semibold num">
           {ltvLoading ? "…" : ltvValue !== null ? ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
         </div>
