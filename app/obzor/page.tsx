@@ -209,7 +209,7 @@ export default function ObzorPage() {
   // the rest of the page (unlike the old stockDays-based version), so it
   // loads alongside range/selectedStores rather than independently.
   const [turnoverByBucket, setTurnoverByBucket] = useState<
-    { label: string; cogs: number; stockValue: number; revenue: number; stockSaleValue: number }[]
+    { label: string; cogs: number; stockValue: number; revenue: number; stockSaleValue: number; stockValueEnd: number; stockSaleValueEnd: number }[]
   >([]);
   const [turnoverLoading, setTurnoverLoading] = useState(true);
 
@@ -248,10 +248,10 @@ export default function ObzorPage() {
       }
       const byCategory = new Map<
         string,
-        { cogs: number; stock_value: number; revenue: number; stock_sale_value: number }
+        { cogs: number; stock_value: number; revenue: number; stock_sale_value: number; stock_value_end: number; stock_sale_value_end: number }
       >(
         (
-          data as { category: string; cogs: number; stock_value: number; revenue: number; stock_sale_value: number }[]
+          data as { category: string; cogs: number; stock_value: number; revenue: number; stock_sale_value: number; stock_value_end: number; stock_sale_value_end: number }[]
         ).map((row) => [row.category, row])
       );
       const buckets = TOP_CATEGORIES.map((b) => {
@@ -262,6 +262,8 @@ export default function ObzorPage() {
           stockValue: row?.stock_value ?? 0,
           revenue: row?.revenue ?? 0,
           stockSaleValue: row?.stock_sale_value ?? 0,
+          stockValueEnd: Number(row?.stock_value_end ?? 0),
+          stockSaleValueEnd: Number(row?.stock_sale_value_end ?? 0),
         };
       });
       setTurnoverByBucket(buckets);
@@ -278,6 +280,9 @@ export default function ObzorPage() {
   const turnoverPct = turnoverStockValueTotal > 0 ? (turnoverCogsTotal / turnoverStockValueTotal) * 100 : null;
   const turnoverRevenueTotal = turnoverByBucket.reduce((acc, r) => acc + r.revenue, 0);
   const turnoverStockSaleValueTotal = turnoverByBucket.reduce((acc, r) => acc + r.stockSaleValue, 0);
+  // Остаток по факту (на конец периода, как в МойСклад) — его и показываем; оборачиваемость считается по среднему остатку.
+  const stockEndTotal = turnoverByBucket.reduce((acc, r) => acc + r.stockValueEnd, 0);
+  const stockSaleEndTotal = turnoverByBucket.reduce((acc, r) => acc + r.stockSaleValueEnd, 0);
 
   // selectedStores starts empty and updates a moment later once the store
   // list finishes loading, firing a second load() call right behind the
@@ -560,16 +565,17 @@ export default function ObzorPage() {
               const body: (string | number)[][] = turnoverByBucket.map((r) => [
                 r.label,
                 money(r.cogs),
+                money(r.stockValueEnd),
                 money(r.stockValue),
                 r.stockValue > 0 ? `${((r.cogs / r.stockValue) * 100).toFixed(0)}%` : "—",
               ]);
-              body.push(["Итого", money(turnoverCogsTotal), money(turnoverStockValueTotal), turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—"]);
+              body.push(["Итого", money(turnoverCogsTotal), money(stockEndTotal), money(turnoverStockValueTotal), turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—"]);
               sections.push({
                 title: "Оборачиваемость по категориям",
                 group: "cost",
-                note: "Себестоимость продаж за период / себестоимость текущего остатка.",
-                headers: ["Категория", "Себестоимость продаж", "Себестоимость остатка", "Оборачиваемость"],
-                widths: [2, 1.6, 1.6, 1.4],
+                note: "Остаток — на конец периода, как в МойСклад. Оборачиваемость = себестоимость продаж за период / средний остаток за период.",
+                headers: ["Категория", "Себестоимость продаж", "Остаток на конец периода", "Средний остаток за период", "Оборачиваемость"],
+                widths: [2, 1.6, 1.6, 1.6, 1.4],
                 rows: body,
                 rowKinds: body.map((_, i) => (i === body.length - 1 ? "total" : "normal")),
               });
@@ -652,7 +658,7 @@ export default function ObzorPage() {
           <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
               <div className="text-[15px] font-bold">Оборачиваемость по категориям</div>
-              <div className="text-xs text-mutedLight">себест. продаж за период / себест. текущего остатка</div>
+              <div className="text-xs text-mutedLight">остаток — на конец периода (как в МойСклад); оборачиваемость — себест. продаж / средний остаток за период</div>
             </div>
             {turnoverLoading ? (
               <div className="text-sm text-muted py-2">Загрузка…</div>
@@ -677,6 +683,10 @@ export default function ObzorPage() {
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
                           <span>Остаток (себест.)</span>
+                          <span className="num">{money(r.stockValueEnd)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[12px] text-muted">
+                          <span>Средний остаток за период</span>
                           <span className="num">{money(r.stockValue)}</span>
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
@@ -685,7 +695,7 @@ export default function ObzorPage() {
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
                           <span>Остаток (прод. цена)</span>
-                          <span className="num">{money(r.stockSaleValue)}</span>
+                          <span className="num">{money(r.stockSaleValueEnd)}</span>
                         </div>
                       </div>
                     );
@@ -701,6 +711,10 @@ export default function ObzorPage() {
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
                       <span>Остаток (себест.)</span>
+                      <span className="num">{money(stockEndTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span>Средний остаток за период</span>
                       <span className="num">{money(turnoverStockValueTotal)}</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
@@ -709,7 +723,7 @@ export default function ObzorPage() {
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
                       <span>Остаток (прод. цена)</span>
-                      <span className="num">{money(turnoverStockSaleValueTotal)}</span>
+                      <span className="num">{money(stockSaleEndTotal)}</span>
                     </div>
                   </div>
                 </div>
@@ -719,18 +733,19 @@ export default function ObzorPage() {
                     продажная цена as a smaller line right under it, so the
                     extra figures sit "рядом" without widening the table. */}
                 <div className="hidden sm:flex sm:flex-col">
-                  <div className="grid grid-cols-[1fr_90px_130px_130px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
+                  <div className="grid grid-cols-[1fr_90px_130px_130px_130px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
                     <div>Категория</div>
                     <div className="text-right">Оборачив.</div>
                     <div className="text-right">Продано, ₸ (себест. / прод.)</div>
                     <div className="text-right">Остаток, ₸ (себест. / прод.)</div>
+                    <div className="text-right">Ср. остаток, ₸ (себест.)</div>
                   </div>
                   {turnoverByBucket.map((r) => {
                     const pct = r.stockValue > 0 ? (r.cogs / r.stockValue) * 100 : null;
                     return (
                       <div
                         key={r.label}
-                        className="grid grid-cols-[1fr_90px_130px_130px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
+                        className="grid grid-cols-[1fr_90px_130px_130px_130px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
                       >
                         <div className="font-semibold truncate self-center">{r.label}</div>
                         <div className="text-right num self-center">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
@@ -739,13 +754,16 @@ export default function ObzorPage() {
                           <div className="num text-[11px] text-mutedLight">{money(r.revenue)}</div>
                         </div>
                         <div className="text-right">
+                          <div className="num text-muted">{money(r.stockValueEnd)}</div>
+                          <div className="num text-[11px] text-mutedLight">{money(r.stockSaleValueEnd)}</div>
+                        </div>
+                        <div className="text-right self-center">
                           <div className="num text-muted">{money(r.stockValue)}</div>
-                          <div className="num text-[11px] text-mutedLight">{money(r.stockSaleValue)}</div>
                         </div>
                       </div>
                     );
                   })}
-                  <div className="grid grid-cols-[1fr_90px_130px_130px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
+                  <div className="grid grid-cols-[1fr_90px_130px_130px_130px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
                     <div className="self-center">Итого</div>
                     <div className="text-right num self-center">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</div>
                     <div className="text-right">
@@ -753,8 +771,11 @@ export default function ObzorPage() {
                       <div className="num text-[11px] font-normal text-mutedLight">{money(turnoverRevenueTotal)}</div>
                     </div>
                     <div className="text-right">
+                      <div className="num">{money(stockEndTotal)}</div>
+                      <div className="num text-[11px] font-normal text-mutedLight">{money(stockSaleEndTotal)}</div>
+                    </div>
+                    <div className="text-right self-center">
                       <div className="num">{money(turnoverStockValueTotal)}</div>
-                      <div className="num text-[11px] font-normal text-mutedLight">{money(turnoverStockSaleValueTotal)}</div>
                     </div>
                   </div>
                 </div>

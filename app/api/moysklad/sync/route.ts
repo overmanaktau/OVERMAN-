@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { syncEmployeeNamesEverywhere } from "@/lib/employeeNames";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
+import { aggregateStock, fetchStockByWarehouses, writeStock } from "@/lib/stockSync";
 
 // Without this, Vercel caps the function at its platform default (well
 // under a minute) — this route now does a full catalog/stock/supply resync
@@ -248,11 +249,7 @@ async function syncCatalogAndStock() {
   // Остатки — по каждому складу отдельным отчётом «Остатки» (как на экране МойСклад): у каждого склада своя себестоимость,
   // а общий отчёт «все склады» даёт одну среднюю цену на товар и теряет позиции, у которых остаток в сумме по складам нулевой
   // (плюс в одном городе, минус в другом). Склады без города (заморозки) сливаются в свою корзину.
-  const stockByWarehouse: { warehouseId: string; store: string; rows: Awaited<ReturnType<typeof fetchStockAll>> }[] = [];
-  for (const [warehouseId, store] of Object.entries(WAREHOUSE_STORE)) {
-    // по очереди: МойСклад отвечает 429, если запросов слишком много сразу
-    stockByWarehouse.push({ warehouseId, store, rows: await fetchStockAll(undefined, warehouseId) });
-  }
+  const stockByWarehouse = await fetchStockByWarehouses();
   const variants = await fetchAllVariants();
   const infoById = new Map<string, Awaited<ReturnType<typeof fetchStockAll>>[number]>();
   for (const w of stockByWarehouse) for (const r of w.rows) if (!infoById.has(r.productMsId) || (!infoById.get(r.productMsId)!.imageUrl && r.imageUrl)) infoById.set(r.productMsId, r);
@@ -315,87 +312,8 @@ async function syncCatalogAndStock() {
     if (error) throw error;
   }
 
-  type Agg = { productMsId: string; store: string; name: string; category: string | null; topCategory: string | null; stock: number; posStock: number; posCost: number; fallbackPrice: number | null; salePrice: number | null; stockDays: number | null };
-  const byStock = new Map<string, Agg>();
-  for (const w of stockByWarehouse) {
-    for (const r of w.rows) {
-      if (!r.stock) continue;
-      const key = `${r.productMsId}|${w.store}`;
-      const a = byStock.get(key) ?? { productMsId: r.productMsId, store: w.store, name: r.name, category: r.category, topCategory: r.topCategory, stock: 0, posStock: 0, posCost: 0, fallbackPrice: r.buyPrice, salePrice: r.salePrice, stockDays: r.stockDays };
-      a.stock += r.stock;
-      if (r.stock > 0) {
-        a.posStock += r.stock;
-        a.posCost += r.stock * (r.buyPrice ?? 0);
-      }
-      if (a.stockDays === null || (r.stockDays ?? -1) > a.stockDays) a.stockDays = r.stockDays;
-      byStock.set(key, a);
-    }
-  }
-  // плюсовые остатки — в основную таблицу; минусовые — отдельно (для итогов «как в МойСклад»)
-  const stockRows = [...byStock.values()]
-    .filter((a) => a.stock > 0)
-    .map((a) => ({
-      product_ms_id: a.productMsId,
-      product_name: a.name,
-      category: a.category,
-      top_category: a.topCategory,
-      store: a.store,
-      stock: a.stock,
-      // себестоимость единицы на этом складе (если склад заменяет несколько — средневзвешенная)
-      buy_price: a.posStock > 0 ? a.posCost / a.posStock : a.fallbackPrice,
-      sale_price: a.salePrice,
-      stock_days: a.stockDays,
-      synced_at: now,
-    }));
-  const negativeRows = [...byStock.values()]
-    .filter((a) => a.stock < 0)
-    .map((a) => ({ product_ms_id: a.productMsId, store: a.store, product_name: a.name, stock: a.stock, sale_price: a.salePrice, synced_at: now }));
-  for (const batch of chunk(stockRows, 500)) {
-    const { error } = await supabaseAdmin.from("moysklad_product_stock").upsert(batch, { onConflict: "product_ms_id,store" });
-    if (error) throw error;
-  }
-  // минусовые позиции пересобираем целиком: то, что перестало быть минусом, из таблицы уходит
-  if (stockRows.length >= 500) {
-    const { error: delNegError } = await supabaseAdmin.from("moysklad_product_stock_negative").delete().lt("synced_at", now);
-    if (delNegError) throw delNegError;
-  }
-  for (const batch of chunk(negativeRows, 500)) {
-    const { error } = await supabaseAdmin.from("moysklad_product_stock_negative").upsert(batch, { onConflict: "product_ms_id,store" });
-    if (error) throw error;
-  }
-
-  // Таблица остатков хранит только позиции с остатком больше нуля. Всё, что распродано или
-  // переехало, раньше оставалось в ней навсегда и раздувало себестоимость остатка (и занижало
-  // оборачиваемость) — теперь такие строки удаляются. Защита: если пришло подозрительно
-  // мало строк (сбой отчёта), ничего не удаляем.
-  let staleRemoved = 0;
-  if (stockRows.length >= 500) {
-    const live = new Set(stockRows.map((r) => `${r.product_ms_id}|${r.store}`));
-    const tracked = new Set(Object.values(WAREHOUSE_STORE));
-    const stale: { product_ms_id: string; store: string }[] = [];
-    for (let offset = 0; ; offset += 1000) {
-      const { data, error } = await supabaseAdmin
-        .from("moysklad_product_stock")
-        .select("product_ms_id, store")
-        .order("product_ms_id")
-        .order("store")
-        .range(offset, offset + 999);
-      if (error) throw error;
-      for (const r of (data ?? []) as { product_ms_id: string; store: string }[]) {
-        if (tracked.has(r.store) && !live.has(`${r.product_ms_id}|${r.store}`)) stale.push(r);
-      }
-      if (!data || data.length < 1000) break;
-    }
-    const byStore = new Map<string, string[]>();
-    for (const r of stale) byStore.set(r.store, [...(byStore.get(r.store) ?? []), r.product_ms_id]);
-    for (const [store, ids] of byStore) {
-      for (const batch of chunk(ids, 200)) {
-        const { error } = await supabaseAdmin.from("moysklad_product_stock").delete().eq("store", store).in("product_ms_id", batch);
-        if (error) throw error;
-      }
-    }
-    staleRemoved = stale.length;
-  }
+  const { stockRows, negativeRows } = aggregateStock(stockByWarehouse, now);
+  const staleRemoved = await writeStock(stockRows, negativeRows, now);
 
   // Only ~400 приёмки ever — cheap enough to refetch and rebuild in full
   // every sync, same as the catalog/stock snapshot above.
