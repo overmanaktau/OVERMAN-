@@ -74,6 +74,55 @@ function rangeOf(period: Period, custom: { from: string; to: string }): { from: 
   return { from: ymd(start), to: ymd(end), label: period === 0 ? `${label} (${fmtRuDate(ymd(start))})` : `${label} (${fmtRuDate(ymd(start))} — ${fmtRuDate(ymd(end))})` };
 }
 
+// Сравнение: предыдущий период такой же длины. «Эта неделя» и «С начала месяца» сравниваются с тем же отрезком прошлой недели / прошлого месяца
+// (по сегодняшний день недели / число), «Всё время» не сравнивается.
+function prevRangeOf(period: Period, cur: { from: string; to: string }): { from: string; to: string; label: string } | null {
+  if (period === 5) return null;
+  const parse = (iso: string) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const add = (x: Date, n: number) => new Date(x.getFullYear(), x.getMonth(), x.getDate() + n);
+  const from = parse(cur.from);
+  const to = parse(cur.to);
+  const today = new Date();
+  const d0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let start: Date;
+  let end: Date;
+  if (period === 2) {
+    start = add(from, -7);
+    end = add(d0, -7);
+  } else if (period === 3) {
+    start = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+    const lastDay = new Date(from.getFullYear(), from.getMonth(), 0).getDate();
+    end = new Date(start.getFullYear(), start.getMonth(), Math.min(to.getDate(), lastDay));
+  } else if (period === 4) {
+    start = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+    end = new Date(from.getFullYear(), from.getMonth(), 0);
+  } else {
+    const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+    end = add(from, -1);
+    start = add(end, -(days - 1));
+  }
+  const a = ymd(start);
+  const b = ymd(end);
+  return { from: a, to: b, label: a === b ? fmtRuDate(a) : `${fmtRuDate(a)} — ${fmtRuDate(b)}` };
+}
+
+// Разница к предыдущему периоду, %: (сейчас − тогда) ÷ |тогда|. Если тогда было 0 — не посчитать.
+function deltaPct(cur: number | null, prev: number | null | undefined): number | null {
+  if (cur === null || prev === null || prev === undefined || prev === 0) return null;
+  return ((cur - prev) / Math.abs(prev)) * 100;
+}
+function deltaText(v: number | null): string {
+  if (v === null) return "—";
+  const t = Math.abs(v).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${t}%`;
+}
+function Delta({ v }: { v: number | null }) {
+  return <div className={`text-[11px] ${v === null || Math.abs(v) < 0.05 ? "text-mutedLight" : v > 0 ? "text-accent" : "text-[#A34B36]"}`}>{deltaText(v)}</div>;
+}
+
 async function fetchAllRows<T>(
   build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
 ): Promise<T[]> {
@@ -160,6 +209,7 @@ function Block({
   nameHeader,
   excluded,
   onToggle,
+  prev,
 }: {
   title: string;
   hint: string;
@@ -167,12 +217,16 @@ function Block({
   nameHeader: string;
   excluded?: Set<string>; // выключенные галочками строки (только у блока с галочками)
   onToggle?: (name: string) => void;
+  prev?: Row[] | null; // тот же разрез за предыдущий период (для разницы)
 }) {
   const [sort, setSort] = useState<Sort>(null);
   const selectable = !!onToggle;
   const isOn = (name: string) => !excluded?.has(name);
   const sum = total(selectable ? rows.filter((r) => isOn(r.name)) : rows);
   const sumM = metrics(sum);
+  const prevMap = new Map((prev ?? []).map((r) => [r.name, r]));
+  const prevSum = prev ? total(selectable ? prev.filter((r) => isOn(r.name)) : prev) : null;
+  const prevSumM = prevSum ? metrics(prevSum) : null;
   const sorted = useMemo(() => {
     const base = [...rows];
     if (!sort) return base.sort((a, b) => b.stockEnd - a.stockEnd);
@@ -207,6 +261,9 @@ function Block({
             </div>
             {sorted.map((r) => {
               const m = metrics(r);
+              const pr = prev ? prevMap.get(r.name) : undefined;
+              const pm = pr ? metrics(pr) : null;
+              const cmp = (cur: number | null, old: number | null | undefined) => (prev ? <Delta v={pr ? deltaPct(cur, old) : null} /> : null);
               return (
                 <div key={r.name} className={`grid ${GRID} gap-3 py-2.5 items-center text-[13px] border-b border-border/60 ${selectable && !isOn(r.name) ? "opacity-45" : ""}`}>
                   {selectable ? (
@@ -217,25 +274,25 @@ function Block({
                   ) : (
                     <div className="font-medium break-words">{r.name}</div>
                   )}
-                  <div className="num text-right">{money(r.stockEnd)}</div>
+                  <div className="num text-right">{money(r.stockEnd)}{cmp(r.stockEnd, pr?.stockEnd)}</div>
                   <div className="num text-right text-muted">{pctText(sum.stockEnd > 0 ? (r.stockEnd / sum.stockEnd) * 100 : null)}</div>
-                  <div className="num text-right">{money(r.revenue)}</div>
-                  <div className="num text-right">{money(r.cogs)}</div>
-                  <div className={`num text-right font-semibold ${m.profit < 0 ? "text-[#A34B36]" : ""}`}>{money(m.profit)}</div>
-                  <div className="num text-right text-muted">{pctText(m.margin)}</div>
-                  <div className="num text-right">{pctText(m.turnover)}</div>
+                  <div className="num text-right">{money(r.revenue)}{cmp(r.revenue, pr?.revenue)}</div>
+                  <div className="num text-right">{money(r.cogs)}{cmp(r.cogs, pr?.cogs)}</div>
+                  <div className={`num text-right font-semibold ${m.profit < 0 ? "text-[#A34B36]" : ""}`}>{money(m.profit)}{cmp(m.profit, pm?.profit)}</div>
+                  <div className="num text-right text-muted">{pctText(m.margin)}{cmp(m.margin, pm?.margin)}</div>
+                  <div className="num text-right">{pctText(m.turnover)}{cmp(m.turnover, pm?.turnover)}</div>
                 </div>
               );
             })}
             <div className={`grid ${GRID} gap-3 py-3 items-center text-[13px] font-bold bg-paper`}>
               <div className="pl-2">Итого</div>
-              <div className="num text-right">{money(sum.stockEnd)}</div>
+              <div className="num text-right">{money(sum.stockEnd)}{prevSum && <Delta v={deltaPct(sum.stockEnd, prevSum.stockEnd)} />}</div>
               <div className="num text-right text-muted">{sum.stockEnd > 0 ? "100,0%" : "—"}</div>
-              <div className="num text-right">{money(sum.revenue)}</div>
-              <div className="num text-right">{money(sum.cogs)}</div>
-              <div className="num text-right">{money(sumM.profit)}</div>
-              <div className="num text-right text-muted">{pctText(sumM.margin)}</div>
-              <div className="num text-right">{pctText(sumM.turnover)}</div>
+              <div className="num text-right">{money(sum.revenue)}{prevSum && <Delta v={deltaPct(sum.revenue, prevSum.revenue)} />}</div>
+              <div className="num text-right">{money(sum.cogs)}{prevSum && <Delta v={deltaPct(sum.cogs, prevSum.cogs)} />}</div>
+              <div className="num text-right">{money(sumM.profit)}{prevSumM && <Delta v={deltaPct(sumM.profit, prevSumM.profit)} />}</div>
+              <div className="num text-right text-muted">{pctText(sumM.margin)}{prevSumM && <Delta v={deltaPct(sumM.margin, prevSumM.margin)} />}</div>
+              <div className="num text-right">{pctText(sumM.turnover)}{prevSumM && <Delta v={deltaPct(sumM.turnover, prevSumM.turnover)} />}</div>
             </div>
           </div>
         </div>
@@ -263,6 +320,7 @@ export default function WarehouseOverviewPage() {
     return { from: ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() - 6)), to: ymd(t) };
   });
   const range = rangeOf(period, custom);
+  const prevRange = prevRangeOf(period, range);
 
   const [byCategory, setByCategory] = useState<Row[]>([]);
   // категории, выключенные галочками (по умолчанию — «Бесплатный» и «Без категории»); итоги блока и карточек считаются по включённым
@@ -278,6 +336,8 @@ export default function WarehouseOverviewPage() {
   const categoriesOn = byCategory.filter((r) => !excludedCategories.has(r.name));
   const [bySupplier, setBySupplier] = useState<Row[]>([]);
   const [byStore, setByStore] = useState<Row[]>([]);
+  // то же за предыдущий период — для разницы (null — период без сравнения или данные ещё не пришли)
+  const [prevData, setPrevData] = useState<{ cat: Row[]; sup: Row[]; sto: Row[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const seq = useRef(0);
@@ -296,41 +356,45 @@ export default function WarehouseOverviewPage() {
     setError(null);
     (async () => {
       try {
-        const args = { p_stores: stores, p_from: range.from, p_to: range.to };
         // выключенные галочками категории (названия на экране → верхние категории каталога, как их хранит база)
         const exclude = [...excludedCategories].map((label) => TOP_CATEGORIES.find((c) => c.label === label)?.key ?? label);
-        const argsEx = { ...args, p_exclude: exclude };
         type Cat = { category: string; cogs: number; stock_value: number; revenue: number; stock_value_end: number };
         type Sup = { supplier_name: string; revenue: number; cogs: number; stock_value: number; stock_value_end: number };
         type Sto = { store: string; revenue: number; cogs: number; stock_value: number; stock_value_end: number };
-        const [cat, sup, sto] = await Promise.all([
-          fetchAllRows<Cat>((a, b) => supabase.rpc("stock_turnover_by_category", args).range(a, b)),
-          fetchAllRows<Sup>((a, b) => supabase.rpc("warehouse_overview_by_supplier", argsEx).range(a, b)),
-          fetchAllRows<Sto>((a, b) => supabase.rpc("warehouse_overview_by_store", argsEx).range(a, b)),
-        ]);
-        if (my !== seq.current) return;
         const label = (key: string) => TOP_CATEGORIES.find((c) => c.key === key)?.label ?? key;
         const order = (key: string) => {
           const i = TOP_CATEGORIES.findIndex((c) => c.key === key);
           return i === -1 ? 99 : i;
         };
-        setByCategory(
-          [...cat]
-            .sort((x, y) => order(x.category) - order(y.category))
-            .map((r) => ({ name: label(r.category), stockEnd: Number(r.stock_value_end), stockAvg: Number(r.stock_value), revenue: Number(r.revenue), cogs: Number(r.cogs) }))
-        );
-        setBySupplier(sup.map((r) => ({ name: r.supplier_name, stockEnd: Number(r.stock_value_end), stockAvg: Number(r.stock_value), revenue: Number(r.revenue), cogs: Number(r.cogs) })));
-        setByStore(
-          sto
-            .filter((r) => Number(r.stock_value_end) !== 0 || Number(r.stock_value) !== 0 || Number(r.revenue) !== 0 || Number(r.cogs) !== 0)
-            .map((r) => ({
-            name: WAREHOUSES.find((w) => w.code === r.store)?.label ?? (r.store === "frozen" ? "Заморозка" : r.store),
-            stockEnd: Number(r.stock_value_end),
-            stockAvg: Number(r.stock_value),
-            revenue: Number(r.revenue),
-            cogs: Number(r.cogs),
-          }))
-        );
+        const mk = (name: string, r: { stock_value_end: number; stock_value: number; revenue: number; cogs: number }): Row => ({
+          name,
+          stockEnd: Number(r.stock_value_end),
+          stockAvg: Number(r.stock_value),
+          revenue: Number(r.revenue),
+          cogs: Number(r.cogs),
+        });
+        const fetchSet = async (from: string, to: string) => {
+          const args = { p_stores: stores, p_from: from, p_to: to };
+          const argsEx = { ...args, p_exclude: exclude };
+          const [cat, sup, sto] = await Promise.all([
+            fetchAllRows<Cat>((a, b) => supabase.rpc("stock_turnover_by_category", args).range(a, b)),
+            fetchAllRows<Sup>((a, b) => supabase.rpc("warehouse_overview_by_supplier", argsEx).range(a, b)),
+            fetchAllRows<Sto>((a, b) => supabase.rpc("warehouse_overview_by_store", argsEx).range(a, b)),
+          ]);
+          return {
+            cat: [...cat].sort((x, y) => order(x.category) - order(y.category)).map((r) => mk(label(r.category), r)),
+            sup: sup.map((r) => mk(r.supplier_name, r)),
+            sto: sto
+              .filter((r) => Number(r.stock_value_end) !== 0 || Number(r.stock_value) !== 0 || Number(r.revenue) !== 0 || Number(r.cogs) !== 0)
+              .map((r) => mk(WAREHOUSES.find((w) => w.code === r.store)?.label ?? (r.store === "frozen" ? "Заморозка" : r.store), r)),
+          };
+        };
+        const [now, before] = await Promise.all([fetchSet(range.from, range.to), prevRange ? fetchSet(prevRange.from, prevRange.to) : Promise.resolve(null)]);
+        if (my !== seq.current) return;
+        setByCategory(now.cat);
+        setBySupplier(now.sup);
+        setByStore(now.sto);
+        setPrevData(before);
       } catch (e) {
         if (my === seq.current) setError(getErrorMessage(e));
       } finally {
@@ -338,7 +402,7 @@ export default function WarehouseOverviewPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canView, storesKey, range.from, range.to, [...excludedCategories].sort().join("|")]);
+  }, [canView, storesKey, range.from, range.to, prevRange?.from, prevRange?.to, [...excludedCategories].sort().join("|")]);
 
   if (!canView) {
     return (
@@ -350,44 +414,80 @@ export default function WarehouseOverviewPage() {
 
   const sum = total(byCategory.length > 0 ? categoriesOn : byStore);
   const sumM = metrics(sum);
+  const prevCategoriesOn = prevData ? prevData.cat.filter((r) => !excludedCategories.has(r.name)) : null;
+  const prevSum = prevData ? total(prevCategoriesOn && prevCategoriesOn.length > 0 ? prevCategoriesOn : prevData.sto) : null;
+  const prevSumM = prevSum ? metrics(prevSum) : null;
   const storeLabels = stores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? (c === "frozen" ? "Заморозка" : c));
 
   function toggleStore(code: string) {
     setStoreFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
   }
 
-  const tableRow = (r: Row): (string | number)[] => {
+  // разница к предыдущему периоду по метрикам строки (в том же порядке, что и колонки): остаток, продано, себестоимость, валовая прибыль, валовый %, оборачиваемость
+  const deltasOf = (r: Row, pr: Row | null | undefined): (number | null)[] => {
+    if (!pr) return [null, null, null, null, null, null];
     const m = metrics(r);
-    return [r.name, money(r.stockEnd), money(r.revenue), money(r.cogs), money(m.profit), pctText(m.margin), pctText(m.turnover)];
+    const pm = metrics(pr);
+    return [deltaPct(r.stockEnd, pr.stockEnd), deltaPct(r.revenue, pr.revenue), deltaPct(r.cogs, pr.cogs), deltaPct(m.profit, pm.profit), deltaPct(m.margin, pm.margin), deltaPct(m.turnover, pm.turnover)];
   };
-  const excelRow = (r: Row): (string | number)[] => {
+  const withDelta = (text: string, d: number | null) => (prevRange ? `${text} (${deltaText(d)})` : text);
+  const tableRow = (r: Row, pr?: Row | null): (string | number)[] => {
     const m = metrics(r);
-    return [r.name, Math.round(r.stockEnd * 100) / 100, Math.round(r.revenue * 100) / 100, Math.round(r.cogs * 100) / 100, Math.round(m.profit * 100) / 100, m.margin === null ? "" : Math.round(m.margin * 10) / 10, m.turnover === null ? "" : Math.round(m.turnover * 10) / 10];
+    const d = deltasOf(r, pr);
+    return [r.name, withDelta(money(r.stockEnd), d[0]), withDelta(money(r.revenue), d[1]), withDelta(money(r.cogs), d[2]), withDelta(money(m.profit), d[3]), withDelta(pctText(m.margin), d[4]), withDelta(pctText(m.turnover), d[5])];
+  };
+  const excelRow = (r: Row, pr?: Row | null): (string | number)[] => {
+    const m = metrics(r);
+    const base: (string | number)[] = [r.name, Math.round(r.stockEnd * 100) / 100, Math.round(r.revenue * 100) / 100, Math.round(r.cogs * 100) / 100, Math.round(m.profit * 100) / 100, m.margin === null ? "" : Math.round(m.margin * 10) / 10, m.turnover === null ? "" : Math.round(m.turnover * 10) / 10];
+    if (!prevRange) return base;
+    return [...base, ...deltasOf(r, pr).map((v) => (v === null ? "" : Math.round(v * 10) / 10))];
+  };
+  const blockPrev = (b: { nameHeader: string }) => (prevData ? (b.nameHeader === "Категория" ? prevData.cat : b.nameHeader === "Поставщик" ? prevData.sup : prevData.sto) : null);
+  const prevOf = (b: { nameHeader: string }) => new Map((blockPrev(b) ?? []).map((r) => [r.name, r]));
+  const totalPrev = (b: { nameHeader: string; rows: Row[] }): Row | null => {
+    const pr = blockPrev(b);
+    if (!pr) return null;
+    // у блока категорий в итог входят только включённые строки (b.rows уже отфильтрованы) — для прошлого периода те же категории
+    const names = new Set(b.rows.map((r) => r.name));
+    return total(b.nameHeader === "Категория" ? pr.filter((r) => names.has(r.name)) : pr);
   };
   const blocks: { title: string; nameHeader: string; rows: Row[] }[] = [
     { title: "По категориям", nameHeader: "Категория", rows: categoriesOn },
     { title: "По поставщикам", nameHeader: "Поставщик", rows: bySupplier },
     { title: "По складам", nameHeader: "Склад", rows: byStore },
   ];
-  const excelHeaders = (first: string) => [first, "Остаток (себестоимость)", "Продано (выручка)", "Себестоимость продаж", "Валовая прибыль", "Валовый, %", "Оборачиваемость, %"];
+  const excelHeaders = (first: string) => [
+    first,
+    "Остаток (себестоимость)",
+    "Продано (выручка)",
+    "Себестоимость продаж",
+    "Валовая прибыль",
+    "Валовый, %",
+    "Оборачиваемость, %",
+    ...(prevRange ? ["Остаток, разница %", "Продано, разница %", "Себестоимость, разница %", "Валовая прибыль, разница %", "Валовый, разница %", "Оборачиваемость, разница %"] : []),
+  ];
 
   function exportXls() {
     const rows: (string | number)[][] = [];
+    const width = excelHeaders("").length;
+    const blank = Array.from({ length: width }, () => "");
     for (const b of blocks) {
-      rows.push([`— ${b.title} —`, "", "", "", "", "", ""]);
+      const pm = prevOf(b);
+      rows.push([`— ${b.title} —`, ...blank.slice(1)]);
       rows.push(excelHeaders(b.nameHeader));
-      rows.push(...[...b.rows].sort((x, y) => y.stockEnd - x.stockEnd).map(excelRow));
-      rows.push(excelRow(total(b.rows)));
-      rows.push(["", "", "", "", "", "", ""]);
+      rows.push(...[...b.rows].sort((x, y) => y.stockEnd - x.stockEnd).map((r) => excelRow(r, pm.get(r.name))));
+      rows.push(excelRow(total(b.rows), totalPrev(b)));
+      rows.push(blank);
     }
     downloadExcel("Склад_обзор", excelHeaders("Название"), rows);
   }
 
   const checkbox = "flex items-center gap-1.5 text-[13px] cursor-pointer";
-  const kpi = (label: string, value: string, note?: string) => (
+  const kpi = (label: string, value: string, note?: string, delta?: number | null) => (
     <div className="bg-surface border border-border rounded-card px-5 py-4 flex flex-col gap-1 min-w-0">
       <div className="text-xs font-semibold text-muted">{label}</div>
       <div className="num text-[20px] font-semibold break-words">{value}</div>
+      {delta !== undefined && <Delta v={delta} />}
       {note && <div className="text-[11px] text-mutedLight">{note}</div>}
     </div>
   );
@@ -469,7 +569,7 @@ export default function WarehouseOverviewPage() {
               fileName: "Склад_обзор",
               orientation: "landscape",
               title: "Склад — обзор",
-              subtitle: `Период: ${range.label} · склады: ${storeLabels.join(", ")}`,
+              subtitle: `Период: ${range.label}${prevRange ? ` · разница к периоду ${prevRange.label}` : ""} · склады: ${storeLabels.join(", ")}`,
               meta: [
                 "Остаток — по факту на последний день периода, как в МойСклад",
                 "Оборачиваемость — себестоимость продаж ÷ средний остаток за период",
@@ -483,7 +583,8 @@ export default function WarehouseOverviewPage() {
               ],
               sections: blocks.map((b) => {
                 const sorted = [...b.rows].sort((x, y) => y.stockEnd - x.stockEnd);
-                const body = [...sorted.map(tableRow), tableRow(total(b.rows))];
+                const pm = prevOf(b);
+                const body = [...sorted.map((r) => tableRow(r, pm.get(r.name))), tableRow(total(b.rows), totalPrev(b))];
                 return {
                   title: b.title,
                   headers: [b.nameHeader, "Остаток", "Продано", "Себестоимость", "Валовая прибыль", "Валовый %", "Оборачиваемость"],
@@ -499,14 +600,15 @@ export default function WarehouseOverviewPage() {
 
       <div className="text-xs text-muted">
         Период: {range.label}
+        {prevRange ? ` · разница к периоду ${prevRange.label}` : " · для «Всё время» разницы нет"}
         {loading && " · загрузка…"}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {kpi("Остаток (себестоимость)", money(sum.stockEnd), "по факту на конец периода")}
-        {kpi("Продано", money(sum.revenue), `себестоимость ${money(sum.cogs)}`)}
-        {kpi("Валовая прибыль", money(sumM.profit), sumM.margin === null ? undefined : `валовый ${pctText(sumM.margin)}`)}
-        {kpi("Оборачиваемость", pctText(sumM.turnover))}
+        {kpi("Остаток (себестоимость)", money(sum.stockEnd), "по факту на конец периода", prevSum ? deltaPct(sum.stockEnd, prevSum.stockEnd) : undefined)}
+        {kpi("Продано", money(sum.revenue), `себестоимость ${money(sum.cogs)}`, prevSum ? deltaPct(sum.revenue, prevSum.revenue) : undefined)}
+        {kpi("Валовая прибыль", money(sumM.profit), sumM.margin === null ? undefined : `валовый ${pctText(sumM.margin)}`, prevSumM ? deltaPct(sumM.profit, prevSumM.profit) : undefined)}
+        {kpi("Оборачиваемость", pctText(sumM.turnover), undefined, prevSumM ? deltaPct(sumM.turnover, prevSumM.turnover) : undefined)}
       </div>
 
       {blocks.map((b) => (
@@ -517,6 +619,7 @@ export default function WarehouseOverviewPage() {
           rows={b.nameHeader === "Категория" ? byCategory : b.rows}
           excluded={b.nameHeader === "Категория" ? excludedCategories : undefined}
           onToggle={b.nameHeader === "Категория" ? toggleCategory : undefined}
+          prev={prevData ? (b.nameHeader === "Категория" ? prevData.cat : b.nameHeader === "Поставщик" ? prevData.sup : prevData.sto) : null}
           hint={
             b.nameHeader === "Поставщик"
               ? "Поставщик — из карточки товара в МойСклад. Стрелки у колонок — сортировка."
