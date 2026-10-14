@@ -22,6 +22,7 @@ export type PdfSection = {
   // двухэтажная шапка: группа без subs занимает оба этажа (обычно первая колонка), группа с subs — объединяет span колонок и показывает под собой подписи subs
   headGroups?: { label: string; span: number; subs?: string[] }[];
   fontSize?: number; // размер текста таблицы (по умолчанию 8.4) — для широких таблиц
+  grid?: boolean; // контуры: линии между всеми ячейками, группы колонок отделены жирнее
   signColors?: boolean; // ячейки, начинающиеся с «+» / «−», красятся зелёным / красным (разница к прошлому периоду)
   indent?: number[]; // отступ первой колонки (уровень вложенности) по строкам
   // — для окна «Что скачать» (PdfButton): —
@@ -220,6 +221,16 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
         hg.flatMap((g) => (g.subs ? g.subs.map(clean) : [])),
       ];
     }
+    // начала групп колонок (жирная линия слева) — только для таблицы с контурами
+    const groupStarts = new Set<number>();
+    if (section.grid) {
+      let pos = 0;
+      for (const g of hg ?? []) {
+        groupStarts.add(pos);
+        pos += g.span;
+      }
+    }
+    const gridLine: [number, number, number] = [150, 143, 126];
     const bodyFont = section.fontSize ?? 8.4;
     const tightPad = section.fontSize !== undefined && section.fontSize < 8;
     autoTable(pdf, {
@@ -234,8 +245,8 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
         fontSize: bodyFont,
         textColor: C.ink,
         cellPadding: { top: 2.1, bottom: 2.1, left: tightPad ? 1.6 : 2.6, right: tightPad ? 1.6 : 2.6 },
-        lineColor: C.soft,
-        lineWidth: 0,
+        lineColor: section.grid ? gridLine : C.soft,
+        lineWidth: section.grid ? 0.2 : 0,
         overflow: "linebreak",
         valign: "middle",
       },
@@ -249,6 +260,11 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
       alternateRowStyles: { fillColor: C.stripe },
       columnStyles,
       didParseCell: (data) => {
+        if (section.grid) {
+          const heavy = groupStarts.has(data.column.index);
+          data.cell.styles.lineWidth = { top: 0.2, bottom: 0.2, right: 0.2, left: heavy ? 0.7 : 0.2 };
+          if (data.section === "head") data.cell.styles.lineColor = [255, 255, 255];
+        }
         if (data.section === "head") {
           data.cell.styles.halign = hg && data.cell.colSpan > 1 ? "center" : align[data.column.index];
           if (hg && data.row.index === 1) {
@@ -283,7 +299,7 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
         }
       },
       didDrawCell: (data) => {
-        if (data.section !== "body") return;
+        if (data.section !== "body" || section.grid) return;
         // тонкая линия под каждой строкой — глазу проще держать строку
         pdf.setDrawColor(...C.soft);
         pdf.setLineWidth(0.15);

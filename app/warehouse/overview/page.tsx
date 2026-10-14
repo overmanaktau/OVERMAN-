@@ -527,6 +527,7 @@ ${deltaText(deltaPct(c, o))}`;
         rowKinds: rows.map((_, i) => (i === rows.length - 1 ? ("total" as const) : ("normal" as const))),
         widths,
         fontSize: 7.2,
+        grid: true,
         signColors: true,
       };
     });
