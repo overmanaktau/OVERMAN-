@@ -62,24 +62,17 @@ function dayRevenuePlan(date: string, monthPlans: Map<string, number>, periods: 
   return (monthPlan * (Number(cur.percent) || 0)) / 100 / (daysBetween(cur.from, cur.to) + 1);
 }
 
-// Две подряд идущие недели (пн–вс). weekFrom — понедельник первой недели; по умолчанию — две последние
-// полностью прошедшие недели.
-export async function loadWeeklyCompare(store: string, today: string, weekFrom?: string): Promise<{ weeks: [CompareWeek, CompareWeek]; city: string }> {
-  const lastMonday = mondayOf(today);
-  const w1 = weekFrom ?? addDays(lastMonday, -14);
-  const w2 = addDays(w1, 7);
-  const from = w1;
-  const to = addDays(w2, 6);
-
+// Один период любой длины (от from до to включительно): по дням — продажи, трафик и планы города.
+export async function loadPeriod(store: string, from: string, to: string): Promise<CompareWeek> {
   const regRes = await supabaseAdmin.from("moysklad_registers").select("id").eq("store", store);
   if (regRes.error) throw regRes.error;
   const registerIds = (regRes.data ?? []).map((r) => r.id as string);
 
   const [salesRes, trafficRes, plansRes, periodsRes, overridesRes] = await Promise.all([
     registerIds.length
-      ? supabaseAdmin.from("moysklad_sales_daily").select("sale_date, revenue, receipts_count, items_count").in("register_id", registerIds).gte("sale_date", from).lte("sale_date", to)
+      ? supabaseAdmin.from("moysklad_sales_daily").select("sale_date, revenue, receipts_count, items_count").in("register_id", registerIds).gte("sale_date", from).lte("sale_date", to).limit(5000)
       : Promise.resolve({ data: [], error: null }),
-    supabaseAdmin.from("traffic_entries").select("entry_date, traffic_fact, traffic_plan").eq("store", store).gte("entry_date", from).lte("entry_date", to),
+    supabaseAdmin.from("traffic_entries").select("entry_date, traffic_fact, traffic_plan").eq("store", store).gte("entry_date", from).lte("entry_date", to).limit(5000),
     supabaseAdmin.from("sales_plan_monthly").select("plan_month, sales_plan").eq("store", store).gte("plan_month", `${from.slice(0, 7)}-01`).lte("plan_month", to),
     supabaseAdmin.from("sales_plan_periods").select("*").eq("store", store).gte("plan_month", `${from.slice(0, 7)}-01`).lte("plan_month", to),
     // план оборота, внесённый вручную только для этого отчёта (главнее расчёта по плану месяца)
@@ -112,11 +105,11 @@ export async function loadWeeklyCompare(store: string, today: string, weekFrom?:
   const periods = new Map<string, PeriodRow>();
   for (const r of (periodsRes.data ?? []) as PeriodRow[]) periods.set(r.plan_month, r);
 
-  const build = (start: string): CompareWeek => ({
-    from: start,
-    to: addDays(start, 6),
-    days: Array.from({ length: 7 }, (_, i) => {
-      const date = addDays(start, i);
+  return {
+    from,
+    to,
+    days: Array.from({ length: daysBetween(from, to) + 1 }, (_, i) => {
+      const date = addDays(from, i);
       const s = sales.get(date);
       const t = traffic.get(date);
       return {
@@ -129,8 +122,22 @@ export async function loadWeeklyCompare(store: string, today: string, weekFrom?:
         items: s?.items ?? 0,
       };
     }),
-  });
-  return { weeks: [build(w1), build(w2)], city: CITY[store] ?? store };
+  };
+}
+
+// Два произвольных периода одного города (для отчёта «Сравнение периодов» в боте).
+export async function loadPeriodsCompare(store: string, p1: { from: string; to: string }, p2: { from: string; to: string }): Promise<{ weeks: [CompareWeek, CompareWeek]; city: string }> {
+  const [a, b] = await Promise.all([loadPeriod(store, p1.from, p1.to), loadPeriod(store, p2.from, p2.to)]);
+  return { weeks: [a, b], city: CITY[store] ?? store };
+}
+
+// Две подряд идущие недели (пн–вс). weekFrom — понедельник первой недели; по умолчанию — две последние
+// полностью прошедшие недели.
+export async function loadWeeklyCompare(store: string, today: string, weekFrom?: string): Promise<{ weeks: [CompareWeek, CompareWeek]; city: string }> {
+  const lastMonday = mondayOf(today);
+  const w1 = weekFrom ?? addDays(lastMonday, -14);
+  const w2 = addDays(w1, 7);
+  return loadPeriodsCompare(store, { from: w1, to: addDays(w1, 6) }, { from: w2, to: addDays(w2, 6) });
 }
 
 // ───────── расчёты и оформление ─────────
@@ -208,8 +215,17 @@ const COLOR = {
   note: [255, 255, 255] as RGB,
 };
 
-// PDF в альбомной ориентации: две недели по дням, итоги недель и разница второй недели от первой.
-export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], city: string): Promise<Uint8Array> {
+// Подписи PDF. Для недельного отчёта вычисляются сами (номера недель месяца); для произвольных периодов задаются снаружи.
+export type CompareLabels = {
+  title: string; // «Сравнение периодов · Актау»
+  subtitle: string; // под заголовком: какие периоды
+  bands: [string, string]; // заголовки блоков (над днями каждого периода)
+  diff: string; // подпись строки разницы
+  dayAsDate: boolean; // в первой колонке «05.10» вместо «5» — для периодов, которые не укладываются в одну неделю или месяц
+};
+
+// PDF в альбомной ориентации: два периода (по умолчанию две недели) по дням, итоги и разница второго от первого.
+export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], city: string, custom?: CompareLabels): Promise<Uint8Array> {
   const fonts = await loadFonts();
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   pdf.addFileToVFS("NotoSans-Regular.ttf", fonts.regular);
@@ -217,17 +233,17 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   pdf.addFileToVFS("NotoSans-Bold.ttf", fonts.bold);
   pdf.addFont("NotoSans-Bold.ttf", "NotoSans", "bold");
 
-  const fmtDay = (d: string) => String(Number(d.slice(8, 10)));
+  const fmtDay = (d: string) => (custom?.dayAsDate ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : String(Number(d.slice(8, 10))));
   const period = (w: CompareWeek) => `${w.from.slice(8, 10)}.${w.from.slice(5, 7)}–${w.to.slice(8, 10)}.${w.to.slice(5, 7)}`;
 
   pdf.setFont("NotoSans", "bold");
   pdf.setFontSize(13);
-  pdf.text(`Сравнение недель · ${city}`, 148.5, 9, { align: "center" });
+  const wi = [weekOfMonth(weeks[0].from), weekOfMonth(weeks[1].from)];
+  pdf.text(custom?.title ?? `Сравнение недель · ${city}`, 148.5, 9, { align: "center" });
   pdf.setFont("NotoSans", "normal");
   pdf.setFontSize(8.5);
-  const wi = [weekOfMonth(weeks[0].from), weekOfMonth(weeks[1].from)];
   pdf.text(
-    `${wi[0].n} неделя ${MONTH_SHORT[wi[0].month]} (${period(weeks[0])})   ·   ${wi[1].n} неделя ${MONTH_SHORT[wi[1].month]} (${period(weeks[1])})`,
+    custom?.subtitle ?? `${wi[0].n} неделя ${MONTH_SHORT[wi[0].month]} (${period(weeks[0])})   ·   ${wi[1].n} неделя ${MONTH_SHORT[wi[1].month]} (${period(weeks[1])})`,
     148.5,
     13.5,
     { align: "center" }
@@ -253,7 +269,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   const rows: Row[] = [];
   const totals = weeks.map((w) => sumDays(w.days));
   weeks.forEach((w, i) => {
-    rows.push({ cells: [`${wi[i].n} Неделя · ${MONTH[wi[i].month]}`], kind: "band" });
+    rows.push({ cells: [custom ? custom.bands[i] : `${wi[i].n} Неделя · ${MONTH[wi[i].month]}`], kind: "band" });
     for (const d of w.days) rows.push({ cells: dayCells(fmtDay(d.date), weekdayOf(d.date), sumDays([d])), kind: "day" });
     const t = totals[i];
     rows.push({ cells: dayCells("итог", "", t), kind: "total" });
@@ -268,7 +284,7 @@ export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], c
   type Cell = string | { content: string; colSpan?: number; rowSpan?: number };
   const diffRows: Cell[][] = [
     [
-      { content: wi[0].month === wi[1].month ? `разница недели ${wi[1].n} от ${wi[0].n}` : `разница недели ${wi[1].n} (${MONTH_SHORT[wi[1].month]}) от ${wi[0].n} (${MONTH_SHORT[wi[0].month]})`, rowSpan: 2 },
+      { content: custom ? custom.diff : wi[0].month === wi[1].month ? `разница недели ${wi[1].n} от ${wi[0].n}` : `разница недели ${wi[1].n} (${MONTH_SHORT[wi[1].month]}) от ${wi[0].n} (${MONTH_SHORT[wi[0].month]})`, rowSpan: 2 },
       "цифра",
       t1.planRevenue > 0 ? signed(t2.planRevenue - t1.planRevenue, int) : "—",
       t1.planTraffic > 0 ? signed(t2.planTraffic - t1.planTraffic, int) : "—",

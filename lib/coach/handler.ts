@@ -8,6 +8,7 @@ import { ALL_STORES, handleCustomPeriodInput, sendDemoSales, sendSalesStart, set
 import { handleAdminCallback, handleDemoCallback, notifyAdminsOfCancel, notifyAdminsOfRequest, sendDemoStaffList, sendStaffList } from "@/lib/coach/adminui";
 import { TEST_EMPLOYEE_ID, TEST_LABEL, expireTestUser, isTestExpired } from "@/lib/coach/testmode";
 import { handleVerifyCallback } from "@/lib/verify/botActions";
+import { handleCompareCallback, handleCompareInput, sendCompareStart } from "@/lib/coach/compareReport";
 import { handleEditRequestCallback } from "@/lib/editRequests";
 import { clearCertDraft, handleCertAdminCallback, handleCertCallback, handleCertOwnerCallback, handleCertText, sendCertAdminMenu, sendConsultantMenu } from "@/lib/coach/certificates";
 import {
@@ -169,6 +170,9 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
   } else if (section === "sales") {
     if (u.is_admin) await sendSalesStart(t, u.telegram_chat_id, adminStores(u));
     else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
+  } else if (section === "report") {
+    if (u.is_admin) await sendCompareStart(t, u.telegram_chat_id, adminStores(u));
+    else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
   } else if (section === "cert") {
     if (!u.is_admin) await sendConsultantMenu(t, u);
     else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
@@ -233,6 +237,8 @@ const SECTION_BY_TEXT: Record<string, string> = {
   заявки: "requests",
   сотрудники: "staff",
   продажи: "sales",
+  отчёт: "report",
+  "/report": "report",
   сертификат: "cert",
   сертификаты: "certs",
   "/help": "help",
@@ -273,6 +279,11 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
     // Бот ждёт свой период для «Продаж»: любой текст, кроме кнопок меню, — это ввод дат.
     if (user.awaiting?.startsWith("sales:") && user.is_admin && !section) {
       await handleCustomPeriodInput(t, user, user.awaiting, text, adminStores(user));
+      return;
+    }
+    // Бот ждёт периоды для «Отчёта» (сравнение): любой текст, кроме кнопок меню, — ввод дат.
+    if (user.awaiting?.startsWith("cmp") && user.is_admin && !user.is_test && !section) {
+      await handleCompareInput(t, user, user.awaiting, text, adminStores(user));
       return;
     }
     // Идёт диалог по сертификату (продажа): любой текст, кроме кнопок меню, — ответ на вопрос бота.
@@ -403,6 +414,14 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     // Задержанные отчёты (сверка) — только главный владелец.
     if (!existing || existing.status !== "approved" || !existing.is_protected) return;
     await handleVerifyCallback(cb.data, t, chatId, existing.employee_name, dropCurrent, clearCurrent);
+    return;
+  }
+
+  if (cb.data.startsWith("cmp:")) {
+    // Только подтверждённый администратор; от остальных нажатия молча игнорируем.
+    if (!existing || existing.status !== "approved" || !existing.is_admin || existing.is_test) return;
+    await dropCurrent();
+    await handleCompareCallback(cb.data, t, chatId, adminStores(existing), existing.id);
     return;
   }
 

@@ -94,14 +94,14 @@ export const CONSULTANT_MENU_MARKUP: ReplyMarkup = {
 // Остальные владельцы: сотрудников и продажи всех городов смотрят, но заявки,
 // отключение и роли — только у главного владельца, поэтому «Заявок» у них нет.
 export const ADMIN_MENU_MARKUP: ReplyMarkup = {
-  keyboard: [[{ text: "Сотрудники" }, { text: "Продажи" }], [{ text: "Сертификаты" }], [{ text: "Помощь" }, { text: "Выход" }]],
+  keyboard: [[{ text: "Сотрудники" }, { text: "Продажи" }], [{ text: "Отчёт" }, { text: "Сертификаты" }], [{ text: "Помощь" }, { text: "Выход" }]],
   resize_keyboard: true,
   is_persistent: true,
 };
 
 // Главный владелец: всё управление; выйти не может — меню без «Выхода».
 export const MAIN_OWNER_MENU_MARKUP: ReplyMarkup = {
-  keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Продажи" }, { text: "Сертификаты" }], [{ text: "Помощь" }]],
+  keyboard: [[{ text: "Заявки" }, { text: "Сотрудники" }], [{ text: "Продажи" }, { text: "Отчёт" }], [{ text: "Сертификаты" }, { text: "Помощь" }]],
   resize_keyboard: true,
   is_persistent: true,
 };
@@ -115,7 +115,7 @@ export const MANAGER_DEMO_MENU_MARKUP: ReplyMarkup = {
 
 // Администратор города: только продажи своего города. Заявки и сотрудники — только у владельца.
 export const CITY_ADMIN_MENU_MARKUP: ReplyMarkup = {
-  keyboard: [[{ text: "Продажи" }, { text: "Сертификаты" }], [{ text: "Помощь" }, { text: "Выход" }]],
+  keyboard: [[{ text: "Продажи" }, { text: "Отчёт" }], [{ text: "Сертификаты" }], [{ text: "Помощь" }, { text: "Выход" }]],
   resize_keyboard: true,
   is_persistent: true,
 };

@@ -7,6 +7,7 @@ import { activeHoldFor } from "@/lib/verify/holds";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { todayInAlmaty } from "@/lib/coach/metrics";
 import { buildWeeklyComparePdf, loadWeeklyCompare } from "@/lib/reports/weeklyCompare";
+import { buildPeriodsComparePdf } from "@/lib/coach/compareReport";
 
 export const maxDuration = 60;
 
@@ -42,6 +43,17 @@ async function handle(request: Request) {
   const from = url.searchParams.get("from") ?? undefined;
   if (!["point_1", "point_3"].includes(store) || (from && !/^\d{4}-\d{2}-\d{2}$/.test(from))) {
     return NextResponse.json({ error: "Неверные параметры." }, { status: 400 });
+  }
+  // ?p1=YYYY-MM-DD..YYYY-MM-DD&p2=… — сравнение двух произвольных периодов (как кнопка «Отчёт» в боте), файл отдаётся сразу.
+  const p1 = url.searchParams.get("p1")?.match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/);
+  const p2 = url.searchParams.get("p2")?.match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/);
+  if (p1 && p2) {
+    try {
+      const { pdf } = await buildPeriodsComparePdf(store, { from: p1[1], to: p1[2] }, { from: p2[1], to: p2[2] });
+      return new NextResponse(Buffer.from(pdf), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="periods-${store}.pdf"` } });
+    } catch (e) {
+      return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
+    }
   }
   try {
     // Контрольный пересчёт данных: два независимых подсчёта, не совпали — третий; нет двух одинаковых — не отправляем.
