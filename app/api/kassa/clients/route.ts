@@ -26,9 +26,14 @@ export async function GET(request: Request) {
         query = query.ilike("name", `%${q.replace(/[%_\\]/g, "\\$&")}%`);
       }
     }
-    const { data, count, error } = await query;
+    const [{ data, count, error }, aktau, aktobe] = await Promise.all([
+      query,
+      // база единая (тег «клиенты»), по городам клиенты только считаются — по тегам МойСклад: «overman» — Актау, «актобе» — Актобе
+      supabaseAdmin.from("kassa_clients").select("ms_id", { count: "exact", head: true }).contains("tags", ["overman"]),
+      supabaseAdmin.from("kassa_clients").select("ms_id", { count: "exact", head: true }).contains("tags", ["актобе"]),
+    ]);
     if (error) throw error;
-    return NextResponse.json({ clients: data ?? [], total: count ?? 0 });
+    return NextResponse.json({ clients: data ?? [], total: count ?? 0, cities: { aktau: aktau.count ?? 0, aktobe: aktobe.count ?? 0 } });
   } catch (e) {
     return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
   }

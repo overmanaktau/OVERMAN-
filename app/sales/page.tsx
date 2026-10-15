@@ -9,6 +9,7 @@ import { SalesPlanEntry } from "@/components/SalesPlanEntry";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import PdfButton from "@/components/PdfButton";
+import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
@@ -210,6 +211,10 @@ export default function SalesPage() {
   // по убыванию — возрастающий порядок не нужен.
   const [employeeSortField, setEmployeeSortField] = useState<EmployeeSortField>("revenue");
   const [showSortMenu, setShowSortMenu] = useState(false);
+  // Стрелки у колонок (▼ от большего к меньшему, ▲ наоборот): у таблицы сотрудников — внутри города; без выбранной стрелки порядок прежний
+  // (по критерию из меню — оно остаётся для телефона, где нет заголовков колонок). У таблицы касс без стрелки порядок как есть.
+  const [empSort, setEmpSort] = useState<SortState<EmployeeSortField | "name">>(null);
+  const [regSort, setRegSort] = useState<SortState<"name" | "revenue" | "receipts" | "avgCheck" | "items" | "depth" | "profit" | "returned">>(null);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
   // selectedStores starts empty and updates a moment later once the store
@@ -534,6 +539,37 @@ export default function SalesPage() {
     const group = cityGroups.find((g) => g.store === r.store) ?? cityGroups[cityGroups.length - 1];
     group.rows.push(r);
   }
+  if (regSort) {
+    const val = (r: RegisterSalesRow): number | string => {
+      const d = displayed(r);
+      switch (regSort.key) {
+        case "name":
+          return r.name;
+        case "revenue":
+          return d.revenue;
+        case "receipts":
+          return d.receipts;
+        case "avgCheck":
+          return d.receipts > 0 ? d.revenue / d.receipts : 0;
+        case "items":
+          return d.items;
+        case "depth":
+          return d.receipts > 0 ? d.items / d.receipts : 0;
+        case "profit":
+          return d.revenue - (r.cost ?? 0);
+        case "returned":
+          return r.returnedAmount;
+      }
+    };
+    for (const group of cityGroups) {
+      group.rows.sort((a, b) => {
+        const x = val(a);
+        const y = val(b);
+        const cmp = typeof x === "string" ? x.localeCompare(y as string, "ru") : (x as number) - (y as number);
+        return regSort.dir === "asc" ? cmp : -cmp;
+      });
+    }
+  }
   const visibleGroups = cityGroups.filter((g) => g.rows.length > 0);
 
   // Same grouping as the register table above, so "Продажи по сотрудникам"
@@ -570,7 +606,21 @@ export default function SalesPage() {
     }
   }
   for (const group of employeeCityGroups) {
-    group.rows.sort((a, b) => employeeMetric(b, employeeSortField) - employeeMetric(a, employeeSortField));
+    if (empSort) {
+      group.rows.sort((a, b) => {
+        const cmp = empSort.key === "name" ? a.name.localeCompare(b.name, "ru") : employeeMetric(a, empSort.key) - employeeMetric(b, empSort.key);
+        // «нет данных по трафику» (−∞) всегда внизу, в любую сторону
+        if (empSort.key === "conversion") {
+          const ax = employeeMetric(a, "conversion");
+          const bx = employeeMetric(b, "conversion");
+          if (ax === -Infinity && bx !== -Infinity) return 1;
+          if (bx === -Infinity && ax !== -Infinity) return -1;
+        }
+        return empSort.dir === "asc" ? cmp : -cmp;
+      });
+    } else {
+      group.rows.sort((a, b) => employeeMetric(b, employeeSortField) - employeeMetric(a, employeeSortField));
+    }
   }
 
   const visibleEmployeeGroups = employeeCityGroups.filter((g) => g.rows.length > 0);
@@ -978,15 +1028,15 @@ export default function SalesPage() {
         ) : (
           <div className="overflow-x-auto">
             <div className="min-w-[960px] grid grid-cols-[1.2fr_0.8fr_1fr_0.55fr_0.9fr_0.85fr_0.8fr_0.8fr_1.1fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-              <div>Касса</div>
+              <SortHead label="Касса" k="name" sort={regSort} onSort={setRegSort} left />
               <div>Город</div>
-              <div>Оборот</div>
-              <div>Чеков</div>
-              <div>Средний чек</div>
-              <div>Колич.товара</div>
-              <div>Глубина чека</div>
-              <div>Вал. прибыль</div>
-              <div>Возврат</div>
+              <SortHead label="Оборот" k="revenue" sort={regSort} onSort={setRegSort} left />
+              <SortHead label="Чеков" k="receipts" sort={regSort} onSort={setRegSort} left />
+              <SortHead label="Средний чек" k="avgCheck" sort={regSort} onSort={setRegSort} left />
+              <SortHead label="Колич.товара" k="items" sort={regSort} onSort={setRegSort} left />
+              <SortHead label="Глубина чека" k="depth" sort={regSort} onSort={setRegSort} left />
+              <SortHead label="Вал. прибыль" k="profit" sort={regSort} onSort={setRegSort} left />
+              <SortHead label="Возврат" k="returned" sort={regSort} onSort={setRegSort} left />
             </div>
             {visibleGroups.map((group) => {
               const activeRows = group.rows.filter((r) => !hiddenRegisterIds.has(r.registerId));
@@ -1109,7 +1159,7 @@ export default function SalesPage() {
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-3.5">
         <div className="text-[15px] font-bold flex items-center gap-2 flex-wrap">
           <span>Продажи по сотрудникам</span>
-          <div ref={sortMenuRef} className="relative">
+          <div ref={sortMenuRef} className={`relative ${mobileLayout ? "" : "hidden"}`}>
             <button
               type="button"
               onClick={() => setShowSortMenu((v) => !v)}
@@ -1125,6 +1175,7 @@ export default function SalesPage() {
                     type="button"
                     onClick={() => {
                       setEmployeeSortField(f.key);
+                      setEmpSort(null);
                       setShowSortMenu(false);
                     }}
                     className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-paper ${
@@ -1241,13 +1292,13 @@ export default function SalesPage() {
         ) : (
           <div className="overflow-x-auto">
             <div className="min-w-[880px] grid grid-cols-[1.2fr_1fr_0.55fr_0.8fr_0.9fr_0.7fr_0.8fr] gap-3 pb-2.5 text-[10.5px] uppercase tracking-wide text-mutedLight border-b border-border">
-              <div>Сотрудник</div>
-              <div>Оборот</div>
-              <div>Чеков</div>
-              <div>Колич.товара</div>
-              <div>Средний чек</div>
-              <div>Конверсия</div>
-              <div>Глубина чека</div>
+              <SortHead label="Сотрудник" k="name" sort={empSort} onSort={setEmpSort} left />
+              <SortHead label="Оборот" k="revenue" sort={empSort} onSort={setEmpSort} left />
+              <SortHead label="Чеков" k="receipts" sort={empSort} onSort={setEmpSort} left />
+              <SortHead label="Колич.товара" k="items" sort={empSort} onSort={setEmpSort} left />
+              <SortHead label="Средний чек" k="avgCheck" sort={empSort} onSort={setEmpSort} left />
+              <SortHead label="Конверсия" k="conversion" sort={empSort} onSort={setEmpSort} left />
+              <SortHead label="Глубина чека" k="depth" sort={empSort} onSort={setEmpSort} left />
             </div>
             {visibleEmployeeGroups.map((group) => {
               const g = groupTotals(group.rows);

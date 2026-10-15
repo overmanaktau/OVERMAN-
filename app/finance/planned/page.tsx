@@ -7,6 +7,7 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { downloadExcel } from "@/lib/exportExcel";
 import KpiCard from "@/components/KpiCard";
 import PdfButton from "@/components/PdfButton";
+import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
 import {
   accountBalance,
@@ -110,6 +111,7 @@ function Inner() {
   const sum = (rows: { amount: number }[]) => rows.reduce((a, r) => a + r.amount, 0);
   const next30 = planned.filter((i) => i.due_date <= addDays(today, 30));
 
+  const [sort, setSort] = useState<SortState<"due" | "category" | "store" | "supplier" | "repeat" | "amount">>(null);
   const list = scoped.filter((i) => (filter === "all" ? i.status !== "cancelled" : i.status === filter)).sort((a, b) => (filter === "paid" ? b.due_date.localeCompare(a.due_date) : a.due_date.localeCompare(b.due_date)));
 
   // Долги со сроком оплаты тоже уходят деньгами: «мы должны» — выплата, «должны нам» — приход.
@@ -280,17 +282,41 @@ function Inner() {
             <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  <th className={thCls}>Срок</th>
-                  <th className={thCls}>Статья</th>
-                  <th className={thCls}>Магазин</th>
-                  <th className={thCls}>Контрагент / комментарий</th>
-                  <th className={thCls}>Повтор</th>
-                  <th className={`${thCls} text-right`}>Сумма</th>
+                  <th className={thCls}><SortHead label="Срок" k="due" sort={sort} onSort={setSort} left /></th>
+                  <th className={thCls}><SortHead label="Статья" k="category" sort={sort} onSort={setSort} left /></th>
+                  <th className={thCls}><SortHead label="Магазин" k="store" sort={sort} onSort={setSort} left /></th>
+                  <th className={thCls}><SortHead label="Контрагент / комментарий" k="supplier" sort={sort} onSort={setSort} left /></th>
+                  <th className={thCls}><SortHead label="Повтор" k="repeat" sort={sort} onSort={setSort} left /></th>
+                  <th className={`${thCls} text-right`}><SortHead label="Сумма" k="amount" sort={sort} onSort={setSort} /></th>
                   <th className={thCls} />
                 </tr>
               </thead>
               <tbody>
-                {list.map((i) => {
+                {(sort
+                  ? [...list].sort((a, b) => {
+                      const val = (i: (typeof list)[number]): string | number => {
+                        switch (sort.key) {
+                          case "due":
+                            return i.due_date;
+                          case "category":
+                            return categoryPath(ref.categories, i.category_id);
+                          case "store":
+                            return storeName(i.store);
+                          case "supplier":
+                            return supplierName(i.supplier_id) ?? "";
+                          case "repeat":
+                            return REPEAT_LABEL[i.repeat];
+                          case "amount":
+                            return i.amount; // по размеру суммы, без знака
+                        }
+                      };
+                      const x = val(a);
+                      const y = val(b);
+                      const c = typeof x === "string" ? x.localeCompare(y as string, "ru") : (x as number) - (y as number);
+                      return sort.dir === "asc" ? c : -c;
+                    })
+                  : list
+                ).map((i) => {
                   const left = daysBetween(today, i.due_date);
                   return (
                     <tr key={i.id}>

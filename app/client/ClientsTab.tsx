@@ -41,6 +41,7 @@ export default function ClientsTab() {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<ClientRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [cities, setCities] = useState<{ aktau: number; aktobe: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -51,10 +52,11 @@ export default function ClientsTab() {
     setLoading(true);
     setError(null);
     try {
-      const res = await kassaApi<{ clients: ClientRow[]; total: number }>(`/api/kassa/clients?q=${encodeURIComponent(query)}`);
+      const res = await kassaApi<{ clients: ClientRow[]; total: number; cities?: { aktau: number; aktobe: number } }>(`/api/kassa/clients?q=${encodeURIComponent(query)}`);
       if (my !== seq.current) return;
       setRows(res.clients);
       setTotal(res.total);
+      if (res.cities) setCities(res.cities);
     } catch (e) {
       if (my === seq.current) setError(getErrorMessage(e));
     } finally {
@@ -86,7 +88,10 @@ export default function ClientsTab() {
       </div>
 
       <div className="mt-3 flex items-center justify-between px-1 text-[13px] text-muted">
-        <span>{q ? `Найдено: ${num(total)}` : `Последние покупатели · всего ${num(total)}`}</span>
+        <span>
+          {q ? `Найдено: ${num(total)}` : `Последние покупатели · всего ${num(total)}`}
+          {cities && <span className="ml-3 text-mutedLight">в базе: Актау {num(cities.aktau)} · Актобе {num(cities.aktobe)}</span>}
+        </span>
         {loading && <span className="animate-pulse">обновляю…</span>}
       </div>
 

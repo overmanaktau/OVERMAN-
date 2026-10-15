@@ -51,6 +51,7 @@ import {
 } from "@/components/finance/ui";
 import KpiCard from "@/components/KpiCard";
 import PdfButton from "@/components/PdfButton";
+import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
 
 export default function DdsPage() {
@@ -79,6 +80,8 @@ function Inner() {
   const [accountFilter, setAccountFilter] = useState("");
   const [kindFilter, setKindFilter] = useState("");
   const [query, setQuery] = useState("");
+  // стрелки у колонок списка операций (без выбранной стрелки — порядок по дате, как приходит)
+  const [sort, setSort] = useState<SortState<"date" | "account" | "category" | "store" | "supplier" | "amount">>(null);
   const [editing, setEditing] = useState<Partial<FinOperation> | null>(null);
   const [pending, setPending] = useState<Set<number>>(new Set());
   const [requesting, setRequesting] = useState<FinOperation | null>(null);
@@ -263,17 +266,41 @@ function Inner() {
               <table className="w-full border-collapse">
                 <thead>
                   <tr>
-                    <th className={thCls}>Дата</th>
-                    <th className={thCls}>Счёт</th>
-                    <th className={thCls}>Статья</th>
-                    <th className={thCls}>Магазин</th>
-                    <th className={thCls}>Контрагент / комментарий</th>
-                    <th className={`${thCls} text-right`}>Сумма</th>
+                    <th className={thCls}><SortHead label="Дата" k="date" sort={sort} onSort={setSort} left /></th>
+                    <th className={thCls}><SortHead label="Счёт" k="account" sort={sort} onSort={setSort} left /></th>
+                    <th className={thCls}><SortHead label="Статья" k="category" sort={sort} onSort={setSort} left /></th>
+                    <th className={thCls}><SortHead label="Магазин" k="store" sort={sort} onSort={setSort} left /></th>
+                    <th className={thCls}><SortHead label="Контрагент / комментарий" k="supplier" sort={sort} onSort={setSort} left /></th>
+                    <th className={`${thCls} text-right`}><SortHead label="Сумма" k="amount" sort={sort} onSort={setSort} /></th>
                     <th className={thCls} />
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((o) => (
+                  {(sort
+                    ? [...rows].sort((a, b) => {
+                        const val = (o: (typeof rows)[number]): string | number => {
+                          switch (sort.key) {
+                            case "date":
+                              return o.op_date;
+                            case "account":
+                              return accountName(o.account_id);
+                            case "category":
+                              return o.kind === "transfer" ? "Перевод" : o.category_id === null ? "" : categoryPath(ref.categories, o.category_id);
+                            case "store":
+                              return storeName(o.store);
+                            case "supplier":
+                              return supplierName(o.supplier_id) ?? "";
+                            case "amount":
+                              return o.amount; // по размеру суммы, без знака: самые крупные операции — вверху
+                          }
+                        };
+                        const x = val(a);
+                        const y = val(b);
+                        const c = typeof x === "string" ? x.localeCompare(y as string, "ru") : (x as number) - (y as number);
+                        return sort.dir === "asc" ? c : -c;
+                      })
+                    : rows
+                  ).map((o) => (
                     <tr key={o.id}>
                       <td className={`${tdCls} whitespace-nowrap`}>{fmtDate(o.op_date)}</td>
                       <td className={tdCls}>

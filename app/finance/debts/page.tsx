@@ -7,6 +7,7 @@ import { useStoreSelection } from "@/components/StoreSelection";
 import { downloadExcel } from "@/lib/exportExcel";
 import KpiCard from "@/components/KpiCard";
 import PdfButton from "@/components/PdfButton";
+import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
 import {
   addDays,
@@ -82,6 +83,7 @@ function Inner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
+  const [sort, setSort] = useState<SortState<"name" | "date" | "due" | "amount" | "rem">>(null);
   const [editing, setEditing] = useState<Partial<FinDebt> | null>(null);
   const [paying, setPaying] = useState<FinDebt | null>(null);
   const [requesting, setRequesting] = useState<FinDebt | null>(null);
@@ -371,16 +373,38 @@ function Inner() {
                       <table className="w-full border-collapse">
                         <thead>
                           <tr>
-                            <th className={thCls}>Долг</th>
-                            <th className={thCls}>Дата</th>
-                            <th className={thCls}>Срок</th>
-                            <th className={`${thCls} text-right`}>Сумма</th>
-                            <th className={`${thCls} text-right`}>Остаток</th>
+                            <th className={thCls}><SortHead label="Долг" k="name" sort={sort} onSort={setSort} left /></th>
+                            <th className={thCls}><SortHead label="Дата" k="date" sort={sort} onSort={setSort} left /></th>
+                            <th className={thCls}><SortHead label="Срок" k="due" sort={sort} onSort={setSort} left /></th>
+                            <th className={`${thCls} text-right`}><SortHead label="Сумма" k="amount" sort={sort} onSort={setSort} /></th>
+                            <th className={`${thCls} text-right`}><SortHead label="Остаток" k="rem" sort={sort} onSort={setSort} /></th>
                             <th className={thCls} />
                           </tr>
                         </thead>
                         <tbody>
-                          {g.rows.map(({ d, rem }) => {
+                          {(sort
+                            ? [...g.rows].sort((a, b) => {
+                                const val = (x: (typeof g.rows)[number]): string | number => {
+                                  switch (sort.key) {
+                                    case "name":
+                                      return directionLabel(x.d);
+                                    case "date":
+                                      return x.d.debt_date;
+                                    case "due":
+                                      return x.d.due_date ?? "9999-12-31";
+                                    case "amount":
+                                      return x.d.amount;
+                                    case "rem":
+                                      return x.rem;
+                                  }
+                                };
+                                const p = val(a);
+                                const q = val(b);
+                                const c = typeof p === "string" ? p.localeCompare(q as string, "ru") : (p as number) - (q as number);
+                                return sort.dir === "asc" ? c : -c;
+                              })
+                            : g.rows
+                          ).map(({ d, rem }) => {
                             const due = d.due_date;
                             const left = due ? daysBetween(today, due) : null;
                             const myPayments = payments.filter((p) => p.debt_id === d.id);

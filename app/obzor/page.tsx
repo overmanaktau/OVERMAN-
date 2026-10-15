@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { warehousesForCities } from "@/lib/warehouses";
 import PdfButton from "@/components/PdfButton";
+import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
@@ -212,6 +213,8 @@ export default function ObzorPage() {
   // got sold through in the selected period. Scoped to the same period as
   // the rest of the page (unlike the old stockDays-based version), so it
   // loads alongside range/selectedStores rather than independently.
+  // стрелки у колонок таблицы оборачиваемости (без выбранной стрелки — порядок категорий как есть)
+  const [catSort, setCatSort] = useState<SortState<"label" | "turnover" | "cogs" | "stockEnd" | "stockAvg">>(null);
   const [turnoverByBucket, setTurnoverByBucket] = useState<
     { label: string; cogs: number; stockValue: number; revenue: number; stockSaleValue: number; stockValueEnd: number; stockSaleValueEnd: number }[]
   >([]);
@@ -738,13 +741,23 @@ export default function ObzorPage() {
                     extra figures sit "рядом" without widening the table. */}
                 <div className="hidden sm:flex sm:flex-col">
                   <div className="grid grid-cols-[1fr_80px_150px_150px_150px] gap-3 text-xs text-mutedLight pb-2 border-b border-borderSoft">
-                    <div>Категория</div>
-                    <div className="text-right">Оборачив.</div>
-                    <div className="text-right">Продано, ₸ (себест. / прод.)</div>
-                    <div className="text-right">Остаток, ₸ (себест. / прод.)</div>
-                    <div className="text-right">Ср. остаток, ₸ (себест.)</div>
+                    <SortHead label="Категория" k="label" sort={catSort} onSort={setCatSort} left />
+                    <SortHead label="Оборачив." k="turnover" sort={catSort} onSort={setCatSort} />
+                    <SortHead label="Продано, ₸ (себест. / прод.)" k="cogs" sort={catSort} onSort={setCatSort} />
+                    <SortHead label="Остаток, ₸ (себест. / прод.)" k="stockEnd" sort={catSort} onSort={setCatSort} />
+                    <SortHead label="Ср. остаток, ₸ (себест.)" k="stockAvg" sort={catSort} onSort={setCatSort} />
                   </div>
-                  {turnoverByBucket.map((r) => {
+                  {(catSort
+                    ? [...turnoverByBucket].sort((a, b) => {
+                        const val = (r: (typeof turnoverByBucket)[number]): string | number =>
+                          catSort.key === "label" ? r.label : catSort.key === "turnover" ? (r.stockValue > 0 ? r.cogs / r.stockValue : -1) : catSort.key === "cogs" ? r.cogs : catSort.key === "stockEnd" ? r.stockValueEnd : r.stockValue;
+                        const x = val(a);
+                        const y = val(b);
+                        const c = typeof x === "string" ? x.localeCompare(y as string, "ru") : (x as number) - (y as number);
+                        return catSort.dir === "asc" ? c : -c;
+                      })
+                    : turnoverByBucket
+                  ).map((r) => {
                     const pct = r.stockValue > 0 ? (r.cogs / r.stockValue) * 100 : null;
                     return (
                       <div
