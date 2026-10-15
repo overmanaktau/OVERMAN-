@@ -3,6 +3,7 @@
 // «Внесения плана продаж по сотрудникам» (sales_plan_monthly, периоды —
 // sales_plan_periods), факт — из moysklad_employee_sales_daily.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { dayPlanOf } from "@/lib/dayPlan";
 
 export type EmployeeRef = { id: string; name: string; store: string };
 
@@ -355,15 +356,15 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
     const p = plans.get(month) ?? null;
     if (p === null) return null;
     const periods = periodsByMonth.get(month);
-    if (!periods) return p / daysInMonthOf(date);
+    // тот же расчёт, что в портале: план недели по долям дней недели (lib/dayPlan), чтобы бот и портал показывали одно и то же
+    if (!periods) return dayPlanOf(emp.store, date, p, { from: month, to: `${month.slice(0, 8)}${String(daysInMonthOf(date)).padStart(2, "0")}`, percent: 100 });
     const candidates = [
       { from: periods.p1_from, to: periods.p1_to, percent: periods.p1_percent },
       { from: periods.p2_from, to: periods.p2_to, percent: periods.p2_percent },
     ];
     const cur = candidates.find((c) => c.from && c.to && c.from <= date && date <= c.to);
     if (!cur || !cur.from || !cur.to) return 0; // дата вне заданных периодов
-    const periodDays = daysBetween(cur.from, cur.to) + 1;
-    return (p * (Number(cur.percent) || 0)) / 100 / periodDays;
+    return dayPlanOf(emp.store, date, p, { from: cur.from, to: cur.to, percent: Number(cur.percent) || 0 });
   };
   const sumPlan = (from: string, to: string): number | null => {
     let total = 0;
