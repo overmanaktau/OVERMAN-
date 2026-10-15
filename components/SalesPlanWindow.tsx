@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
+import { dayPlanOf } from "@/lib/dayPlan";
 
 const MONTH_NAMES = [
   "январь", "февраль", "март", "апрель", "май", "июнь",
@@ -44,8 +45,9 @@ type FactRow = { store: string; date: string; revenue: number };
 
 // Окно «План продаж» для выбранного периода (не «с начала месяца»): план периода —
 // сумма дневных планов по точкам. Дневной план = план месяца точки × процент периода
-// месяца, в который попадает день, ÷ число дней этого периода; если периоды месяца не
-// заданы — план месяца ÷ число дней месяца; день вне заданных периодов — 0. Факт —
+// месяца, в который попадает день, × доля дня недели среди дней этого периода (пятница, суббота и
+// воскресенье получают больше — lib/dayPlan); если периоды месяца не заданы — то же по дням месяца;
+// день вне заданных периодов — 0. Факт —
 // выручка за дни периода (по вчера). Планы разных месяцев берутся каждый свой.
 function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[]; refreshKey?: number; range: PlanRange }) {
   const [plans, setPlans] = useState<{ store: string; plan_month: string; sales_plan: number | null }[]>([]);
@@ -148,12 +150,12 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
       const date = `${y}-${pad2(m)}-${pad2(d)}`;
       if (date < range.from || date > range.to) continue;
       if (!candidates) {
-        plan += monthPlan / daysInMonth;
+        plan += dayPlanOf(p.store, date, monthPlan, { from: `${y}-${pad2(m)}-01`, to: `${y}-${pad2(m)}-${pad2(daysInMonth)}`, percent: 100 });
         continue;
       }
       const cur = candidates.find((c) => c.from && c.to && c.from <= date && date <= c.to);
       if (!cur || !cur.from || !cur.to) continue; // день вне заданных периодов
-      plan += (monthPlan * (Number(cur.percent) || 0)) / 100 / (daysBetween(cur.from, cur.to) + 1);
+      plan += dayPlanOf(p.store, date, monthPlan, { from: cur.from, to: cur.to, percent: Number(cur.percent) || 0 });
     }
   }
   // Факт сравниваем с планом только по тем точкам и месяцам, где план внесён: иначе

@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { addDays, mondayOf } from "@/lib/coach/metrics";
+import { dayPlanOf } from "@/lib/dayPlan";
 
 export type CompareDay = {
   date: string;
@@ -41,20 +42,20 @@ type PeriodRow = { plan_month: string; p1_from: string | null; p1_to: string | n
 // Дневной план оборота города — как в окне «План продаж»: план месяца (сумма планов сотрудников) × процент
 // периода месяца, в который попадает день, ÷ число дней периода; без периодов — план месяца ÷ дни месяца;
 // день вне заданных периодов — 0.
-function dayRevenuePlan(date: string, monthPlans: Map<string, number>, periods: Map<string, PeriodRow>): number {
+function dayRevenuePlan(store: string, date: string, monthPlans: Map<string, number>, periods: Map<string, PeriodRow>): number {
   const monthKey = `${date.slice(0, 7)}-01`;
   const monthPlan = monthPlans.get(monthKey) ?? 0;
   if (monthPlan <= 0) return 0;
   const [y, m] = date.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const row = periods.get(monthKey);
-  if (!row) return monthPlan / daysInMonth;
+  if (!row) return dayPlanOf(store, date, monthPlan, { from: `${monthKey.slice(0, 8)}01`, to: `${monthKey.slice(0, 8)}${String(daysInMonth).padStart(2, "0")}`, percent: 100 });
   const cur = [
     { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
     { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
   ].find((c) => c.from && c.to && c.from <= date && date <= c.to);
   if (!cur || !cur.from || !cur.to) return 0;
-  return (monthPlan * (Number(cur.percent) || 0)) / 100 / (daysBetween(cur.from, cur.to) + 1);
+  return dayPlanOf(store, date, monthPlan, { from: cur.from, to: cur.to, percent: Number(cur.percent) || 0 });
 }
 
 // Один период любой длины (от from до to включительно): по дням — продажи, трафик и планы города.
@@ -109,7 +110,7 @@ export async function loadPeriod(store: string, from: string, to: string): Promi
       const t = traffic.get(date);
       return {
         date,
-        planRevenue: overrides.get(date) ?? dayRevenuePlan(date, monthPlans, periods),
+        planRevenue: overrides.get(date) ?? dayRevenuePlan(store, date, monthPlans, periods),
         planTraffic: t?.plan ?? 0,
         revenue: s?.revenue ?? 0,
         visitors: t?.fact ?? 0,

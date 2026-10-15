@@ -29,7 +29,7 @@ const relText = (v: number | null) => (v === null ? "—" : `${v > 0 ? "+" : v <
 const tone = (v: number | null): RGB => (v === null || Math.abs(v) < 0.05 ? C.muted : v > 0 ? C.green : C.red);
 const mix = (a: RGB, b: RGB, t: number): RGB => [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t)];
 
-const FOOT = "План оборота — дневной план города из раздела «Продажа», план посетителей — из «Статистики». Оборот с учётом возвратов. Конверсия = чеки ÷ посетители, глубина = товары ÷ чеки.";
+const FOOT = "План оборота — дневной план города: план месяца по периодам раздела «Продажа», разложенный по дням недели (в выходные больше). План посетителей — из «Статистики». Оборот с учётом возвратов. Конверсия = чеки ÷ посетители, глубина = товары ÷ чеки.";
 
 export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], city: string, custom?: CompareLabels): Promise<Uint8Array> {
   const fonts = await loadFonts();
@@ -175,7 +175,7 @@ export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], c
   pdf.setFont("NotoSans", "normal");
   pdf.setFontSize(6.8);
   pdf.setTextColor(...C.light);
-  pdf.text(FOOT, 10, 205);
+  pdf.text(pdf.splitTextToSize(FOOT, 240) as string[], 10, 201.5);
   if (pages > 1) {
     for (let i = 1; i <= pages; i++) {
       pdf.setPage(i);
