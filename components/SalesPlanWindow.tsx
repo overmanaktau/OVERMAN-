@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
-import { dayPlanOf } from "@/lib/dayPlan";
+import { addDaysYmd, dayPlanForDate, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
 
 const MONTH_NAMES = [
   "январь", "февраль", "март", "апрель", "май", "июнь",
@@ -72,7 +72,9 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
       setLoading(true);
       setError(null);
       try {
-        const firstMonth = `${range.from.slice(0, 8)}01`;
+        // планы нужны за все недели периода целиком: неделя может начинаться в прошлом месяце и заканчиваться в следующем
+        const firstMonth = `${mondayYmd(range.from).slice(0, 8)}01`;
+        const lastPlanDay = addDaysYmd(mondayYmd(range.to), 6);
         const factTo = range.to < todayStr ? range.to : todayStr;
         const [planRes, periodsRes] = await Promise.all([
           supabase
@@ -80,13 +82,13 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
             .select("store, plan_month, sales_plan")
             .in("store", stores)
             .gte("plan_month", firstMonth)
-            .lte("plan_month", range.to),
+            .lte("plan_month", lastPlanDay),
           supabase
             .from("sales_plan_periods")
             .select("*")
             .in("store", stores)
             .gte("plan_month", firstMonth)
-            .lte("plan_month", range.to),
+            .lte("plan_month", lastPlanDay),
         ]);
         if (planRes.error) throw planRes.error;
         if (periodsRes.error) throw periodsRes.error;
@@ -132,30 +134,30 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storesKey, refreshKey, range.from, range.to]);
 
-  // План периода: по каждому месяцу с планом суммируем дневные планы дней, попавших в период.
+  // План периода: сумма дневных планов дней периода по каждой точке (lib/dayPlan: план недели по долям дней недели).
+  const lookupFor = (store: string): PlanLookup => ({
+    monthPlan: (m) => Number(plans.find((p) => p.store === store && p.plan_month === m)?.sales_plan) || 0,
+    periods: (m) => {
+      const row = periods.find((r) => r.store === store && r.plan_month === m);
+      if (!row) return null;
+      return [
+        { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
+        { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
+      ]
+        .filter((c): c is { from: string; to: string; percent: number | null } => !!c.from && !!c.to)
+        .map((c) => ({ from: c.from, to: c.to, percent: Number(c.percent) || 0 }));
+    },
+  });
   let plan = 0;
   for (const p of plans) {
-    const monthPlan = Number(p.sales_plan) || 0;
-    if (monthPlan <= 0) continue;
+    if ((Number(p.sales_plan) || 0) <= 0) continue;
     const [y, m] = p.plan_month.split("-").map(Number);
     const daysInMonth = new Date(y, m, 0).getDate();
-    const row = periods.find((r) => r.store === p.store && r.plan_month === p.plan_month);
-    const candidates = row
-      ? [
-          { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
-          { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
-        ]
-      : null;
+    const lk = lookupFor(p.store);
     for (let d = 1; d <= daysInMonth; d++) {
       const date = `${y}-${pad2(m)}-${pad2(d)}`;
       if (date < range.from || date > range.to) continue;
-      if (!candidates) {
-        plan += dayPlanOf(p.store, date, monthPlan, { from: `${y}-${pad2(m)}-01`, to: `${y}-${pad2(m)}-${pad2(daysInMonth)}`, percent: 100 });
-        continue;
-      }
-      const cur = candidates.find((c) => c.from && c.to && c.from <= date && date <= c.to);
-      if (!cur || !cur.from || !cur.to) continue; // день вне заданных периодов
-      plan += dayPlanOf(p.store, date, monthPlan, { from: cur.from, to: cur.to, percent: Number(cur.percent) || 0 });
+      plan += dayPlanForDate(p.store, date, lk);
     }
   }
   // Факт сравниваем с планом только по тем точкам и месяцам, где план внесён: иначе

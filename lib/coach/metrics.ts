@@ -3,7 +3,7 @@
 // «Внесения плана продаж по сотрудникам» (sales_plan_monthly, периоды —
 // sales_plan_periods), факт — из moysklad_employee_sales_daily.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { dayPlanOf } from "@/lib/dayPlan";
+import { dayPlanForDate, type PlanLookup } from "@/lib/dayPlan";
 
 export type EmployeeRef = { id: string; name: string; store: string };
 
@@ -351,20 +351,24 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
   ]);
   const periodsByMonth = new Map(months.map((m, i) => [m, periodsList[i]]));
 
+  // Тот же расчёт, что в портале (lib/dayPlan): план недели по долям дней недели — чтобы бот и портал показывали одно и то же.
+  const lookup: PlanLookup = {
+    monthPlan: (m) => plans.get(m) ?? 0,
+    periods: (m) => {
+      const row = periodsByMonth.get(m);
+      if (!row) return null;
+      return [
+        { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
+        { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
+      ]
+        .filter((c): c is { from: string; to: string; percent: number | null } => !!c.from && !!c.to)
+        .map((c) => ({ from: c.from, to: c.to, percent: Number(c.percent) || 0 }));
+    },
+  };
   const planPerDay = (date: string): number | null => {
-    const month = monthStartOf(date);
-    const p = plans.get(month) ?? null;
-    if (p === null) return null;
-    const periods = periodsByMonth.get(month);
-    // тот же расчёт, что в портале: план недели по долям дней недели (lib/dayPlan), чтобы бот и портал показывали одно и то же
-    if (!periods) return dayPlanOf(emp.store, date, p, { from: month, to: `${month.slice(0, 8)}${String(daysInMonthOf(date)).padStart(2, "0")}`, percent: 100 });
-    const candidates = [
-      { from: periods.p1_from, to: periods.p1_to, percent: periods.p1_percent },
-      { from: periods.p2_from, to: periods.p2_to, percent: periods.p2_percent },
-    ];
-    const cur = candidates.find((c) => c.from && c.to && c.from <= date && date <= c.to);
-    if (!cur || !cur.from || !cur.to) return 0; // дата вне заданных периодов
-    return dayPlanOf(emp.store, date, p, { from: cur.from, to: cur.to, percent: Number(cur.percent) || 0 });
+    const p = plans.get(monthStartOf(date)) ?? null;
+    if (p === null) return null; // на месяц этого дня план не вносили
+    return dayPlanForDate(emp.store, date, lookup);
   };
   const sumPlan = (from: string, to: string): number | null => {
     let total = 0;

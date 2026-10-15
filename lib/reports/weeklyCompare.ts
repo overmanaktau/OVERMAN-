@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { addDays, mondayOf } from "@/lib/coach/metrics";
-import { dayPlanOf } from "@/lib/dayPlan";
+import { addDaysYmd, dayPlanForDate, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
 
 export type CompareDay = {
   date: string;
@@ -39,27 +39,11 @@ export function weekdayOf(date: string) {
 
 type PeriodRow = { plan_month: string; p1_from: string | null; p1_to: string | null; p1_percent: number | null; p2_from: string | null; p2_to: string | null; p2_percent: number | null };
 
-// Дневной план оборота города — как в окне «План продаж»: план месяца (сумма планов сотрудников) × процент
-// периода месяца, в который попадает день, ÷ число дней периода; без периодов — план месяца ÷ дни месяца;
-// день вне заданных периодов — 0.
-function dayRevenuePlan(store: string, date: string, monthPlans: Map<string, number>, periods: Map<string, PeriodRow>): number {
-  const monthKey = `${date.slice(0, 7)}-01`;
-  const monthPlan = monthPlans.get(monthKey) ?? 0;
-  if (monthPlan <= 0) return 0;
-  const [y, m] = date.split("-").map(Number);
-  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const row = periods.get(monthKey);
-  if (!row) return dayPlanOf(store, date, monthPlan, { from: `${monthKey.slice(0, 8)}01`, to: `${monthKey.slice(0, 8)}${String(daysInMonth).padStart(2, "0")}`, percent: 100 });
-  const cur = [
-    { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
-    { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
-  ].find((c) => c.from && c.to && c.from <= date && date <= c.to);
-  if (!cur || !cur.from || !cur.to) return 0;
-  return dayPlanOf(store, date, monthPlan, { from: cur.from, to: cur.to, percent: Number(cur.percent) || 0 });
-}
-
 // Один период любой длины (от from до to включительно): по дням — продажи, трафик и планы города.
 export async function loadPeriod(store: string, from: string, to: string): Promise<CompareWeek> {
+  // планы нужны за все недели периода целиком (неделя может начинаться в прошлом месяце и заканчиваться в следующем)
+  const planFrom = `${mondayYmd(from).slice(0, 7)}-01`;
+  const planTo = addDaysYmd(mondayYmd(to), 6);
   const regRes = await supabaseAdmin.from("moysklad_registers").select("id").eq("store", store);
   if (regRes.error) throw regRes.error;
   const registerIds = (regRes.data ?? []).map((r) => r.id as string);
@@ -69,10 +53,10 @@ export async function loadPeriod(store: string, from: string, to: string): Promi
       ? supabaseAdmin.from("moysklad_sales_daily").select("sale_date, revenue, receipts_count, items_count").in("register_id", registerIds).gte("sale_date", from).lte("sale_date", to).limit(5000)
       : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("traffic_entries").select("entry_date, traffic_fact, traffic_plan").eq("store", store).gte("entry_date", from).lte("entry_date", to).limit(5000),
-    supabaseAdmin.from("sales_plan_monthly").select("plan_month, sales_plan").eq("store", store).gte("plan_month", `${from.slice(0, 7)}-01`).lte("plan_month", to),
-    supabaseAdmin.from("sales_plan_periods").select("*").eq("store", store).gte("plan_month", `${from.slice(0, 7)}-01`).lte("plan_month", to),
+    supabaseAdmin.from("sales_plan_monthly").select("plan_month, sales_plan").eq("store", store).gte("plan_month", planFrom).lte("plan_month", planTo),
+    supabaseAdmin.from("sales_plan_periods").select("*").eq("store", store).gte("plan_month", planFrom).lte("plan_month", planTo),
     // план оборота, внесённый вручную только для этого отчёта (главнее расчёта по плану месяца)
-    supabaseAdmin.from("weekly_report_plan_overrides").select("plan_date, revenue_plan").eq("store", store).gte("plan_date", from).lte("plan_date", to),
+    supabaseAdmin.from("weekly_report_plan_overrides").select("plan_date, revenue_plan").eq("store", store).gte("plan_date", mondayYmd(from)).lte("plan_date", planTo),
   ]);
   if (salesRes.error) throw salesRes.error;
   if (trafficRes.error) throw trafficRes.error;
@@ -101,6 +85,20 @@ export async function loadPeriod(store: string, from: string, to: string): Promi
   const periods = new Map<string, PeriodRow>();
   for (const r of (periodsRes.data ?? []) as PeriodRow[]) periods.set(r.plan_month, r);
 
+  const lookup: PlanLookup = {
+    dayOverride: (d) => overrides.get(d),
+    monthPlan: (m) => monthPlans.get(m) ?? 0,
+    periods: (m) => {
+      const row = periods.get(m);
+      if (!row) return null;
+      return [
+        { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
+        { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
+      ]
+        .filter((c): c is { from: string; to: string; percent: number | null } => !!c.from && !!c.to)
+        .map((c) => ({ from: c.from, to: c.to, percent: Number(c.percent) || 0 }));
+    },
+  };
   return {
     from,
     to,
@@ -110,7 +108,7 @@ export async function loadPeriod(store: string, from: string, to: string): Promi
       const t = traffic.get(date);
       return {
         date,
-        planRevenue: overrides.get(date) ?? dayRevenuePlan(store, date, monthPlans, periods),
+        planRevenue: overrides.get(date) ?? dayPlanForDate(store, date, lookup),
         planTraffic: t?.plan ?? 0,
         revenue: s?.revenue ?? 0,
         visitors: t?.fact ?? 0,
