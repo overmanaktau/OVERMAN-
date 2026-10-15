@@ -1,8 +1,6 @@
 // Сравнение двух недель по дням (оборот, посетители, чеки, товары, средний чек, выполнение плана,
 // конверсия, глубина чека) и PDF в виде таблицы, как у владельца в Google-таблице. Каждый понедельник в 9:00
 // бот-помощник присылает его администратору города (Картбаев Нуржан).
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -21,8 +19,8 @@ export type CompareWeek = { from: string; to: string; days: CompareDay[] };
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 const WEEKDAY = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
-const MONTH = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
-const MONTH_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+export const MONTH = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
+export const MONTH_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
 // Какая это неделя месяца: неделя (пн–вс) относится к месяцу своего четверга; номер — по числу четверга
 // (1–7 — первая неделя, 8–14 — вторая и т.д.). Так неделя 28.09–04.10 — 1-я неделя октября.
@@ -31,13 +29,10 @@ export function weekOfMonth(mondayYmd: string): { n: number; month: number } {
   return { n: Math.floor((Number(thursday.slice(8, 10)) - 1) / 7) + 1, month: Number(thursday.slice(5, 7)) - 1 };
 }
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
 function daysBetween(a: string, b: string) {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
 }
-function weekdayOf(date: string) {
+export function weekdayOf(date: string) {
   return WEEKDAY[new Date(`${date}T00:00:00Z`).getUTCDay()];
 }
 
@@ -142,8 +137,8 @@ export async function loadWeeklyCompare(store: string, today: string, weekFrom?:
 
 // ───────── расчёты и оформление ─────────
 
-type Totals = Omit<CompareDay, "date">;
-const sumDays = (days: CompareDay[]): Totals =>
+export type Totals = Omit<CompareDay, "date">;
+export const sumDays = (days: CompareDay[]): Totals =>
   days.reduce<Totals>(
     (a, d) => ({
       planRevenue: a.planRevenue + d.planRevenue,
@@ -157,12 +152,12 @@ const sumDays = (days: CompareDay[]): Totals =>
   );
 
 const nf0 = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
-const int = (n: number) => nf0.format(Math.round(n)).replace(/[  ]/g, " ");
-const dec = (n: number, d: number) => n.toFixed(d).replace(".", ",");
-const pct = (n: number, d = 2) => `${dec(n, d)}%`;
-const signed = (n: number, f: (x: number) => string) => (n > 0 ? `+${f(n)}` : f(n));
+export const int = (n: number) => nf0.format(Math.round(n)).replace(/[  ]/g, " ");
+export const dec = (n: number, d: number) => n.toFixed(d).replace(".", ",");
+export const pct = (n: number, d = 2) => `${dec(n, d)}%`;
+export const signed = (n: number, f: (x: number) => string) => (n > 0 ? `+${f(n)}` : f(n));
 
-const ratios = (t: Totals) => ({
+export const ratios = (t: Totals) => ({
   atv: t.receipts > 0 ? t.revenue / t.receipts : 0,
   revPct: t.planRevenue > 0 ? (t.revenue / t.planRevenue) * 100 : null,
   trafPct: t.planTraffic > 0 ? (t.visitors / t.planTraffic) * 100 : null,
@@ -170,27 +165,8 @@ const ratios = (t: Totals) => ({
   depth: t.receipts > 0 ? t.items / t.receipts : 0,
 });
 
-function dayCells(label: string, wd: string, t: Totals): string[] {
-  const r = ratios(t);
-  return [
-    label,
-    wd,
-    t.planRevenue > 0 ? int(t.planRevenue) : "—",
-    t.planTraffic > 0 ? int(t.planTraffic) : "—",
-    int(t.revenue),
-    int(t.visitors),
-    int(t.receipts),
-    int(t.items),
-    int(r.atv),
-    r.revPct === null ? "—" : pct(r.revPct),
-    r.trafPct === null ? "—" : pct(r.trafPct),
-    pct(r.cr, 1),
-    dec(r.depth, 2),
-  ];
-}
-
 type Fonts = { regular: string; bold: string };
-async function loadFonts(): Promise<Fonts> {
+export async function loadFonts(): Promise<Fonts> {
   const get = async (name: string) => {
     try {
       return (await readFile(path.join(process.cwd(), "public", "fonts", "pdf", name))).toString("base64");
@@ -204,17 +180,6 @@ async function loadFonts(): Promise<Fonts> {
   return { regular, bold };
 }
 
-type RGB = [number, number, number];
-const COLOR = {
-  head: [162, 196, 201] as RGB,
-  band: [217, 234, 211] as RGB,
-  plan: [255, 255, 255] as RGB,
-  fact: [217, 210, 233] as RGB,
-  blue: [159, 197, 248] as RGB,
-  total: [194, 123, 160] as RGB,
-  note: [255, 255, 255] as RGB,
-};
-
 // Подписи PDF. Для недельного отчёта вычисляются сами (номера недель месяца); для произвольных периодов задаются снаружи.
 export type CompareLabels = {
   title: string; // «Сравнение периодов · Актау»
@@ -225,138 +190,8 @@ export type CompareLabels = {
 };
 
 // PDF в альбомной ориентации: два периода (по умолчанию две недели) по дням, итоги и разница второго от первого.
+// Оформление («тепловая карта») — в weeklyCompareStyled; подгружается по требованию, чтобы файлы не зависели друг от друга при загрузке.
 export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], city: string, custom?: CompareLabels): Promise<Uint8Array> {
-  const fonts = await loadFonts();
-  const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-  pdf.addFileToVFS("NotoSans-Regular.ttf", fonts.regular);
-  pdf.addFont("NotoSans-Regular.ttf", "NotoSans", "normal");
-  pdf.addFileToVFS("NotoSans-Bold.ttf", fonts.bold);
-  pdf.addFont("NotoSans-Bold.ttf", "NotoSans", "bold");
-
-  const fmtDay = (d: string) => (custom?.dayAsDate ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : String(Number(d.slice(8, 10))));
-  const period = (w: CompareWeek) => `${w.from.slice(8, 10)}.${w.from.slice(5, 7)}–${w.to.slice(8, 10)}.${w.to.slice(5, 7)}`;
-
-  pdf.setFont("NotoSans", "bold");
-  pdf.setFontSize(13);
-  const wi = [weekOfMonth(weeks[0].from), weekOfMonth(weeks[1].from)];
-  pdf.text(custom?.title ?? `Сравнение недель · ${city}`, 148.5, 9, { align: "center" });
-  pdf.setFont("NotoSans", "normal");
-  pdf.setFontSize(8.5);
-  pdf.text(
-    custom?.subtitle ?? `${wi[0].n} неделя ${MONTH_SHORT[wi[0].month]} (${period(weeks[0])})   ·   ${wi[1].n} неделя ${MONTH_SHORT[wi[1].month]} (${period(weeks[1])})`,
-    148.5,
-    13.5,
-    { align: "center" }
-  );
-
-  const head = [
-    "Число",
-    "День недели",
-    "ОБОРОТ\nПлан на день",
-    "ПОСЕТИТЕЛЬ\nПлан на день",
-    "ОБОРОТ\nФакт на день",
-    "Посетители",
-    "Кол-во чеков",
-    "Кол-во товаров",
-    "ATV\n(средний чек)",
-    "ОБОРОТ %\nвыполнения\nдневного плана",
-    "ПОСЕТИТЕЛЬ %\nвыполнения\nплана",
-    "CR\n(конверсия)",
-    "Глубина чека",
-  ];
-
-  type Row = { cells: string[]; kind: "head" | "band" | "day" | "total" | "diff" | "gap" };
-  const rows: Row[] = [];
-  const totals = weeks.map((w) => sumDays(w.days));
-  weeks.forEach((w, i) => {
-    rows.push({ cells: [custom ? custom.bands[i] : `${wi[i].n} Неделя · ${MONTH[wi[i].month]}`], kind: "band" });
-    for (const d of w.days) rows.push({ cells: dayCells(fmtDay(d.date), weekdayOf(d.date), sumDays([d])), kind: "day" });
-    const t = totals[i];
-    rows.push({ cells: dayCells("итог", "", t), kind: "total" });
-  });
-  rows.push({ cells: [""], kind: "gap" });
-
-  const [t1, t2] = totals;
-  const r1 = ratios(t1);
-  const r2 = ratios(t2);
-  const rel = (a: number, b: number) => (a > 0 ? pct(((b - a) / a) * 100) : "—");
-  const relOrDash = (a: number | null, b: number | null) => (a === null || b === null ? "—" : rel(a, b));
-  type Cell = string | { content: string; colSpan?: number; rowSpan?: number };
-  const diffRows: Cell[][] = [
-    [
-      { content: custom ? custom.diff : wi[0].month === wi[1].month ? `разница недели ${wi[1].n} от ${wi[0].n}` : `разница недели ${wi[1].n} (${MONTH_SHORT[wi[1].month]}) от ${wi[0].n} (${MONTH_SHORT[wi[0].month]})`, rowSpan: 2 },
-      "цифра",
-      t1.planRevenue > 0 ? signed(t2.planRevenue - t1.planRevenue, int) : "—",
-      t1.planTraffic > 0 ? signed(t2.planTraffic - t1.planTraffic, int) : "—",
-      signed(t2.revenue - t1.revenue, int),
-      signed(t2.visitors - t1.visitors, int),
-      signed(t2.receipts - t1.receipts, int),
-      signed(t2.items - t1.items, int),
-      signed(r2.atv - r1.atv, int),
-      { content: relOrDash(r1.revPct, r2.revPct), rowSpan: 2 },
-      { content: relOrDash(r1.trafPct, r2.trafPct), rowSpan: 2 },
-      { content: rel(r1.cr, r2.cr), rowSpan: 2 },
-      signed(r2.depth - r1.depth, (x) => dec(x, 2)),
-    ],
-    ["%", rel(t1.planRevenue, t2.planRevenue), rel(t1.planTraffic, t2.planTraffic), rel(t1.revenue, t2.revenue), rel(t1.visitors, t2.visitors), rel(t1.receipts, t2.receipts), rel(t1.items, t2.items), rel(r1.atv, r2.atv), rel(r1.depth, r2.depth)],
-  ];
-
-  autoTable(pdf, {
-    startY: 17,
-    head: [head],
-    body: [...rows.map((r) => r.cells as Cell[]), ...diffRows],
-    margin: { left: 6, right: 6, top: 6, bottom: 6 },
-    theme: "grid",
-    styles: { font: "NotoSans", fontSize: 8, cellPadding: 1.3, halign: "center", valign: "middle", lineColor: [0, 0, 0], lineWidth: 0.2, textColor: [20, 20, 20], minCellHeight: 6.6 },
-    headStyles: { fillColor: COLOR.head, textColor: [20, 20, 20], fontStyle: "bold", fontSize: 7.5, lineColor: [0, 0, 0], lineWidth: 0.2 },
-    tableWidth: 285,
-    columnStyles: { 0: { cellWidth: 15 }, 1: { cellWidth: 17 }, 2: { cellWidth: 23 }, 3: { cellWidth: 23 }, 4: { cellWidth: 23 }, 5: { cellWidth: 23 }, 6: { cellWidth: 23 }, 7: { cellWidth: 23 }, 8: { cellWidth: 23 }, 9: { cellWidth: 23 }, 10: { cellWidth: 23 }, 11: { cellWidth: 23 }, 12: { cellWidth: 23 } },
-    didParseCell: (data) => {
-      if (data.section !== "body") return;
-      const row: Row = rows[data.row.index] ?? { cells: [], kind: "diff" };
-      const col = data.column.index;
-      const cell = data.cell;
-      if (row.kind === "band") {
-        cell.styles.fillColor = COLOR.band;
-        cell.styles.fontStyle = "bold";
-        cell.styles.fontSize = 10;
-        if (col === 0) cell.colSpan = 13;
-        return;
-      }
-      if (row.kind === "gap") {
-        cell.styles.fillColor = COLOR.band;
-        cell.styles.minCellHeight = 4;
-        if (col === 0) cell.colSpan = 13;
-        return;
-      }
-      if (row.kind === "total") {
-        cell.styles.fillColor = COLOR.total;
-        cell.styles.fontStyle = "bold";
-        if (col === 0) {
-          cell.colSpan = 2;
-          cell.styles.fontSize = 9.5;
-        }
-        return;
-      }
-      if (row.kind === "diff") {
-        cell.styles.fillColor = COLOR.total;
-        cell.styles.fontStyle = "bold";
-        if (col === 0) cell.styles.fontSize = 6.5;
-        return;
-      }
-      // день недели: факт (оборот, посетители, чеки, товары) — сиреневым, ATV и проценты, CR, глубина — голубым
-      if (col >= 4 && col <= 7) cell.styles.fillColor = COLOR.fact;
-      else if (col >= 8) cell.styles.fillColor = COLOR.blue;
-      if (col >= 8) cell.styles.fontStyle = "bold";
-    },
-  });
-
-  // Подпись внизу: откуда план.
-  const y = (pdf as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 190;
-  pdf.setFont("NotoSans", "normal");
-  pdf.setFontSize(7);
-  pdf.setTextColor(100);
-  pdf.text("План оборота — дневной план города из раздела «Продажа» (план месяца по периодам), план посетителей — из «Статистики». Оборот с учётом возвратов. Конверсия = чеки ÷ посетители, глубина = товары ÷ чеки.", 6, Math.min(y + 4, 204));
-
-  return new Uint8Array(pdf.output("arraybuffer"));
+  const { buildStyledComparePdf } = await import("@/lib/reports/weeklyCompareStyled");
+  return buildStyledComparePdf(weeks, city, custom);
 }

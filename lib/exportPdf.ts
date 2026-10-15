@@ -61,6 +61,10 @@ const C = {
   accent: [47, 74, 60] as [number, number, number],
   accentSoft: [228, 236, 230] as [number, number, number],
   tan: [184, 149, 106] as [number, number, number],
+  greenBg: [214, 236, 221] as [number, number, number],
+  redBg: [246, 218, 210] as [number, number, number],
+  green: [38, 120, 78] as [number, number, number],
+  red: [176, 70, 48] as [number, number, number],
 };
 
 // В шрифтах нет стрелок и геометрических фигур — заменяем на то, что точно есть.
@@ -100,38 +104,35 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
   const contentW = W - M * 2;
   const stamp = nowAlmaty();
 
-  // ── шапка первой страницы
-  pdf.setFont("NotoSerif", "bold");
-  pdf.setFontSize(15);
-  pdf.setTextColor(...C.ink);
-  pdf.text("OVERMAN", M, 15);
+  // ── шапка первой страницы: тёмная полоса с названием (как у «Сравнения недель»)
+  pdf.setFillColor(...C.ink);
+  pdf.rect(0, 0, W, 17, "F");
+  pdf.setFont("NotoSans", "bold");
+  pdf.setFontSize(13);
+  pdf.setTextColor(255, 255, 255);
+  pdf.text(clean(doc.title), M, 8);
   pdf.setFont("NotoSans", "normal");
-  pdf.setFontSize(6.8);
-  pdf.setTextColor(...C.mutedLight);
-  pdf.text("ПОРТАЛ БИЗНЕСА", M + 31, 14.8, { charSpace: 0.6 });
-  pdf.setFontSize(8);
-  pdf.text(clean(`Сформировано ${stamp}${doc.author ? ` · ${doc.author}` : ""}`), W - M, 14.8, { align: "right" });
-  pdf.setDrawColor(...C.accent);
-  pdf.setLineWidth(0.7);
-  pdf.line(M, 19, W - M, 19);
-  pdf.setDrawColor(...C.tan);
-  pdf.setLineWidth(0.25);
-  pdf.line(M, 20, M + 24, 20);
+  pdf.setFontSize(8.2);
+  pdf.setTextColor(210, 204, 190);
+  const subtitleLines = doc.subtitle ? (pdf.splitTextToSize(clean(doc.subtitle), contentW * 0.62) as string[]) : [];
+  if (subtitleLines.length > 0) pdf.text(subtitleLines[0], M, 13);
+  pdf.setFont("NotoSans", "bold");
+  pdf.setFontSize(8.5);
+  pdf.setTextColor(255, 255, 255);
+  pdf.text("OVERMAN · ПОРТАЛ БИЗНЕСА", W - M, 8, { align: "right" });
+  pdf.setFont("NotoSans", "normal");
+  pdf.setFontSize(7);
+  pdf.setTextColor(210, 204, 190);
+  pdf.text(clean(`Сформировано ${stamp}${doc.author ? ` · ${doc.author}` : ""}`), W - M, 13, { align: "right" });
 
-  // ── заголовок
-  let y = 31;
-  pdf.setFont("NotoSerif", "bold");
-  pdf.setFontSize(21);
-  pdf.setTextColor(...C.ink);
-  pdf.text(clean(doc.title), M, y);
-  y += 6.5;
-  if (doc.subtitle) {
+  let y = 23;
+  if (subtitleLines.length > 1) {
     pdf.setFont("NotoSans", "normal");
-    pdf.setFontSize(10);
+    pdf.setFontSize(9);
     pdf.setTextColor(...C.muted);
-    const lines = pdf.splitTextToSize(clean(doc.subtitle), contentW) as string[];
-    pdf.text(lines, M, y);
-    y += lines.length * 4.6;
+    const rest = pdf.splitTextToSize(clean(subtitleLines.slice(1).join(" ")), contentW) as string[];
+    pdf.text(rest, M, y);
+    y += rest.length * 4.2;
   }
   if (doc.meta && doc.meta.length > 0) {
     pdf.setFont("NotoSans", "normal");
@@ -188,8 +189,8 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
         y = contTop;
       }
       if (section.title) {
-        pdf.setFont("NotoSerif", "bold");
-        pdf.setFontSize(12.5);
+        pdf.setFont("NotoSans", "bold");
+        pdf.setFontSize(11.5);
         pdf.setTextColor(...C.ink);
         pdf.text(clean(section.title), M, y + 1);
         y += 5.5;
@@ -245,13 +246,13 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
         fontSize: bodyFont,
         textColor: C.ink,
         cellPadding: { top: 2.1, bottom: 2.1, left: tightPad ? 1.6 : 2.6, right: tightPad ? 1.6 : 2.6 },
-        lineColor: section.grid ? gridLine : C.soft,
-        lineWidth: section.grid ? 0.2 : 0,
+        lineColor: section.grid ? gridLine : [255, 255, 255],
+        lineWidth: section.grid ? 0.2 : 0.35,
         overflow: "linebreak",
         valign: "middle",
       },
       headStyles: {
-        fillColor: C.accent,
+        fillColor: C.ink,
         textColor: [255, 255, 255],
         fontStyle: "bold",
         fontSize: 7.6,
@@ -279,45 +280,41 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
         const kind = section.rowKinds?.[data.row.index] ?? "normal";
         if (kind === "group") {
           data.cell.styles.fontStyle = "bold";
-          data.cell.styles.fillColor = C.soft;
+          data.cell.styles.fillColor = C.paper;
         } else if (kind === "total") {
           data.cell.styles.fontStyle = "bold";
           data.cell.styles.fillColor = C.accentSoft;
-          data.cell.styles.textColor = C.accent;
+          data.cell.styles.textColor = C.ink;
         } else if (kind === "sub") {
           data.cell.styles.textColor = C.muted;
           data.cell.styles.fontSize = 8;
         }
         if (section.signColors && (kind === "normal" || kind === "total")) {
           const first = String(data.cell.raw ?? "").trim();
-          if (first.startsWith("+")) data.cell.styles.textColor = [47, 107, 79];
-          else if (first.startsWith("−") || first.startsWith("-")) data.cell.styles.textColor = [163, 75, 54];
+          if (first.startsWith("+")) {
+            data.cell.styles.textColor = C.green;
+            data.cell.styles.fillColor = C.greenBg;
+          } else if (first.startsWith("−") || first.startsWith("-")) {
+            data.cell.styles.textColor = C.red;
+            data.cell.styles.fillColor = C.redBg;
+          }
         }
         const indent = section.indent?.[data.row.index] ?? 0;
         if (data.column.index === 0 && indent > 0) {
           data.cell.styles.cellPadding = { top: 2.1, bottom: 2.1, left: 2.6 + indent * 4.2, right: 2.6 };
         }
       },
-      didDrawCell: (data) => {
-        if (data.section !== "body" || section.grid) return;
-        // тонкая линия под каждой строкой — глазу проще держать строку
-        pdf.setDrawColor(...C.soft);
-        pdf.setLineWidth(0.15);
-        pdf.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
-      },
       didDrawPage: (data) => {
         if (data.pageNumber > 1) {
-          pdf.setFont("NotoSerif", "bold");
-          pdf.setFontSize(9);
-          pdf.setTextColor(...C.ink);
-          pdf.text("OVERMAN", M, 12);
-          pdf.setFont("NotoSans", "normal");
+          pdf.setFillColor(...C.ink);
+          pdf.rect(0, 0, W, 8, "F");
+          pdf.setFont("NotoSans", "bold");
           pdf.setFontSize(8);
-          pdf.setTextColor(...C.mutedLight);
-          pdf.text(clean(doc.title), W - M, 12, { align: "right" });
-          pdf.setDrawColor(...C.accent);
-          pdf.setLineWidth(0.4);
-          pdf.line(M, 15, W - M, 15);
+          pdf.setTextColor(255, 255, 255);
+          pdf.text(clean(doc.title), M, 5.4);
+          pdf.setFont("NotoSans", "normal");
+          pdf.setFontSize(7.5);
+          pdf.text("OVERMAN", W - M, 5.4, { align: "right" });
         }
       },
     });
