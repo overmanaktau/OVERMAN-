@@ -1,7 +1,7 @@
 // Кнопка «Отчёт» в боте-помощнике (владельцы и администраторы городов): PDF «Сравнение периодов» — такой же, как недельный отчёт
-// (два периода по дням, итоги и разница второго периода от первого), только периоды выбирает сам руководитель:
-// готовые пары (прошлая неделя к позапрошлой, этот месяц к прошлому, прошлый месяц к позапрошлому) или два своих периода.
-// Нажатия кнопок — cmp:…; ввод своих дат — через coach_users.awaiting (cmp1:<город> → cmp2:<город>:<с>:<по>).
+// (два периода по дням, итоги и разница второго периода от первого), только периоды выбирает сам руководитель: каждый — кнопкой
+// (вчера, прошлая неделя, с начала месяца …) или своим вводом (01.09-14.09). Шаг 1 — с какого периода сравниваем (база), шаг 2 — на какой
+// период показать разницу. Нажатия кнопок — cmp:…; ввод своих дат — через coach_users.awaiting (cmp1:<город> → cmp2:<город>:<с>:<по>).
 import { sendCoachDocument, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { addDays, daysBetween, monthStartOf, mondayOf, todayInAlmaty } from "@/lib/coach/metrics";
 import { ALL_STORES, parsePeriodInput, setAwaiting } from "@/lib/coach/salesview";
@@ -24,7 +24,7 @@ export async function sendCompareStart(t: Transport, chatId: number | string, st
   const cities = stores.filter((s) => ALL_STORES.includes(s));
   if (cities.length === 0) return;
   if (cities.length === 1) {
-    await sendPresetMenu(t, chatId, cities[0], false);
+    await sendStep1(t, chatId, cities[0], false);
     return;
   }
   await t.send(chatId, "📑 <b>Отчёт · сравнение периодов</b>\nВыберите город:", {
@@ -32,48 +32,82 @@ export async function sendCompareStart(t: Transport, chatId: number | string, st
   });
 }
 
-async function sendPresetMenu(t: Transport, chatId: number | string, store: string, canGoBack: boolean) {
-  const rows: { text: string; callback_data: string }[][] = [
-    [{ text: "Прошлая неделя ↔ позапрошлая", callback_data: `cmp:p:${store}:w` }],
-    [{ text: "Этот месяц ↔ прошлый (по то же число)", callback_data: `cmp:p:${store}:m` }],
-    [{ text: "Прошлый месяц ↔ позапрошлый", callback_data: `cmp:p:${store}:pm` }],
-    [{ text: "✏️ Выбрать периоды самому", callback_data: `cmp:x:${store}` }],
-  ];
-  if (canGoBack) rows.push([{ text: "← Города", callback_data: "cmp:m" }]);
+// Периоды-кнопки. Данные есть по вчерашний день, поэтому «Эта неделя» и «С начала месяца» — по вчера.
+const PERIOD_BUTTONS: { code: string; label: string }[] = [
+  { code: "y", label: "Вчера" },
+  { code: "yy", label: "Позавчера" },
+  { code: "w", label: "Прошлая неделя" },
+  { code: "ww", label: "Позапрошлая неделя" },
+  { code: "tw", label: "Эта неделя" },
+  { code: "m", label: "С начала месяца" },
+  { code: "pm", label: "Прошлый месяц" },
+  { code: "ppm", label: "Позапрошлый месяц" },
+];
+
+function periodByCode(code: string): Range | string {
+  const today = todayInAlmaty();
+  const yesterday = addDays(today, -1);
+  const thisMonday = mondayOf(today);
+  const [y, m] = monthStartOf(today).split("-").map(Number);
+  const monthRange = (offset: number): Range => ({
+    from: new Date(Date.UTC(y, m - 1 - offset, 1)).toISOString().slice(0, 10),
+    to: new Date(Date.UTC(y, m - offset, 0)).toISOString().slice(0, 10),
+  });
+  switch (code) {
+    case "y":
+      return { from: yesterday, to: yesterday };
+    case "yy":
+      return { from: addDays(today, -2), to: addDays(today, -2) };
+    case "w":
+      return { from: addDays(thisMonday, -7), to: addDays(thisMonday, -1) };
+    case "ww":
+      return { from: addDays(thisMonday, -14), to: addDays(thisMonday, -8) };
+    case "tw":
+      return thisMonday > yesterday ? "Эта неделя только началась — данных ещё нет (они появятся завтра)." : { from: thisMonday, to: yesterday };
+    case "m": {
+      const start = monthStartOf(today);
+      return start > yesterday ? "Месяц только начался — данных ещё нет (они появятся завтра)." : { from: start, to: yesterday };
+    }
+    case "pm":
+      return monthRange(1);
+    case "ppm":
+      return monthRange(2);
+    default:
+      return "Неизвестный период.";
+  }
+}
+
+// Кнопки периодов (по две в ряд) и «Свой период». prefix — как начинаются callback_data выбора («cmp:a:<город>» или «cmp:b:<город>:<с>:<по>»).
+function periodKeyboard(prefix: string, customData: string, back?: { text: string; data: string }): ReplyMarkup {
+  const rows: { text: string; callback_data: string }[][] = [];
+  for (let i = 0; i < PERIOD_BUTTONS.length; i += 2) {
+    rows.push(PERIOD_BUTTONS.slice(i, i + 2).map((b) => ({ text: b.label, callback_data: `${prefix}:${b.code}` })));
+  }
+  rows.push([{ text: "✏️ Свой период", callback_data: customData }]);
+  if (back) rows.push([{ text: back.text, callback_data: back.data }]);
+  return { inline_keyboard: rows };
+}
+
+// Шаг 1: с какого периода сравниваем.
+async function sendStep1(t: Transport, chatId: number | string, store: string, canGoBack: boolean) {
   await t.send(
     chatId,
-    `📑 <b>Отчёт · сравнение периодов · ${CITY[store] ?? store}</b>\nPDF как недельный отчёт: два периода по дням, итоги и разница. Выберите, что с чем сравнить:`,
-    { inline_keyboard: rows }
+    `📑 <b>Отчёт · сравнение периодов · ${CITY[store] ?? store}</b>
+PDF как недельный отчёт: два периода по дням, итоги и разница.
+
+Шаг 1 из 2. <b>С какого периода</b> сравниваем (база)?`,
+    periodKeyboard(`cmp:a:${store}`, `cmp:ax:${store}`, canGoBack ? { text: "← Города", data: "cmp:m" } : undefined)
   );
 }
 
-// Готовые пары: [с какого (база), на какой (его разницу показываем)].
-function presetRanges(code: string): { p1: Range; p2: Range } | string {
-  const today = todayInAlmaty();
-  const yesterday = addDays(today, -1);
-  if (code === "w") {
-    const lastMonday = mondayOf(today);
-    return { p1: { from: addDays(lastMonday, -14), to: addDays(lastMonday, -8) }, p2: { from: addDays(lastMonday, -7), to: addDays(lastMonday, -1) } };
-  }
-  if (code === "m") {
-    const start = monthStartOf(today);
-    if (start > yesterday) return "С начала месяца данных ещё нет — завтра появятся данные за первый день.";
-    const days = daysBetween(start, yesterday) + 1;
-    const [y, m] = start.split("-").map(Number);
-    const prevStart = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10);
-    const prevLast = new Date(Date.UTC(y, m - 1, 0)).toISOString().slice(0, 10);
-    const prevEnd = addDays(prevStart, days - 1);
-    return { p1: { from: prevStart, to: prevEnd > prevLast ? prevLast : prevEnd }, p2: { from: start, to: yesterday } };
-  }
-  if (code === "pm") {
-    const [y, m] = monthStartOf(today).split("-").map(Number);
-    const mk = (offset: number): Range => ({
-      from: new Date(Date.UTC(y, m - 1 - offset, 1)).toISOString().slice(0, 10),
-      to: new Date(Date.UTC(y, m - offset, 0)).toISOString().slice(0, 10),
-    });
-    return { p1: mk(2), p2: mk(1) };
-  }
-  return "Неизвестный вариант.";
+// Шаг 2: на какой период показать разницу (период 1 уже выбран).
+async function sendStep2(t: Transport, chatId: number | string, store: string, p1: Range) {
+  await t.send(
+    chatId,
+    `Период 1: <b>${rangeText(p1)}</b>
+Шаг 2 из 2. <b>На какой период</b> показать разницу?`,
+    periodKeyboard(`cmp:b:${store}:${p1.from}:${p1.to}`, `cmp:bx:${store}:${p1.from}:${p1.to}`, { text: "← Выбрать период 1 заново", data: `cmp:c:${store}` })
+  );
 }
 
 // PDF «Сравнение периодов» для города: период 1 — база, период 2 — тот, чью разницу показываем.
@@ -98,8 +132,8 @@ async function sendPdf(t: Transport, chatId: number | string, store: string, p1:
 
 // Нажатия cmp:… ; stores — города, доступные этому администратору.
 export async function handleCompareCallback(data: string, t: Transport, chatId: number | string, stores: string[], userId: number) {
-  // cmp:m | cmp:c:<город> | cmp:p:<город>:<w|m|pm> | cmp:x:<город>
-  const [, kind, store, code] = data.split(":");
+  // cmp:m | cmp:c:<город> | cmp:a:<город>:<код> | cmp:ax:<город> | cmp:b:<город>:<с>:<по>:<код> | cmp:bx:<город>:<с>:<по>
+  const [, kind, store, x1, x2, x3] = data.split(":");
   await setAwaiting(userId, null);
   if (kind === "m") {
     await sendCompareStart(t, chatId, stores);
@@ -107,25 +141,48 @@ export async function handleCompareCallback(data: string, t: Transport, chatId: 
   }
   if (!storeOk(store, stores)) return;
   if (kind === "c") {
-    await sendPresetMenu(t, chatId, store, stores.length > 1);
+    await sendStep1(t, chatId, store, stores.length > 1);
     return;
   }
-  if (kind === "x") {
+  const cancel: ReplyMarkup = { inline_keyboard: [[{ text: "Отмена", callback_data: `cmp:c:${store}` }]] };
+  const ask = () =>
+    `Напишите период:
+• <b>01.09-14.09</b> — с какого по какое
+• <b>12.10</b> — один день
+Год можно не указывать. Данные есть по вчерашний день.`;
+  if (kind === "ax") {
     await setAwaiting(userId, `cmp1:${store}`);
-    await t.send(
-      chatId,
-      `✏️ <b>Свои периоды · ${CITY[store] ?? store}</b>\nШаг 1 из 2. Напишите период, <b>с которого</b> сравниваем (база):\n• <b>01.09-14.09</b> — с какого по какое\n• <b>12.10</b> — один день\nГод можно не указывать. Данные есть по вчерашний день.`,
-      { inline_keyboard: [[{ text: "Отмена", callback_data: `cmp:c:${store}` }]] }
-    );
+    await t.send(chatId, `✏️ <b>Свой период 1 · ${CITY[store] ?? store}</b>
+Шаг 1 из 2. С какого периода сравниваем (база).
+${ask()}`, cancel);
     return;
   }
-  if (kind === "p" && code) {
-    const r = presetRanges(code);
+  if (kind === "a" && x1) {
+    const r = periodByCode(x1);
     if (typeof r === "string") {
       await t.send(chatId, r);
       return;
     }
-    await sendPdf(t, chatId, store, r.p1, r.p2);
+    await sendStep2(t, chatId, store, r);
+    return;
+  }
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  if ((kind === "b" || kind === "bx") && dateRe.test(x1 ?? "") && dateRe.test(x2 ?? "")) {
+    const p1: Range = { from: x1, to: x2 };
+    if (kind === "bx") {
+      await setAwaiting(userId, `cmp2:${store}:${p1.from}:${p1.to}`);
+      await t.send(chatId, `✏️ <b>Свой период 2 · ${CITY[store] ?? store}</b>
+Период 1: <b>${rangeText(p1)}</b>
+Шаг 2 из 2. На какой период показать разницу.
+${ask()}`, cancel);
+      return;
+    }
+    const r = periodByCode(x3 ?? "");
+    if (typeof r === "string") {
+      await t.send(chatId, r);
+      return;
+    }
+    await sendPdf(t, chatId, store, p1, r);
   }
 }
 
@@ -158,12 +215,8 @@ export async function handleCompareInput(t: Transport, user: { id: number; teleg
     return;
   }
   if (step === "cmp1") {
-    await setAwaiting(user.id, `cmp2:${store}:${range.from}:${range.to}`);
-    await t.send(
-      chat,
-      `Период 1: <b>${rangeText(range)}</b>\nШаг 2 из 2. Напишите период, <b>на который</b> показать разницу (с чем сравниваем):\n• <b>15.09-28.09</b> или один день <b>13.10</b>`,
-      cancel
-    );
+    await setAwaiting(user.id, null);
+    await sendStep2(t, chat, store, range);
     return;
   }
   if (step === "cmp2" && from1 && to1) {
