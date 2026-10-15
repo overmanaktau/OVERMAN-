@@ -1223,3 +1223,42 @@ export async function fetchReturnedSumsByDemand(fromDate: string, toDate: string
   });
   return out;
 }
+
+// Списание бонусов вручную (сгорание по сроку: бонус хранится 4 месяца с начисления) — операция SPENDING в бонусной программе «5% OVER».
+// Идемпотентно по externalCode: если операция с таким кодом уже есть, ничего не создаёт.
+export const BONUS_PROGRAM_ID = "53b6b197-019b-11f1-0a80-00cc000472fb";
+
+async function msJson(path: string, init?: { method?: string; body?: unknown }): Promise<{ status: number; json: unknown }> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: init?.method ?? "GET",
+    headers: { Authorization: `Bearer ${getToken()}`, Accept: "application/json;charset=utf-8", ...(init?.body ? { "Content-Type": "application/json" } : {}) },
+    body: init?.body ? JSON.stringify(init.body) : undefined,
+  });
+  const json = await res.json().catch(() => null);
+  return { status: res.status, json };
+}
+
+export async function createBonusWriteOff(clientId: string, value: number, externalCode: string, description: string): Promise<{ created: boolean; id: string | null }> {
+  const found = await msJson(`/entity/bonustransaction?limit=1&filter=${encodeURIComponent(`externalCode=${externalCode}`)}`);
+  const row = (found.json as { rows?: { id: string }[] } | null)?.rows?.[0];
+  if (row) return { created: false, id: row.id };
+  const org = await msJson("/entity/organization?limit=1");
+  const orgMeta = (org.json as { rows?: { meta: unknown }[] } | null)?.rows?.[0]?.meta;
+  if (!orgMeta) throw new Error("МойСклад: организация не найдена.");
+  const r = await msJson("/entity/bonustransaction", {
+    method: "POST",
+    body: {
+      organization: { meta: orgMeta },
+      agent: { meta: { href: `${BASE_URL}/entity/counterparty/${clientId}`, type: "counterparty", mediaType: "application/json" } },
+      bonusProgram: { meta: { href: `${BASE_URL}/entity/bonusprogram/${BONUS_PROGRAM_ID}`, type: "bonusprogram", mediaType: "application/json" } },
+      bonusValue: value,
+      transactionType: "SPENDING",
+      transactionStatus: "COMPLETED",
+      categoryType: "REGULAR",
+      externalCode,
+      description,
+    },
+  });
+  if (r.status !== 200 && r.status !== 201) throw new Error(`МойСклад ${r.status}: ${JSON.stringify(r.json).slice(0, 300)}`);
+  return { created: true, id: (r.json as { id: string }).id };
+}
