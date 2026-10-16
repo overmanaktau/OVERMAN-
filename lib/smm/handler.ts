@@ -6,7 +6,8 @@ import { escapeHtml } from "@/lib/telegram";
 import { todayInAlmaty } from "@/lib/coach/metrics";
 import { CITIES, ROLE_TITLE, SMM_ROLES, citiesOf, type CityKey, type SmmRole } from "@/lib/smm/config";
 import { MAX_DAYS, PERIOD_BUTTONS, codeFromPeriod, daysIn, parseCustomPeriod, periodFromCode, type Period } from "@/lib/smm/periods";
-import { postsReport, spendText, targetReport } from "@/lib/smm/reports";
+import { allPostsText, postsReport, spendText, targetReport } from "@/lib/smm/reports";
+import { listPosts } from "@/lib/smm/meta";
 import { categoryProducts, categorySales, onlineProducts, onlineSales, productsMessage } from "@/lib/smm/sales";
 import { cityCode, cityFromCode, sendCategories, sendLong, sendStories } from "@/lib/smm/flows";
 import { storiesList } from "@/lib/smm/stories";
@@ -94,7 +95,7 @@ async function runFeature(t: Transport, u: SmmUser, chat: number, feat: Feat, co
       for (const c of cities) for (const part of await targetReport(c, p)) await t.send(chat, part);
     } else if (feat === "ps" && p) {
       const r = await postsReport(cities[0], p);
-      await t.send(chat, r.text);
+      await t.send(chat, r.text, r.data.posts.length > 0 ? { inline_keyboard: [[{ text: "📃 Все публикации", callback_data: `pl|${cityCode(cities[0])}|${codeFromPeriod(p)}` }]] } : undefined);
     } else if (feat === "st" && p) {
       for (const c of cities) await sendStories(t, chat, c, p);
     } else if (feat === "cs" && p) {
@@ -291,6 +292,20 @@ async function handleCallback(cb: NonNullable<SmmUpdate["callback_query"]>, t: T
     }
     await supabaseAdmin.from("smm_users").update({ state: { pick } }).eq("id", me.id);
     if (messageId) await t.edit(chat, messageId, PICK_TEXT, pickKeyboard(pick));
+    return;
+  }
+
+  if (kind === "pl") {
+    const city = cityFromCode(args[0]);
+    const p = periodFromCode(args[1], today);
+    if (!city || !p || !citiesOf(me.role).includes(city)) return;
+    await t.send(chat, "⏳ Собираю список…");
+    try {
+      const { posts } = await listPosts(city, p);
+      await sendLong(t, chat, allPostsText(city, p, posts));
+    } catch (e) {
+      await t.send(chat, `⚠️ Не получилось: ${escapeHtml(getErrorMessage(e))}`);
+    }
     return;
   }
 

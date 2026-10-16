@@ -11,6 +11,10 @@ const alm = (iso: string) => {
   return `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 };
 
+const pct1 = (v: number) => `${v.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+// ER по охвату: (лайки + комментарии + репосты + сохранения) ÷ охват × 100
+const postEr = (x: Post) => (x.reach > 0 ? ((x.likes + x.comments + x.shares + x.saved) * 100) / x.reach : 0);
+
 export type PostsData = { posts: Post[]; truncated: boolean };
 
 export async function postsReport(city: CityKey, p: Period): Promise<{ text: string; data: PostsData }> {
@@ -30,6 +34,7 @@ export async function postsReport(city: CityKey, p: Period): Promise<{ text: str
     lines.push(`👁 Просмотры: <b>${n(sum((x) => x.views))}</b> · 🎯 Охват (сумма по постам): ${n(sum((x) => x.reach))}`);
     lines.push(`❤️ Лайки: <b>${n(sum((x) => x.likes))}</b> · 💬 Комментарии: ${n(sum((x) => x.comments))}`);
     lines.push(`🔖 Сохранения: ${n(sum((x) => x.saved))} · ↗️ Репосты: ${n(sum((x) => x.shares))}`);
+    lines.push(`📈 ER по охвату: <b>${pct1(sum((x) => x.reach) > 0 ? ((sum((x) => x.likes) + sum((x) => x.comments) + sum((x) => x.shares) + sum((x) => x.saved)) * 100) / sum((x) => x.reach) : 0)}</b> (лайки + комментарии + репосты + сохранения ÷ охват)`);
     lines.push(`В среднем на пост: 👁 ${n(sum((x) => x.views) / posts.length)} · ❤️ ${n(sum((x) => x.likes) / posts.length)} · 💬 ${n(sum((x) => x.comments) / posts.length)}`);
   }
   if (acc) {
@@ -41,10 +46,16 @@ export async function postsReport(city: CityKey, p: Period): Promise<{ text: str
   if (posts.length > 0) {
     const top = [...posts].sort((a, b) => b.views - a.views || b.likes - a.likes).slice(0, 5);
     lines.push("", "<b>🏆 Топ-5 по просмотрам</b>");
-    top.forEach((x, i) => lines.push(`${i + 1}. ${alm(x.postedAt)} ${x.type} · 👁 ${n(x.views)} · ❤️ ${n(x.likes)} · 💬 ${n(x.comments)} · <a href="${escapeHtml(x.permalink)}">ссылка</a>`));
+    top.forEach((x, i) => lines.push(`${i + 1}. ${alm(x.postedAt)} ${x.type} · 👁 ${n(x.views)} · ❤️ ${n(x.likes)} · 💬 ${n(x.comments)} · ER ${pct1(postEr(x))} · <a href="${escapeHtml(x.permalink)}">ссылка</a>`));
   }
   if (data.truncated) lines.push("", "⚠️ Публикаций больше 200 — показаны первые 200 по дате, выберите период покороче.");
   return { text: lines.join("\n"), data };
+}
+
+export function allPostsText(city: CityKey, p: Period, posts: Post[]): string {
+  const head = `📃 <b>Все публикации · ${CITIES[city].title}</b>\n${periodLabel(p)} · ${posts.length} шт.`;
+  const sorted = [...posts].sort((a, b) => b.postedAt.localeCompare(a.postedAt));
+  return `${head}\n\n${sorted.map((x) => `${alm(x.postedAt)} ${x.type} · 👁 ${n(x.views)} · 🎯 ${n(x.reach)} · ❤️ ${n(x.likes)} · 💬 ${n(x.comments)} · 🔖 ${n(x.saved)} · ↗️ ${n(x.shares)} · ER ${pct1(postEr(x))} · <a href="${escapeHtml(x.permalink)}">ссылка</a>`).join("\n")}`;
 }
 
 export async function spendText(p: Period): Promise<string> {
@@ -67,12 +78,11 @@ const div = (a: number, b: number) => (b > 0 ? a / b : 0);
 
 // Аналитика таргета: активные сейчас публикации города с цифрами за период (цена клика, клики, показы, лайки и т. д.).
 export async function targetReport(city: CityKey, p: Period): Promise<string[]> {
-  const posts = await listTargetPosts(city);
-  const head = `🎯 <b>Сейчас в таргете · ${CITIES[city].title}</b>
-${periodLabel(p)}
-Активных публикаций: ${posts.length}`;
-  if (posts.length === 0) return [`${head}
-Ничего не включено.`];
+  const [posts, acct] = await Promise.all([listTargetPosts(city), adSpend(city, p)]);
+  const head = `🎯 <b>Сейчас в таргете · ${CITIES[city].title}</b>\n${periodLabel(p)}\nАктивных публикаций: ${posts.length}`;
+  // фактический расход всего кабинета за период (включая объявления, которые уже выключены)
+  const acctLine = `💰 <b>Расход аккаунта за период (по факту): ${usd(acct.spend)}</b>\n👁 показов ${n(acct.impressions)} · 🖱 кликов ${n(acct.clicks)} · цена клика ${usd(div(acct.spend, acct.clicks))}`;
+  if (posts.length === 0) return [`${head}\n\n${acctLine}\n\nНичего не включено.`];
   const ins = await adInsightsByAd(city, p);
   const rows = posts.map((post) => {
     const s = emptyAdStats();
@@ -92,10 +102,12 @@ ${periodLabel(p)}
     l.push(`🖱 Клики ${n(s.clicks)} · цена клика ${usd(div(s.spend, s.clicks))} · CTR ${div(s.clicks * 100, s.impressions).toFixed(2)}%`);
     if (s.linkClicks > 0) l.push(`🔗 По ссылке ${n(s.linkClicks)} · цена ${usd(div(s.spend, s.linkClicks))}`);
     l.push(`❤️ ${n(s.reactions)} · 💬 ${n(s.comments)} · ↗️ ${n(s.shares)} · 🔖 ${n(s.saves)}${s.videoViews > 0 ? ` · ▶️ ${n(s.videoViews)}` : ""}`);
+    l.push(`📈 ER по охвату: ${pct1(div((s.reactions + s.comments + s.shares + s.saves) * 100, s.reach))}`);
     if (s.conversations > 0) l.push(`✉️ Переписок ${n(s.conversations)} · цена ${usd(div(s.spend, s.conversations))}`);
     return l;
   };
-  const sections = [`${head}\n\n<b>Итого по активным сейчас</b> (без выключенных, поэтому меньше общего расхода)\n${statLines(total).join("\n")}\nПоказ тысячи (CPM): ${usd(div(total.spend * 1000, total.impressions))}`];
+  const off = Math.max(0, acct.spend - total.spend);
+  const sections = [`${head}\n\n${acctLine}\nИз них включённые сейчас: ${usd(total.spend)}, уже выключенные: ${usd(off)}\n\n<b>Итого по включённым сейчас</b>\n${statLines(total).join("\n")}\nПоказ тысячи (CPM): ${usd(div(total.spend * 1000, total.impressions))}`];
   rows.forEach(({ post, s }, i) => {
     const title = `${i + 1}. ${post.objectType === "VIDEO" ? "🎬" : "🖼"} <b>${escapeHtml(post.campaign || post.adNames[0] || "Публикация")}</b>${post.permalink ? ` · <a href="${escapeHtml(post.permalink)}">ссылка</a>` : ""} · объявлений ${post.adIds.length}`;
     sections.push(`${title}\n${s.spend === 0 && s.impressions === 0 ? "За этот период показов не было." : statLines(s).join("\n")}`);
