@@ -40,32 +40,41 @@ async function handle(request: Request) {
     }
     let done = 0;
     let total = 0;
+    let next = 0;
     const errors: string[] = [];
-    for (const c of candidates) {
+    // функция живёт не больше maxDuration: новых клиентов не берём после бюджета, чтобы успеть записать итог и отправить сообщение
+    const startedAt = Date.now();
+    const BUDGET_MS = 230_000;
+    const processOne = async (c: (typeof candidates)[number]) => {
       try {
         // свежий пересчёт клиента перед списанием: сумму берём из него, а не из ночной записи
         await syncOneClient(c.ms_id);
         const { data: fresh } = await supabaseAdmin.from("kassa_clients").select("bonus_expired").eq("ms_id", c.ms_id).maybeSingle();
         const value = Math.round(Number(fresh?.bonus_expired ?? 0));
-        if (value <= 0) continue;
+        if (value <= 0) return;
         const op = await createBonusWriteOff(c.ms_id, value, `expire-${c.ms_id}-${today}`, `Сгорание бонусов (срок 4 месяца), ${today}`);
         if (op.created) {
-          const { error: logError } = await supabaseAdmin.from("kassa_bonus_expiry_log").insert({ run_date: today, client_ms_id: c.ms_id, client_name: c.name, phone: c.phone, value, tx_id: op.id });
-          if (logError) throw logError;
           done++;
           total += value;
+          const { error: logError } = await supabaseAdmin.from("kassa_bonus_expiry_log").insert({ run_date: today, client_ms_id: c.ms_id, client_name: c.name, phone: c.phone, value, tx_id: op.id });
+          if (logError) throw logError;
           await syncOneClient(c.ms_id); // после списания в списке портала сгоревших уже нет
         }
       } catch (e) {
         errors.push(`${c.name || c.phone}: ${getErrorMessage(e)}`);
       }
-    }
+    };
+    const worker = async () => {
+      while (next < candidates.length && Date.now() - startedAt < BUDGET_MS) await processOne(candidates[next++]);
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    const left = candidates.length - next;
     if (!quiet && (done > 0 || errors.length > 0)) {
       await notifyOwner(
-        `🔥 <b>Сгорание бонусов · ${today.split("-").reverse().join(".")}</b>\n${done > 0 ? `Обнулено у ${done} клиентов: ${Math.round(total).toLocaleString("ru-RU")} бонусов (срок 4 месяца с начисления).` : "Списывать было нечего."}${errors.length > 0 ? `\n⚠️ Ошибок: ${errors.length}\n${errors.slice(0, 5).map(escapeHtml).join("\n")}` : ""}`
+        `🔥 <b>Сгорание бонусов · ${today.split("-").reverse().join(".")}</b>\n${done > 0 ? `Обнулено у ${done} клиентов: ${Math.round(total).toLocaleString("ru-RU")} бонусов (срок 4 месяца с начисления).` : "Списывать было нечего."}${left > 0 ? `\nНе успели за этот запуск: ${left} клиентов (продолжим следующим запуском).` : ""}${errors.length > 0 ? `\n⚠️ Ошибок: ${errors.length}\n${errors.slice(0, 5).map(escapeHtml).join("\n")}` : ""}`
       );
     }
-    return NextResponse.json({ ok: true, today, candidates: candidates.length, written: done, total: Math.round(total), errors: errors.slice(0, 20) });
+    return NextResponse.json({ ok: true, today, candidates: candidates.length, left, written: done, total: Math.round(total), errors: errors.slice(0, 20) });
   } catch (e) {
     return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
   }
