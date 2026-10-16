@@ -10,6 +10,7 @@ import { TEST_EMPLOYEE_ID, TEST_LABEL, expireTestUser, isTestExpired } from "@/l
 import { handleVerifyCallback } from "@/lib/verify/botActions";
 import { handleCompareCallback, handleCompareInput, sendCompareStart } from "@/lib/coach/compareReport";
 import { handleEditRequestCallback } from "@/lib/editRequests";
+import { handleSmmOwnerCallback } from "@/lib/smm/approvals";
 import { clearCertDraft, handleCertAdminCallback, handleCertCallback, handleCertOwnerCallback, handleCertText, sendCertAdminMenu, sendConsultantMenu } from "@/lib/coach/certificates";
 import {
   AUTO_ONLY_TEXT,
@@ -407,6 +408,15 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     if (!existing || existing.status !== "approved" || !existing.is_protected) return;
     await clearCurrent();
     await t.send(chatId, await handleEditRequestCallback(cb.data, existing.employee_name));
+    return;
+  }
+
+  if (cb.data.startsWith("sm:")) {
+    // Заявки сотрудников бота СММ (принять / отклонить / отключить) — только главный владелец.
+    if (!existing || existing.status !== "approved" || !existing.is_protected) return;
+    await clearCurrent();
+    const r = await handleSmmOwnerCallback(cb.data, existing.employee_name);
+    await t.send(chatId, r.text, r.markup);
     return;
   }
 

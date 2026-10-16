@@ -3,9 +3,10 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { CITIES, CITY_KEYS, type CityKey } from "@/lib/smm/config";
 import { listLiveStories, type LiveStory } from "@/lib/smm/meta";
-import { periodLabel, periodUtc, type Period } from "@/lib/smm/periods";
+import { codeFromPeriod, periodLabel, periodUtc, type Period } from "@/lib/smm/periods";
 import { escapeHtml } from "@/lib/telegram";
 
+const NL = String.fromCharCode(10);
 const BUCKET = "smm-stories";
 
 type Row = {
@@ -84,7 +85,7 @@ function almatyStamp(iso: string): string {
   return `${d.slice(8, 10)}.${d.slice(5, 7)} ${d.slice(11, 16)}`;
 }
 
-export type StoryMessage = { photo: string | null; caption: string };
+export type StoryMessage = { photo: string | null; caption: string; markup?: Record<string, unknown> };
 
 function coverUrl(path: string | null): string | null {
   return path ? supabaseAdmin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl : null;
@@ -110,7 +111,8 @@ export async function storiesMessages(city: CityKey, p: Period, now = new Date()
   const head = `🎞 <b>Истории · ${CITIES[city].title}</b>\n${periodLabel(p)}`;
   if (rows.length === 0) return [{ photo: null, caption: `${head}\nИсторий за этот период в базе нет (бот копит их с момента запуска, старые Instagram не отдаёт).` }];
   const totalViews = rows.reduce((a, r) => a + r.views, 0);
-  const out: StoryMessage[] = [{ photo: null, caption: `${head}\nИсторий: ${rows.length} · всего просмотров: <b>${fmt(totalViews)}</b>` }];
+  const listButton = { inline_keyboard: [[{ text: "📃 Список историй", callback_data: `sl|${city === "aktau" ? "a" : "b"}|${codeFromPeriod(p)}` }]] };
+  const out: StoryMessage[] = [{ photo: null, caption: `${head}\nИсторий: ${rows.length} · всего просмотров: <b>${fmt(totalViews)}</b>`, markup: listButton }];
   if (rows.length === 1) {
     out.push({ photo: coverUrl(rows[0].cover_path), caption: caption("Единственная история", city, rows[0], now) });
   } else {
@@ -118,4 +120,22 @@ export async function storiesMessages(city: CityKey, p: Period, now = new Date()
     out.push({ photo: coverUrl(rows[rows.length - 1].cover_path), caption: caption("Последняя история", city, rows[rows.length - 1], now) });
   }
   return out;
+}
+
+// Список всех историй периода по порядку публикации: просмотры каждой и сколько это от первой — видно, как просаживаются просмотры.
+export async function storiesList(city: CityKey, p: Period, now = new Date()): Promise<string> {
+  const { fromIso, toIso } = periodUtc(p);
+  const { data, error } = await supabaseAdmin.from("smm_story_log").select("*").eq("city", city).gte("posted_at", fromIso).lt("posted_at", toIso).order("posted_at", { ascending: true });
+  if (error) throw error;
+  const rows = (data ?? []) as Row[];
+  const head = `📃 <b>Список историй · ${CITIES[city].title}</b>${NL}${periodLabel(p)}`;
+  if (rows.length === 0) return `${head}${NL}Историй за этот период в базе нет.`;
+  const first = rows[0].views;
+  const lines = rows.map((r, i) => {
+    const live = now.getTime() - new Date(r.posted_at).getTime() < 24 * 3600000;
+    const share = i === 0 || first <= 0 ? "" : ` · ${Math.round((r.views / first) * 100)}% от первой`;
+    return `${i + 1}. ${almatyStamp(r.posted_at).slice(6)} · 👁 <b>${fmt(r.views)}</b>${share} · 🎯 ${fmt(r.reach)}${live ? " ⏳" : ""}`;
+  });
+  const note = rows.some((r) => now.getTime() - new Date(r.posted_at).getTime() < 24 * 3600000) ? `${NL}${NL}⏳ — история ещё не закончилась, просмотры ещё растут.` : "";
+  return `${head}${NL}Всего: ${rows.length} · просмотров ${fmt(rows.reduce((a, r) => a + r.views, 0))}${NL}${NL}${lines.join(NL)}${note}`;
 }

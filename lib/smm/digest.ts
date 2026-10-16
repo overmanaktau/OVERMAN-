@@ -43,7 +43,7 @@ export async function runMorning(t: Transport, opts: { only?: SmmUser[]; force?:
     };
     for (const city of citiesOf(u.role)) {
       await step(`cat-${city}`, () => sendCategories(t, u.telegram_chat_id, city, p, "all"));
-      if (city === ONLINE_SELLER.city) await step("online", () => sendCategories(t, u.telegram_chat_id, city, p, "online"));
+      if (city === ONLINE_SELLER.city) await step("online", () => sendCategories(t, u.telegram_chat_id, city, p, "online", false, true));
       await step(`stories-${city}`, () => sendStories(t, u.telegram_chat_id, city, p));
     }
     if (seesSpend(u.role)) await step("spend", async () => void (await t.send(u.telegram_chat_id, await spendText(p))));

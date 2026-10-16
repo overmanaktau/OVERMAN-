@@ -100,6 +100,54 @@ export async function adStatuses(ids: string[]): Promise<Record<string, string>>
   return out;
 }
 
+export type AdStats = {
+  spend: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  linkClicks: number;
+  reactions: number;
+  comments: number;
+  shares: number;
+  saves: number;
+  conversations: number; // начатые переписки (Директ, WhatsApp)
+  videoViews: number;
+};
+export const emptyAdStats = (): AdStats => ({ spend: 0, impressions: 0, reach: 0, clicks: 0, linkClicks: 0, reactions: 0, comments: 0, shares: 0, saves: 0, conversations: 0, videoViews: 0 });
+
+// Цифры по каждому объявлению кабинета за период (только те, что показывались в этот период).
+export async function adInsightsByAd(city: CityKey, p: Period): Promise<Map<string, AdStats>> {
+  const out = new Map<string, AdStats>();
+  let page = await graph<any>(`/${CITIES[city].ad}/insights`, {
+    level: "ad",
+    time_range: JSON.stringify({ since: p.from, until: p.to }),
+    fields: "ad_id,spend,impressions,reach,clicks,inline_link_clicks,actions",
+    limit: "200",
+  });
+  for (let i = 0; i < 10; i++) {
+    for (const r of page.data ?? []) {
+      const act: Record<string, number> = {};
+      for (const a of r.actions ?? []) act[a.action_type] = Number(a.value ?? 0);
+      out.set(String(r.ad_id), {
+        spend: Number(r.spend ?? 0),
+        impressions: Number(r.impressions ?? 0),
+        reach: Number(r.reach ?? 0),
+        clicks: Number(r.clicks ?? 0),
+        linkClicks: Number(r.inline_link_clicks ?? 0),
+        reactions: act["post_reaction"] ?? 0,
+        comments: act["comment"] ?? 0,
+        shares: act["post"] ?? 0,
+        saves: act["onsite_conversion.post_save"] ?? 0,
+        conversations: act["onsite_conversion.messaging_conversation_started_7d"] ?? 0,
+        videoViews: act["video_view"] ?? 0,
+      });
+    }
+    if (!page.paging?.next) break;
+    page = await graph<any>(page.paging.next);
+  }
+  return out;
+}
+
 export const STATUS_TEXT: Record<string, string> = {
   PAUSED: "приостановлено",
   CAMPAIGN_PAUSED: "кампания приостановлена",

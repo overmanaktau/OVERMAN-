@@ -90,8 +90,3 @@ async function upsert(city: CityKey, p: TargetPost, now: string, active: boolean
   );
   if (error) throw error;
 }
-
-// Для кнопки «Что сейчас в таргете»: актуальный список активных публикаций города.
-export async function currentTarget(city: CityKey): Promise<TargetPost[]> {
-  return listTargetPosts(city);
-}

@@ -9,8 +9,9 @@ export const cityCode = (c: CityKey) => (c === "aktau" ? "a" : "b");
 export const cityFromCode = (code: string): CityKey | null => (code === "a" ? "aktau" : code === "b" ? "aktobe" : null);
 
 // Категории продаж города (или онлайн-продаж) + кнопки «Посмотреть все категории» и «Посмотреть товары».
-export async function sendCategories(t: Transport, chat: number, city: CityKey, p: Period, kind: SalesSource, all = false): Promise<void> {
+export async function sendCategories(t: Transport, chat: number, city: CityKey, p: Period, kind: SalesSource, all = false, skipEmpty = false): Promise<void> {
   const report = kind === "online" ? (await onlineSales(p)).report : await categorySales(city, p);
+  if (skipEmpty && report.rows.length === 0) return; // в рассылке пустые онлайн-продажи не присылаем
   const { text, hasRest } = categoryMessage(city, p, report, kind, all);
   const feat = kind === "online" ? "on" : "cs";
   const tail = `${cityCode(city)}|${codeFromPeriod(p)}`;
@@ -22,8 +23,8 @@ export async function sendCategories(t: Transport, chat: number, city: CityKey, 
 
 export async function sendStories(t: Transport, chat: number, city: CityKey, p: Period, now = new Date()): Promise<void> {
   for (const m of await storiesMessages(city, p, now)) {
-    if (m.photo) await t.photo(chat, m.photo, m.caption);
-    else await t.send(chat, m.caption);
+    if (m.photo) await t.photo(chat, m.photo, m.caption, m.markup);
+    else await t.send(chat, m.caption, m.markup);
     await new Promise((r) => setTimeout(r, 200));
   }
 }
