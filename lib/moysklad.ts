@@ -123,6 +123,14 @@ export async function fetchRetailDemandsForDate(date: string): Promise<RetailDem
   return fetchAllPages<RetailDemand>("/entity/retaildemand", filter);
 }
 
+// Чеки одного сотрудника (ответственный) за период дат (по дням бизнес-дня, как fetchRetailDemandsForDate) — для онлайн-продаж в боте СММ.
+// Позиции чеков приходят раскрытыми: assortment.id — товар или модификация (его id есть в moysklad_products).
+export async function fetchRetailDemandsForOwner(ownerId: string, fromDate: string, toDate: string): Promise<RetailDemand[]> {
+  const from = dayWindow(fromDate).from;
+  const to = dayWindow(toDate).to;
+  return fetchAllPages<RetailDemand>("/entity/retaildemand", `moment>=${from};moment<${to};owner=${BASE_URL}/entity/employee/${ownerId}`);
+}
+
 // Light version of the above for reports that only need each check's total,
 // who rang it up and on which register (e.g. "самый крупный чек смены") — no
 // expand and no positions, so a whole day comes back in one 1000-row page
