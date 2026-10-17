@@ -12,6 +12,7 @@ import { handleCompareCallback, handleCompareInput, sendCompareStart } from "@/l
 import { handleEditRequestCallback } from "@/lib/editRequests";
 import { handleSmmOwnerCallback } from "@/lib/smm/approvals";
 import { handlePlanCallback, sendPlanMenu } from "@/lib/coach/planview";
+import { handleExpiryCallback } from "@/lib/kassa/expiryRequests";
 import { clearCertDraft, handleCertAdminCallback, handleCertCallback, handleCertOwnerCallback, handleCertText, sendCertAdminMenu, sendConsultantMenu } from "@/lib/coach/certificates";
 import {
   AUTO_ONLY_TEXT,
@@ -421,6 +422,16 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     // План продаж (личный / общий) — только подтверждённый стилист-консультант.
     if (!existing || existing.status !== "approved" || existing.is_admin || existing.is_test) return;
     await handlePlanCallback(cb.data, t, chatId, refOf(existing), dropCurrent);
+    return;
+  }
+
+  if (cb.data.startsWith("be:")) {
+    // Сгорание бонусов (разрешить / отклонить / список) — только главный владелец.
+    if (!existing || existing.status !== "approved" || !existing.is_protected) return;
+    const action = cb.data.split(":")[1];
+    if (action !== "list") await clearCurrent();
+    const r = await handleExpiryCallback(cb.data, existing.employee_name);
+    await t.send(chatId, r.text, r.markup);
     return;
   }
 
