@@ -56,7 +56,7 @@ async function loadRows(emp: EmployeeRef, kind: Kind, from: string, to: string, 
     if (from <= yesterday) for (const d of await loadEmployeeDays(emp.id, from, to < yesterday ? to : yesterday)) facts.set(d.date, d.revenue);
     return plans.map((p) => ({ date: p.date, plan: p.plan, fact: p.date < today ? (facts.get(p.date) ?? 0) : null }));
   }
-  const w = await loadPeriod(emp.store, from, to, false);
+  const w = await loadPeriod(emp.store, from, to, false, true);
   return w.days.map((d) => ({ date: d.date, plan: d.planRevenue, fact: d.date < today ? d.revenue : null }));
 }
 

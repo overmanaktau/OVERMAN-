@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { addDays, mondayOf } from "@/lib/coach/metrics";
-import { addDaysYmd, adjustedDayPlan, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
+import { addDaysYmd, adjustedDayPlan, dayPlanForDate, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
 
 export type CompareDay = {
   date: string;
@@ -42,12 +42,14 @@ type PeriodRow = { plan_month: string; p1_from: string | null; p1_to: string | n
 
 // Один период любой длины (от from до to включительно): по дням — продажи, трафик и планы города.
 // useOverrides=false — план дня только по правилу долей (как в окне «План продаж» на портале), без цифр, внесённых вручную для PDF.
-export async function loadPeriod(store: string, from: string, to: string, useOverrides = true): Promise<CompareWeek> {
+// withDeficit=true — план дня с добавкой недобора месяца (как в боте «Продажи и план» и у стилистов); по умолчанию (PDF «Сравнение недель»)
+// недобор в план НЕ включается: PDF показывает план по долям дней недели как он есть (решение владельца 17.10.2026).
+export async function loadPeriod(store: string, from: string, to: string, useOverrides = true, withDeficit = false): Promise<CompareWeek> {
   // планы нужны за все недели периода целиком (неделя может начинаться в прошлом месяце и заканчиваться в следующем)
   const planFrom = `${mondayYmd(from).slice(0, 7)}-01`;
   const planTo = addDaysYmd(mondayYmd(to), 6);
   // план дня зависит от факта с начала месяца (недобор месяца делится на оставшиеся дни) — продажи берём с 1-го числа месяца начала периода
-  const factFrom = `${from.slice(0, 7)}-01`;
+  const factFrom = withDeficit ? `${from.slice(0, 7)}-01` : from;
   const todayYmd = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(new Date());
   const regRes = await supabaseAdmin.from("moysklad_registers").select("id").eq("store", store);
   if (regRes.error) throw regRes.error;
@@ -114,7 +116,7 @@ export async function loadPeriod(store: string, from: string, to: string, useOve
       const t = traffic.get(date);
       return {
         date,
-        planRevenue: (useOverrides ? overrides.get(date) : undefined) ?? adjustedDayPlan(store, date, lookup, (d) => sales.get(d)?.revenue ?? 0, todayYmd),
+        planRevenue: (useOverrides ? overrides.get(date) : undefined) ?? (withDeficit ? adjustedDayPlan(store, date, lookup, (d) => sales.get(d)?.revenue ?? 0, todayYmd) : dayPlanForDate(store, date, lookup)),
         planTraffic: t?.plan ?? 0,
         revenue: s?.revenue ?? 0,
         visitors: t?.fact ?? 0,

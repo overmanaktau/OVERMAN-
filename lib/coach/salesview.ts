@@ -394,7 +394,7 @@ type PlanDay = { date: string; plan: number; fact: number | null }; // fact null
 
 async function planDays(store: string, from: string, to: string): Promise<{ days: PlanDay[]; monthPlan: number }> {
   const today = todayInAlmaty();
-  const w = await loadPeriod(store, from, to, false);
+  const w = await loadPeriod(store, from, to, false, true);
   return { days: w.days.map((d) => ({ date: d.date, plan: d.planRevenue, fact: d.date < today ? d.revenue : null })), monthPlan: w.monthPlan ?? 0 };
 }
 
