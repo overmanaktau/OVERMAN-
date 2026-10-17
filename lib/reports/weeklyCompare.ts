@@ -5,11 +5,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { addDays, mondayOf } from "@/lib/coach/metrics";
-import { addDaysYmd, adjustedDayPlan, dayPlanForDate, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
+import { addDaysYmd, dayPlanForDate, mondayYmd, remainingAddOn, type PlanLookup } from "@/lib/dayPlan";
 
 export type CompareDay = {
   date: string;
   planRevenue: number;
+  addOn?: number; // недобор месяца на этот день (только для сегодня и будущих дней и только при withDeficit; в PDF не показывается)
   planTraffic: number;
   revenue: number;
   visitors: number;
@@ -42,8 +43,8 @@ type PeriodRow = { plan_month: string; p1_from: string | null; p1_to: string | n
 
 // Один период любой длины (от from до to включительно): по дням — продажи, трафик и планы города.
 // useOverrides=false — план дня только по правилу долей (как в окне «План продаж» на портале), без цифр, внесённых вручную для PDF.
-// withDeficit=true — план дня с добавкой недобора месяца (как в боте «Продажи и план» и у стилистов); по умолчанию (PDF «Сравнение недель»)
-// недобор в план НЕ включается: PDF показывает план по долям дней недели как он есть (решение владельца 17.10.2026).
+// withDeficit=true — для сегодняшних и будущих дней считается ещё и недобор месяца (addOn): бот показывает «план + недобор». По умолчанию
+// (PDF «Сравнение недель») недобора нет: PDF показывает план по долям дней недели как он есть (решение владельца 17.10.2026).
 export async function loadPeriod(store: string, from: string, to: string, useOverrides = true, withDeficit = false): Promise<CompareWeek> {
   // планы нужны за все недели периода целиком (неделя может начинаться в прошлом месяце и заканчиваться в следующем)
   const planFrom = `${mondayYmd(from).slice(0, 7)}-01`;
@@ -116,7 +117,8 @@ export async function loadPeriod(store: string, from: string, to: string, useOve
       const t = traffic.get(date);
       return {
         date,
-        planRevenue: (useOverrides ? overrides.get(date) : undefined) ?? (withDeficit ? adjustedDayPlan(store, date, lookup, (d) => sales.get(d)?.revenue ?? 0, todayYmd) : dayPlanForDate(store, date, lookup)),
+        planRevenue: (useOverrides ? overrides.get(date) : undefined) ?? dayPlanForDate(store, date, lookup),
+        addOn: withDeficit ? remainingAddOn(store, date, lookup, (d) => sales.get(d)?.revenue ?? 0, todayYmd) : 0,
         planTraffic: t?.plan ?? 0,
         revenue: s?.revenue ?? 0,
         visitors: t?.fact ?? 0,

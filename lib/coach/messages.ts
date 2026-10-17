@@ -232,13 +232,14 @@ function weekLines(w: WeekSummary, conv?: string | null): { last: string; next: 
     next = NO_PLAN_TEXT;
   } else {
     const rows = [line("План недели", money(t.base))];
-    if (t.extra > 0) rows.push(line("+ часть недобора", money(t.extra)));
+    if (t.extra > 0) rows.push(line("+ недобор", money(t.extra)));
+    else if (t.extra < 0) rows.push(line("− опережение", money(-t.extra)));
     rows.push(line("Цель недели", money(t.target)));
     if (t.perShift !== null) rows.push(line("≈ в среднем за смену", money(t.perShift)));
     next = `🎯 <b>Цель на неделю ${shortDate(t.from)}–${shortDate(t.to)}</b>\n${pre(rows.join("\n"))}`;
     if (t.need) next += `\n\n${scenariosText(t.need.own, t.need.perShift)}\n`;
     if (t.extra > 0) {
-      next += "\nНедобор прошлой недели распределён поровну на оставшиеся дни месяца, на эту неделю приходится указанная часть.";
+      next += "\nНедобор месяца поделён поровну на оставшиеся дни, на эту неделю приходится указанная часть.";
     }
   }
   return { last, next };

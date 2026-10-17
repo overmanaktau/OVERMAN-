@@ -68,10 +68,10 @@ export function dayPlanForDate(store: string, date: string, lk: PlanLookup): num
   return weekPlan * (shares[weekdayIndex(date)] / shareSum);
 }
 
-// ---- План дня, который приводит к плану месяца (правило владельца 17.10.2026) ----
-// Базовый план дня (dayPlanForDate) — доля дня недели. К нему добавляется недобор месяца: недобор = план месяца − факт за прошлые дни − базовые
+// ---- План дня и недобор месяца (правило владельца 17.10.2026) ----
+// Базовый план дня (dayPlanForDate) — доля дня недели (это «фактический план»). Рядом через «+» показывается недобор месяца: недобор = план месяца − факт за прошлые дни − базовые
 // планы оставшихся дней; он делится ПОРОВНУ на оставшиеся дни (считая сам день) и прибавляется к плану каждого из них. Тогда сумма планов
-// оставшихся дней + факт прошлых дней = план месяца. Это и есть «План» — везде, где показывается план дня (портал, отчёты, боты).
+// оставшихся дней + факт прошлых дней = план месяца. «План + недобор» показывается везде, кроме PDF «Сравнение недель» (там только план).
 // Для прошедшего дня считаем «как было утром этого дня» (по факту до него), для сегодняшнего и будущих дней — «как сегодня утром».
 export type FactLookup = (date: string) => number; // выручка по дате (0, если данных нет)
 
@@ -100,9 +100,12 @@ export function planAddOn(store: string, date: string, lk: PlanLookup, fact: Fac
   return n > 0 ? (monthPlan - factBefore - futureBase) / n : 0;
 }
 
-// План дня с добавкой: тот, что ведёт к плану месяца. День без базового плана (вне периодов / план не внесён) остаётся 0.
-export function adjustedDayPlan(store: string, date: string, lk: PlanLookup, fact: FactLookup, today: string): number {
+// Недобор для сегодняшнего и будущих дней: одинаковая добавка к плану каждого оставшегося дня (для прошедших дней 0). Показывается рядом с
+// фактическим планом через «+» (владелец 17.10.2026: «покажи фактический план и через + недобор»); не меньше, чем −план дня.
+export function remainingAddOn(store: string, date: string, lk: PlanLookup, fact: FactLookup, today: string): number {
+  if (date < today) return 0;
   const base = dayPlanForDate(store, date, lk);
   if (base <= 0) return 0;
-  return Math.max(0, base + planAddOn(store, date, lk, fact, today));
+  return Math.max(-base, planAddOn(store, date, lk, fact, today));
 }
+

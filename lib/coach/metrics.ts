@@ -3,7 +3,7 @@
 // «Внесения плана продаж по сотрудникам» (sales_plan_monthly, периоды —
 // sales_plan_periods), факт — из moysklad_employee_sales_daily.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { adjustedDayPlan, type PlanLookup } from "@/lib/dayPlan";
+import { dayPlanForDate, remainingAddOn, type PlanLookup } from "@/lib/dayPlan";
 
 export type EmployeeRef = { id: string; name: string; store: string };
 
@@ -346,7 +346,8 @@ function makePlanLookup(plans: Map<string, number | null>, periodsByMonth: Map<s
 }
 
 // Личный план сотрудника по дням за период (null — на месяц этого дня план не вносили).
-export async function employeeDayPlans(emp: EmployeeRef, from: string, to: string): Promise<{ date: string; plan: number | null }[]> {
+// plan — личный план дня по долям (null: на месяц плана нет), addOn — недобор месяца на сегодня и будущие дни (для прошедших 0).
+export async function employeeDayPlans(emp: EmployeeRef, from: string, to: string): Promise<{ date: string; plan: number | null; addOn: number }[]> {
   // план дня зависит от всей недели, в которую он попадает, — месяцы берём по неделям целиком
   const planFrom = mondayOf(from);
   const planTo = addDays(mondayOf(to), 6);
@@ -360,9 +361,10 @@ export async function employeeDayPlans(emp: EmployeeRef, from: string, to: strin
   const factFrom = monthStartOf(from);
   const monthDays = factFrom <= yesterday ? await loadEmployeeDays(emp.id, factFrom, yesterday) : [];
   const factByDate = new Map(monthDays.map((d) => [d.date, d.revenue]));
-  const out: { date: string; plan: number | null }[] = [];
+  const out: { date: string; plan: number | null; addOn: number }[] = [];
   for (let d = from; d <= to; d = addDays(d, 1)) {
-    out.push({ date: d, plan: plans.get(monthStartOf(d)) == null ? null : adjustedDayPlan(emp.store, d, lookup, (x) => factByDate.get(x) ?? 0, today) });
+    const planned = plans.get(monthStartOf(d)) != null;
+    out.push({ date: d, plan: planned ? dayPlanForDate(emp.store, d, lookup) : null, addOn: planned ? remainingAddOn(emp.store, d, lookup, (x) => factByDate.get(x) ?? 0, today) : 0 });
   }
   return out;
 }
@@ -398,7 +400,7 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
   const planPerDay = (date: string): number | null => {
     const p = plans.get(monthStartOf(date)) ?? null;
     if (p === null) return null; // на месяц этого дня план не вносили
-    return adjustedDayPlan(emp.store, date, lookup, (d) => monthFact.get(d) ?? 0, today);
+    return dayPlanForDate(emp.store, date, lookup);
   };
   const sumPlan = (from: string, to: string): number | null => {
     let total = 0;
@@ -424,10 +426,13 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
   const base = sumPlan(monday, thisTo);
   const remainingInMonth = daysBetween(monday, monthEndOf(monday)) + 1;
   const weekDaysInMonth = Math.min(7, remainingInMonth);
-  // недобор месяца уже входит в план каждого дня (adjustedDayPlan), поэтому отдельной «части недобора» в цели недели нет
+  // Недобор месяца: одинаковая добавка к плану каждого оставшегося дня (сегодня и дальше), на неделю приходится сумма по её оставшимся дням.
   void weekDaysInMonth;
   void remainingInMonth;
-  const extra = 0;
+  let extra = 0;
+  for (let d = monday; d <= thisTo; d = addDays(d, 1)) {
+    if (planPerDay(d) !== null) extra += remainingAddOn(emp.store, d, lookup, (x) => monthFact.get(x) ?? 0, today);
+  }
   const target = base === null ? null : base + extra;
   const factSoFar = thisDays
     .filter((d) => d.date < today && (base === null || planned(d)))

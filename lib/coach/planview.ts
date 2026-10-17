@@ -46,7 +46,7 @@ export async function sendPlanMenu(t: Transport, chatId: number | string) {
   });
 }
 
-type Row = { date: string; plan: number | null; fact: number | null };
+type Row = { date: string; plan: number | null; addOn: number; fact: number | null };
 
 async function loadRows(emp: EmployeeRef, kind: Kind, from: string, to: string, today: string): Promise<Row[]> {
   const yesterday = addDays(today, -1);
@@ -54,13 +54,15 @@ async function loadRows(emp: EmployeeRef, kind: Kind, from: string, to: string, 
     const plans = await employeeDayPlans(emp, from, to);
     const facts = new Map<string, number>();
     if (from <= yesterday) for (const d of await loadEmployeeDays(emp.id, from, to < yesterday ? to : yesterday)) facts.set(d.date, d.revenue);
-    return plans.map((p) => ({ date: p.date, plan: p.plan, fact: p.date < today ? (facts.get(p.date) ?? 0) : null }));
+    return plans.map((p) => ({ date: p.date, plan: p.plan, addOn: p.addOn, fact: p.date < today ? (facts.get(p.date) ?? 0) : null }));
   }
   const w = await loadPeriod(emp.store, from, to, false, true);
-  return w.days.map((d) => ({ date: d.date, plan: d.planRevenue, fact: d.date < today ? d.revenue : null }));
+  return w.days.map((d) => ({ date: d.date, plan: d.planRevenue, addOn: d.addOn ?? 0, fact: d.date < today ? d.revenue : null }));
 }
 
 const pctText = (fact: number, plan: number) => (plan > 0 ? `${Math.round((fact / plan) * 100)}%` : "—");
+// «+ недобор» (месяц отстаёт) или «− опережение» (месяц идёт с запасом) — одной строкой для итогов.
+const addOnLine = (label: string, v: number) => (v > 0 ? `+ недобор ${label}${money(v)}` : v < 0 ? `− опережение ${label}${money(-v)}` : "");
 
 export async function buildPlanMessage(emp: EmployeeRef, code: Code, kind: Kind, today = todayInAlmaty()): Promise<string> {
   const { from, to } = rangeOf(code, today);
@@ -74,6 +76,8 @@ export async function buildPlanMessage(emp: EmployeeRef, code: Code, kind: Kind,
   if (rows.length === 1) {
     const r = rows[0];
     const lines = [dayLabel(r.date), `План дня ${money(dated(r))}`];
+    if (r.addOn > 0) lines.push(`+ недобор ${money(r.addOn)}`, `Всего ${money(dated(r) + r.addOn)}`);
+    else if (r.addOn < 0) lines.push(`− опережение ${money(-r.addOn)}`, `Всего ${money(dated(r) + r.addOn)}`);
     return `${head}${NL}${pre(lines.join(NL))}${NL}Факт обновляется ночью — итоги дня придут утром.`;
   }
   const lines = [`${"день".padEnd(9)}${"план".padStart(11)}${"факт".padStart(11)}${"%".padStart(6)}`];
@@ -81,17 +85,15 @@ export async function buildPlanMessage(emp: EmployeeRef, code: Code, kind: Kind,
     lines.push(`${dayLabel(r.date).padEnd(9)}${num(dated(r)).padStart(11)}${(r.fact === null ? "—" : num(r.fact)).padStart(11)}${(r.fact === null ? "" : pctText(r.fact, dated(r))).padStart(6)}`);
   }
   const planAll = rows.reduce((a, r) => a + dated(r), 0);
+  const addOnAll = rows.reduce((a, r) => a + r.addOn, 0);
   const past = rows.filter((r) => r.fact !== null);
   lines.push("─".repeat(37), `План ${CODE_LABEL[code] === CODE_LABEL.w ? "недели" : "периода"} ${money(planAll)}`);
+  const extraLine = addOnLine("", addOnAll);
+  if (extraLine) lines.push(extraLine, `Всего ${money(planAll + addOnAll)}`);
   if (past.length > 0) {
     const planPast = past.reduce((a, r) => a + dated(r), 0);
     const fact = past.reduce((a, r) => a + (r.fact ?? 0), 0);
     lines.push(`План за прошедшие дни ${money(planPast)}`, `Факт ${money(fact)}`, `Выполнение ${pctText(fact, planPast)}`);
-  }
-  const future = rows.filter((r) => r.fact === null);
-  if (future.length > 0) {
-    const planLeft = future.reduce((a, r) => a + dated(r), 0);
-    lines.push(`Впереди (${future.length} дн.) ${money(planLeft)}`);
   }
   return `${head}${NL}${pre(lines.join(NL))}`;
 }

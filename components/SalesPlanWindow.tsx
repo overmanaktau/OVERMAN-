@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
-import { addDaysYmd, adjustedDayPlan, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
+import { addDaysYmd, dayPlanForDate, mondayYmd, remainingAddOn, type PlanLookup } from "@/lib/dayPlan";
 
 const MONTH_NAMES = [
   "январь", "февраль", "март", "апрель", "май", "июнь",
@@ -27,6 +27,21 @@ function daysBetween(fromYmd: string, toYmd: string) {
   const [fy, fm, fd] = fromYmd.split("-").map(Number);
   const [ty, tm, td] = toYmd.split("-").map(Number);
   return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+}
+
+// «План на сегодня»: фактический план дня (по долям дней недели) и через «+» недобор месяца, поделённый поровну на оставшиеся дни.
+function PlanPlusAddOn({ base, addOn }: { base: number; addOn: number }) {
+  return (
+    <div className="font-serif text-[22px] font-semibold num">
+      {base > 0 ? money(base) : "—"}
+      {base > 0 && addOn !== 0 && (
+        <span className="block font-sans text-[13px] font-normal text-muted">
+          {addOn > 0 ? "+ " : "− "}
+          {money(Math.abs(addOn))} {addOn > 0 ? "недобор" : "опережение"}
+        </span>
+      )}
+    </div>
+  );
 }
 
 // Выбранный на странице период (Вчера, Прошлая неделя, Свой период и т.д.).
@@ -76,7 +91,7 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
         const firstMonth = `${mondayYmd(range.from).slice(0, 8)}01`;
         const lastPlanDay = addDaysYmd(mondayYmd(range.to), 6);
         const factTo = range.to < todayStr ? range.to : todayStr;
-        // план дня зависит от факта с начала месяца (недобор делится на оставшиеся дни) — продажи берём с 1-го числа месяца начала периода
+        // недобор месяца считается по факту с 1-го числа месяца начала периода
         const factFrom = `${range.from.slice(0, 8)}01`;
         const [planRes, periodsRes] = await Promise.all([
           supabase
@@ -136,8 +151,8 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storesKey, refreshKey, range.from, range.to]);
 
-  // План периода: сумма планов дней периода по каждой точке. План дня — по долям дней недели плюс недобор месяца, поделённый поровну на
-  // оставшиеся дни (lib/dayPlan, adjustedDayPlan): так он приводит к плану месяца. В базе план внесён по продавцам — на точку суммируем.
+  // План периода: сумма фактических планов дней по каждой точке (lib/dayPlan: план недели по долям дней недели). В базе план внесён по
+  // продавцам — на точку и месяц суммируем. Недобор месяца (addOn) — отдельно, показывается через «+» (только сегодня и дальше).
   const planByStoreMonth = new Map<string, number>();
   for (const p of plans) planByStoreMonth.set(`${p.store}|${p.plan_month}`, (planByStoreMonth.get(`${p.store}|${p.plan_month}`) ?? 0) + (Number(p.sales_plan) || 0));
   const lookupFor = (store: string): PlanLookup => ({
@@ -155,12 +170,21 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
   });
   const factByStoreDate = new Map<string, number>();
   for (const r of factRows) factByStoreDate.set(`${r.store}|${r.date}`, (factByStoreDate.get(`${r.store}|${r.date}`) ?? 0) + r.revenue);
-  const planOfDay = (store: string, date: string) => adjustedDayPlan(store, date, lookupFor(store), (d) => factByStoreDate.get(`${store}|${d}`) ?? 0, todayStr);
   let plan = 0;
+  let addOnPeriod = 0;
   let planToday = 0;
+  let addOnToday = 0;
   for (const store of stores) {
-    for (let date = range.from; date <= range.to; date = addDaysYmd(date, 1)) plan += planOfDay(store, date);
-    if (range.to >= todayStr) planToday += planOfDay(store, todayStr);
+    const lk = lookupFor(store);
+    const factOf = (d: string) => factByStoreDate.get(`${store}|${d}`) ?? 0;
+    for (let date = range.from; date <= range.to; date = addDaysYmd(date, 1)) {
+      plan += dayPlanForDate(store, date, lk);
+      addOnPeriod += remainingAddOn(store, date, lk, factOf, todayStr);
+    }
+    if (range.to >= todayStr) {
+      planToday += dayPlanForDate(store, todayStr, lk);
+      addOnToday += remainingAddOn(store, todayStr, lk, factOf, todayStr);
+    }
   }
   const inRange = (r: FactRow) => r.date >= range.from && r.date <= range.to;
   // Факт сравниваем с планом только по тем точкам и месяцам, где план внесён: иначе
@@ -169,8 +193,10 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
   const fact = factRows.filter((r) => inRange(r) && plannedMonths.has(`${r.store}|${r.date.slice(0, 7)}`)).reduce((a, r) => a + r.revenue, 0);
   const totalFact = factRows.filter(inRange).reduce((a, r) => a + r.revenue, 0);
   const pct = plan > 0 ? (fact / plan) * 100 : null;
-  // Если в периоде есть сегодняшний или будущие дни (например, «Эта неделя»), показываем план на сегодня — с добавкой недобора месяца.
+  // Если в периоде есть дни впереди (например, «Эта неделя»), показываем, сколько нужно в день.
   const hasFuture = range.to >= todayStr;
+  const daysLeft = hasFuture ? daysBetween(todayStr, range.to) + 1 : 0;
+  const perDay = plan > 0 && daysLeft > 0 ? Math.max(0, plan - fact) / daysLeft : null;
   const dates = range.from === range.to ? shortDate(range.from) : `${shortDate(range.from)}–${shortDate(range.to)}`;
 
   return (
@@ -188,10 +214,10 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
         <div className="text-sm text-muted">Загрузка…</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className={`grid grid-cols-2 ${hasFuture ? "lg:grid-cols-5" : "lg:grid-cols-4"} gap-4`}>
             <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">План периода</div>
-              <div className="font-serif text-[22px] font-semibold num">{plan > 0 ? money(plan) : "—"}</div>
+              <PlanPlusAddOn base={plan} addOn={addOnPeriod} />
             </div>
             <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">Факт периода</div>
@@ -203,8 +229,14 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
             </div>
             {hasFuture && (
               <div className="flex flex-col gap-1.5">
+                <div className="text-xs text-muted">Нужно в день до конца периода</div>
+                <div className="font-serif text-[22px] font-semibold num">{perDay !== null ? money(perDay) : "—"}</div>
+              </div>
+            )}
+            {hasFuture && (
+              <div className="flex flex-col gap-1.5">
                 <div className="text-xs text-muted">План на сегодня</div>
-                <div className="font-serif text-[22px] font-semibold num">{planToday > 0 ? money(planToday) : "—"}</div>
+                <PlanPlusAddOn base={planToday} addOn={addOnToday} />
               </div>
             )}
           </div>
@@ -320,12 +352,15 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
 
   const plan = Object.values(planByStore).reduce((a, b) => a + b, 0);
   const fact = factRows.reduce((a, r) => a + r.revenue, 0);
+  const daysLeft = daysInMonth - today.getDate() + 1;
   const pct = plan > 0 ? (fact / plan) * 100 : null;
-  // План на сегодня — по долям дня недели плюс недобор месяца, поделённый поровну на оставшиеся дни (lib/dayPlan): приводит к плану месяца.
+  const perDay = plan > 0 && daysLeft > 0 ? Math.max(0, plan - fact) / daysLeft : null;
+  // План на сегодня: фактический план дня (по долям дней недели) + недобор месяца, поделённый поровну на оставшиеся дни (lib/dayPlan).
   const monthKey = ymd(monthStart);
   const factByStoreDate = new Map<string, number>();
   for (const r of factRows) factByStoreDate.set(`${r.store}|${r.date}`, (factByStoreDate.get(`${r.store}|${r.date}`) ?? 0) + r.revenue);
   let planToday = 0;
+  let addOnToday = 0;
   for (const store of stores) {
     const row = periodRows.find((r) => r.store === store);
     const lk: PlanLookup = {
@@ -340,12 +375,14 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
           .map((c) => ({ from: c.from, to: c.to, percent: Number(c.percent) || 0 }));
       },
     };
-    planToday += adjustedDayPlan(store, todayStr, lk, (d) => factByStoreDate.get(`${store}|${d}`) ?? 0, todayStr);
+    planToday += dayPlanForDate(store, todayStr, lk);
+    addOnToday += remainingAddOn(store, todayStr, lk, (d) => factByStoreDate.get(`${store}|${d}`) ?? 0, todayStr);
   }
 
   // Текущий период по каждой точке, где он задан и сегодня попадает в него.
   let periodPlan = 0;
   let periodFact = 0;
+  let periodNeed = 0;
   const periodLabels = new Set<string>();
   for (const row of periodRows) {
     const candidates = [
@@ -358,8 +395,10 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
     const storeFact = factRows
       .filter((r) => r.store === row.store && r.date >= current.from! && r.date <= current.to!)
       .reduce((a, r) => a + r.revenue, 0);
+    const daysLeftPeriod = daysBetween(todayStr, current.to) + 1;
     periodPlan += storePlan;
     periodFact += storeFact;
+    if (storePlan > 0 && daysLeftPeriod > 0) periodNeed += Math.max(0, storePlan - storeFact) / daysLeftPeriod;
     periodLabels.add(`${shortDate(current.from)}–${shortDate(current.to)} (${Number(current.percent) || 0}%)`);
   }
   const hasPeriod = periodLabels.size > 0;
@@ -380,7 +419,7 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
         <div className="text-sm text-muted">Загрузка…</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">План на месяц</div>
               <div className="font-serif text-[22px] font-semibold num">{plan > 0 ? money(plan) : "—"}</div>
@@ -394,8 +433,12 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
               <div className="font-serif text-[22px] font-semibold num">{pct !== null ? `${pct.toFixed(2)}%` : "—"}</div>
             </div>
             <div className="flex flex-col gap-1.5">
+              <div className="text-xs text-muted">Нужно в день до конца месяца</div>
+              <div className="font-serif text-[22px] font-semibold num">{perDay !== null ? money(perDay) : "—"}</div>
+            </div>
+            <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">План на сегодня</div>
-              <div className="font-serif text-[22px] font-semibold num">{planToday > 0 ? money(planToday) : "—"}</div>
+              <PlanPlusAddOn base={planToday} addOn={addOnToday} />
             </div>
           </div>
 
@@ -408,7 +451,7 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
           {hasPeriod && (
             <div className="flex flex-col gap-3 pt-3.5 border-t border-borderSoft">
               <div className="text-[13px] font-bold">Текущий период: {[...periodLabels].join(" · ")}</div>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="flex flex-col gap-1.5">
                   <div className="text-xs text-muted">План периода</div>
                   <div className="font-serif text-[22px] font-semibold num">{periodPlan > 0 ? money(periodPlan) : "—"}</div>
@@ -422,6 +465,10 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
                   <div className="font-serif text-[22px] font-semibold num">
                     {periodPct !== null ? `${periodPct.toFixed(2)}%` : "—"}
                   </div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-xs text-muted">Нужно в день до конца периода</div>
+                  <div className="font-serif text-[22px] font-semibold num">{periodPlan > 0 ? money(periodNeed) : "—"}</div>
                 </div>
               </div>
             </div>
