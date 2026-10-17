@@ -52,6 +52,18 @@ export async function handleExpiryCallback(data: string, ownerName: string): Pro
     return { text: `📋 <b>Крупнейшие к сгоранию</b> (40 из ${req.clients})\n${list.map((c, i) => `${i + 1}. ${line(c)}`).join("\n")}`, markup: req.status === "pending" ? requestMarkup(req.id) : undefined };
   }
 
+  // «Повторить сейчас» под сообщением о сбое: заново пробуем тех клиентов, по кому списание не вышло
+  if (action === "retry") {
+    if (req.status === "approved") return { text: "Списание по этому запросу уже идёт — подождите несколько минут." };
+    const failed = req.error_ids.map((x) => String(x).split("|")[0]).filter(Boolean);
+    if (failed.length === 0) return { text: "По этому запросу нечего повторять: ошибок нет." };
+    await supabaseAdmin
+      .from("kassa_bonus_expiry_requests")
+      .update({ status: "approved", pending_ids: failed, error_ids: [], finished_at: null, decided_at: new Date().toISOString(), decided_by: `${ownerName} (повтор)` })
+      .eq("id", id);
+    return { text: `🔄 Повторяю списание по ${failed.length} клиентам, у которых не вышло. Итог пришлю только если снова не получится.` };
+  }
+
   if (req.status !== "pending") {
     const done = req.status === "approved" ? "Уже разрешено, списание идёт." : req.status === "rejected" ? "Уже отклонено." : "Уже выполнено.";
     return { text: `${done} (запрос от ${ru(req.run_date)})` };

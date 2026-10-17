@@ -137,7 +137,8 @@ async function runApproved() {
   // владельцу — только если что-то не удалось списать (успешный итог не присылаем)
   if (isDone && errorIds.size > 0) {
     await notifyOwner(
-      `⚠️ <b>Сгорание бонусов: не удалось списать у ${errorIds.size} клиентов</b> (запрос от ${req.run_date.split("-").reverse().join(".")}).\nОстальным списано: ${patch.written} клиентов, ${fmt(patch.written_total)} бонусов.\nНе списанные попробуем снова следующей ночью.\n${[...errorIds].slice(0, 3).map((x) => escapeHtml(x.replace("|", ": "))).join("\n")}`
+      `⚠️ <b>Сгорание бонусов: не удалось списать у ${errorIds.size} клиентов</b> (запрос от ${req.run_date.split("-").reverse().join(".")}).\nОстальным списано: ${patch.written} клиентов, ${fmt(patch.written_total)} бонусов.\nНе списанные попробуем снова следующей ночью или сразу по кнопке.\n${[...errorIds].slice(0, 3).map((x) => escapeHtml(x.replace("|", ": "))).join("\n")}`,
+      { inline_keyboard: [[{ text: "🔄 Повторить сейчас", callback_data: `be:retry:${req.id}` }]] }
     );
   }
   return { ok: true, request: req.id, written, writtenTotal, remaining: remaining.length, done: isDone, errors: errors.slice(0, 10) };
