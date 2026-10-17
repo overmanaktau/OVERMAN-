@@ -40,7 +40,8 @@ export function weekdayOf(date: string) {
 type PeriodRow = { plan_month: string; p1_from: string | null; p1_to: string | null; p1_percent: number | null; p2_from: string | null; p2_to: string | null; p2_percent: number | null };
 
 // Один период любой длины (от from до to включительно): по дням — продажи, трафик и планы города.
-export async function loadPeriod(store: string, from: string, to: string): Promise<CompareWeek> {
+// useOverrides=false — план дня только по правилу долей (как в окне «План продаж» на портале), без цифр, внесённых вручную для PDF.
+export async function loadPeriod(store: string, from: string, to: string, useOverrides = true): Promise<CompareWeek> {
   // планы нужны за все недели периода целиком (неделя может начинаться в прошлом месяце и заканчиваться в следующем)
   const planFrom = `${mondayYmd(from).slice(0, 7)}-01`;
   const planTo = addDaysYmd(mondayYmd(to), 6);
@@ -86,7 +87,7 @@ export async function loadPeriod(store: string, from: string, to: string): Promi
   for (const r of (periodsRes.data ?? []) as PeriodRow[]) periods.set(r.plan_month, r);
 
   const lookup: PlanLookup = {
-    dayOverride: (d) => overrides.get(d),
+    dayOverride: useOverrides ? (d) => overrides.get(d) : undefined,
     monthPlan: (m) => monthPlans.get(m) ?? 0,
     periods: (m) => {
       const row = periods.get(m);
@@ -108,7 +109,7 @@ export async function loadPeriod(store: string, from: string, to: string): Promi
       const t = traffic.get(date);
       return {
         date,
-        planRevenue: overrides.get(date) ?? dayPlanForDate(store, date, lookup),
+        planRevenue: (useOverrides ? overrides.get(date) : undefined) ?? dayPlanForDate(store, date, lookup),
         planTraffic: t?.plan ?? 0,
         revenue: s?.revenue ?? 0,
         visitors: t?.fact ?? 0,

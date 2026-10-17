@@ -5,22 +5,24 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { SCOPES, buildCashReport, money, num, pre, shortName } from "@/lib/reports/sales";
 import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
-import { addDays, daysBetween, monthStartOf, shortDate, todayInAlmaty } from "@/lib/coach/metrics";
+import { addDays, daysBetween, monthEndOf, monthStartOf, mondayOf, shortDate, todayInAlmaty } from "@/lib/coach/metrics";
+import { loadPeriod } from "@/lib/reports/weeklyCompare";
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 const HIDDEN_NAME = /саяпарк|saya/i;
-type Period = "y" | "w" | "m" | "c"; // c — свой период (даты вводятся текстом)
-const PERIOD_LABEL: Record<Period, string> = { y: "Вчера", w: "Последние 7 дней", m: "Месяц", c: "Свой период" };
+type Period = "y" | "w" | "m" | "c" | "t" | "cw"; // c — свой период (даты вводятся текстом); t, cw — только для «Продажи и план»
+const PERIOD_LABEL: Record<Period, string> = { y: "Вчера", w: "Последние 7 дней", m: "Месяц", c: "Свой период", t: "Сегодня", cw: "Эта неделя" };
 type Range = { from: string; to: string };
 const MAX_CUSTOM_DAYS = 366;
+const MAX_PLAN_DAYS = 62; // «Продажи и план»: по дням, слишком длинную таблицу не читать
 const CASH_MAX_DAYS = 31; // касса города (оплаты и возвраты тянутся из МойСклад — дольше не успевает)
 const CASH_MAX_DAYS_ALL = 20; // касса по всем городам (два города подряд)
 
 export const ALL_STORES = Object.keys(CITY);
 
 // Что показывать: продажи по сотрудникам (e) или общая касса города (k).
-type Mode = "e" | "k";
-const MODE_LABEL: Record<Mode, string> = { e: "по сотрудникам", k: "по городу (общая касса)" };
+type Mode = "e" | "k" | "p";
+const MODE_LABEL: Record<Mode, string> = { e: "по сотрудникам", k: "по городу (общая касса)", p: "и план продаж" };
 
 // Вход в раздел: сначала выбор — по сотрудникам или по городу (общая касса).
 export async function sendSalesStart(t: Transport, chatId: number | string, _stores?: string[]) {
@@ -28,6 +30,7 @@ export async function sendSalesStart(t: Transport, chatId: number | string, _sto
     inline_keyboard: [
       [{ text: "👥 По сотрудникам", callback_data: "adm:s:m:e" }],
       [{ text: "🏙 По городу (общая касса)", callback_data: "adm:s:m:k" }],
+      [{ text: "📈 Продажи и план продаж", callback_data: "adm:s:m:p" }],
     ],
   });
 }
@@ -48,7 +51,8 @@ async function sendCityMenu(t: Transport, chatId: number | string, mode: Mode, s
 }
 
 async function sendPeriodMenu(t: Transport, chatId: number | string, mode: Mode, store: string, canGoBack: boolean) {
-  const rows: { text: string; callback_data: string }[][] = (["y", "w", "m"] as Period[]).map((p) => [
+  const list: Period[] = mode === "p" ? ["t", "y", "cw", "m"] : ["y", "w", "m"];
+  const rows: { text: string; callback_data: string }[][] = list.map((p) => [
     { text: PERIOD_LABEL[p], callback_data: `adm:s:p:${mode}:${store}:${p}` },
   ]);
   rows.push([{ text: "✏️ Свой период", callback_data: `adm:s:x:${mode}:${store}` }]);
@@ -61,9 +65,17 @@ async function sendPeriodMenu(t: Transport, chatId: number | string, mode: Mode,
   );
 }
 
-function rangeFor(period: Period, custom?: Range): Range {
+function rangeFor(period: Period, custom?: Range, plan = false): Range {
   const today = todayInAlmaty();
   const yesterday = addDays(today, -1);
+  if (plan) {
+    // «Продажи и план»: план есть и на сегодня, и на будущие дни — ничего не обрезаем
+    if (period === "c" && custom) return custom;
+    if (period === "t") return { from: today, to: today };
+    if (period === "y") return { from: yesterday, to: yesterday };
+    if (period === "cw") return { from: mondayOf(today), to: addDays(mondayOf(today), 6) };
+    return { from: monthStartOf(today), to: monthEndOf(today) };
+  }
   if (period === "c" && custom) {
     // Данные есть по вчера: будущие даты обрезаем.
     return { from: custom.from, to: custom.to > yesterday ? yesterday : custom.to };
@@ -123,7 +135,7 @@ export async function handleCustomPeriodInput(
 ): Promise<void> {
   // sales:<режим>:<город>
   const [, modeRaw, store] = awaiting.split(":");
-  const mode: Mode = modeRaw === "k" ? "k" : "e";
+  const mode: Mode = modeRaw === "k" ? "k" : modeRaw === "p" ? "p" : "e";
   if (!store || (store === "all" ? stores.length < 2 : !stores.includes(store))) {
     await setAwaiting(user.id, null);
     return;
@@ -139,8 +151,9 @@ export async function handleCustomPeriodInput(
     await t.send(chat, "Начало периода позже конца. Напишите ещё раз, например <b>01.10-15.10</b>.", retry);
     return;
   }
-  if (daysBetween(range.from, range.to) + 1 > MAX_CUSTOM_DAYS) {
-    await t.send(chat, `Период слишком длинный — не больше ${MAX_CUSTOM_DAYS} дней. Напишите ещё раз.`, retry);
+  const maxDays = mode === "p" ? MAX_PLAN_DAYS : MAX_CUSTOM_DAYS;
+  if (daysBetween(range.from, range.to) + 1 > maxDays) {
+    await t.send(chat, `Период слишком длинный — не больше ${maxDays} дней. Напишите ещё раз.`, retry);
     return;
   }
   await setAwaiting(user.id, null);
@@ -196,7 +209,7 @@ async function sendReport(t: Transport, chatId: number | string, mode: Mode, sto
   const back: ReplyMarkup = { inline_keyboard: [[{ text: "← Другой период", callback_data: `adm:s:c:${mode}:${store}` }]] };
   let messages: string[];
   try {
-    messages = mode === "k" ? await buildCashMessages(store, period, custom) : [await buildReport(store, period, custom)];
+    messages = mode === "k" ? await buildCashMessages(store, period, custom) : mode === "p" ? [await buildPlanReport(store, period, custom)] : [await buildReport(store, period, custom)];
   } catch (e) {
     messages = [`Не удалось собрать продажи: ${escapeHtml(e instanceof Error ? e.message : String(e))}`];
   }
@@ -368,6 +381,69 @@ async function buildReport(store: string, period: Period, custom?: Range): Promi
   return `${title}\n\n${blocks.join("\n")}\n<b>Всего по городам</b>${pre(totalLines("Итого", all).join("\n"))}`;
 }
 
+// ---- Продажи и план продаж: по дням план оборота города (по долям дней недели, как в окне «План продаж» на портале) и факт ----
+
+const WEEKDAY_SHORT = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+function dayLabel(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return `${WEEKDAY_SHORT[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${shortDate(date)}`;
+}
+const pctText = (fact: number, plan: number) => (plan > 0 ? `${Math.round((fact / plan) * 100)}%` : "—");
+
+type PlanDay = { date: string; plan: number; fact: number | null }; // fact null — день ещё не закончился
+
+async function planDays(store: string, from: string, to: string): Promise<PlanDay[]> {
+  const today = todayInAlmaty();
+  const w = await loadPeriod(store, from, to, false);
+  return w.days.map((d) => ({ date: d.date, plan: d.planRevenue, fact: d.date < today ? d.revenue : null }));
+}
+
+function planTotals(days: PlanDay[]) {
+  const planAll = days.reduce((a, d) => a + d.plan, 0);
+  const past = days.filter((d) => d.fact !== null);
+  return { planAll, planPast: past.reduce((a, d) => a + d.plan, 0), fact: past.reduce((a, d) => a + (d.fact ?? 0), 0), pastCount: past.length };
+}
+
+function planCityBlock(days: PlanDay[]): string[] {
+  if (days.length === 1) {
+    const d = days[0];
+    const lines = [dayLabel(d.date), `План дня   ${money(d.plan)}`];
+    if (d.fact === null) lines.push(d.date === todayInAlmaty() ? "Факт: появится после ночной загрузки (утром)" : "Факт: день ещё не наступил");
+    else lines.push(`Факт       ${money(d.fact)}`, `Выполнение ${pctText(d.fact, d.plan)}`, d.fact >= d.plan ? `Сверх плана ${money(d.fact - d.plan)}` : `До плана    ${money(d.plan - d.fact)}`);
+    return lines;
+  }
+  const lines = [`${"день".padEnd(9)}${"план".padStart(11)}${"факт".padStart(11)}${"%".padStart(6)}`];
+  for (const d of days) {
+    lines.push(`${dayLabel(d.date).padEnd(9)}${num(d.plan).padStart(11)}${(d.fact === null ? "—" : num(d.fact)).padStart(11)}${(d.fact === null ? "" : pctText(d.fact, d.plan)).padStart(6)}`);
+  }
+  const t = planTotals(days);
+  lines.push("─".repeat(37), `План периода ${money(t.planAll)}`);
+  if (t.pastCount > 0) lines.push(`План за прошедшие дни ${money(t.planPast)}`, `Факт ${money(t.fact)}`, `Выполнение ${pctText(t.fact, t.planPast)}`);
+  return lines;
+}
+
+async function buildPlanReport(store: string, period: Period, custom?: Range): Promise<string> {
+  const { from, to } = rangeFor(period, custom, true);
+  const fmt = (d: string) => (d.slice(0, 4) === todayInAlmaty().slice(0, 4) ? shortDate(d) : `${shortDate(d)}.${d.slice(0, 4)}`);
+  const label = store === "all" ? "Все города" : (CITY[store] ?? store);
+  const title = `📈 <b>Продажи и план продаж · ${label}</b>\n${PERIOD_LABEL[period]}: ${from === to ? fmt(from) : `${fmt(from)}–${fmt(to)}`}`;
+  const cities = store === "all" ? ALL_STORES : [store];
+  const data = await Promise.all(cities.map(async (c) => ({ c, days: await planDays(c, from, to) })));
+  const note = "\n<i>План дня — по долям дней недели от плана месяца (как в окне «План продаж» на портале). Факт — по вчера включительно.</i>";
+  if (cities.length === 1) return `${title}\n${pre(planCityBlock(data[0].days).join("\n"))}${note}`;
+  const blocks = data.map(({ c, days }) => `<b>${CITY[c]}</b>${pre(planCityBlock(days).join("\n"))}`);
+  const total = data.reduce(
+    (a, { days }) => {
+      const t = planTotals(days);
+      return { planAll: a.planAll + t.planAll, planPast: a.planPast + t.planPast, fact: a.fact + t.fact, pastCount: Math.max(a.pastCount, t.pastCount) };
+    },
+    { planAll: 0, planPast: 0, fact: 0, pastCount: 0 }
+  );
+  const sum = [`План ${money(total.planAll)}`];
+  if (total.pastCount > 0) sum.push(`План за прошедшие дни ${money(total.planPast)}`, `Факт ${money(total.fact)}`, `Выполнение ${pctText(total.fact, total.planPast)}`);
+  return `${title}\n\n${blocks.join("\n")}\n<b>Всего по городам</b>${pre(sum.join("\n"))}${note}`;
+}
+
 // Нажатия adm:s… ; stores — города, доступные этому администратору.
 export async function handleSalesCallback(parts: string[], t: Transport, chatId: number | string, stores: string[], userId: number) {
   // adm:s | adm:s:m:<режим> | adm:s:c:<режим>:<город> | adm:s:p:<режим>:<город>:<период> | adm:s:x:<режим>:<город>
@@ -378,7 +454,7 @@ export async function handleSalesCallback(parts: string[], t: Transport, chatId:
     await sendSalesStart(t, chatId);
     return;
   }
-  const mode: Mode = parts[3] === "k" ? "k" : "e";
+  const mode: Mode = parts[3] === "k" ? "k" : parts[3] === "p" ? "p" : "e";
   if (kind === "m") {
     await sendCityMenu(t, chatId, mode, stores);
     return;
@@ -402,6 +478,7 @@ export async function handleSalesCallback(parts: string[], t: Transport, chatId:
   }
   const period = parts[5] as Period;
   if (kind !== "p" || !(period in PERIOD_LABEL) || period === "c") return;
+  if (mode !== "p" && (period === "t" || period === "cw")) return;
   await sendReport(t, chatId, mode, store, period);
 }
 
