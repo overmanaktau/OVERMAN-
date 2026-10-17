@@ -22,7 +22,7 @@ export async function handleVerifyCallback(
     await t.send(chatId, "🔄 Перепроверяю… Результат пришлю отдельным сообщением (обычно до минуты).");
     // Сама перепроверка идёт отдельным запросом и сама пишет владельцу итог; здесь ждём недолго,
     // чтобы не упереться во время ответа бота.
-    const run = fetch(`${ORIGIN}/api/verify?recheck=1`, { headers: { Authorization: `Bearer ${secret}` } }).catch(() => null);
+    const run = fetch(`${ORIGIN}/api/verify?recheck=1&quick=1`, { headers: { Authorization: `Bearer ${secret}` } }).catch(() => null);
     await Promise.race([run, new Promise((resolve) => setTimeout(resolve, 45_000))]);
     return;
   }

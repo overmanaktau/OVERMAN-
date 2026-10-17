@@ -18,8 +18,9 @@ export const maxDuration = 300;
 // Сама сверка может упасть из-за МойСклад (например, 429 — слишком много запросов сразу от других ночных заданий). Как договорились при сбое:
 // сначала сразу повторяем несколько раз подряд (6 попыток, паузы 1,5·N с — около 40 с вместе с самими запросами), и только если не вышло —
 // ещё две попытки с паузой 30 и 60 секунд. Владельцу пишем после последней неудачи.
-async function verifyWithRetries(o: Parameters<typeof runVerification>[0]) {
-  const pauses = [1500, 3000, 4500, 6000, 7500, 30_000, 60_000]; // между 8 попытками
+async function verifyWithRetries(o: Parameters<typeof runVerification>[0], quick: boolean) {
+  // quick (ручная перепроверка кнопкой в боте) — только быстрые повторы, без долгих пауз: владелец ждёт ответа
+  const pauses = quick ? [1500, 3000, 4500, 6000, 7500] : [1500, 3000, 4500, 6000, 7500, 30_000, 60_000]; // между попытками
   let last: unknown;
   for (let attempt = 0; attempt <= pauses.length; attempt++) {
     try {
@@ -41,6 +42,7 @@ async function handle(request: Request) {
   const dry = url.searchParams.get("dry") === "1";
   const recheck = url.searchParams.get("recheck") === "1";
   const fix = url.searchParams.get("fix") !== "0";
+  const quick = url.searchParams.get("quick") === "1";
 
   const dateParam = url.searchParams.get("date");
   if (dateParam && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
@@ -57,7 +59,7 @@ async function handle(request: Request) {
   const summary: { date: string; ok: boolean; held: string[]; fixActions: string[]; sentReports: string[]; text?: string }[] = [];
   for (const date of dates) {
     try {
-      const r = await verifyWithRetries({ origin: url.origin, secret: cronSecret, date, fix, recheck, dry });
+      const r = await verifyWithRetries({ origin: url.origin, secret: cronSecret, date, fix, recheck, dry }, quick);
       summary.push({ date, ok: r.result.ok, held: r.heldStores, fixActions: r.fixActions, sentReports: r.sentReports, ...(dry ? { text: r.text } : {}) });
       if (!dry) await notifyOwner(r.text, r.markup);
     } catch (e) {
