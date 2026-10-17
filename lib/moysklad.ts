@@ -107,7 +107,7 @@ export type RetailDemand = {
 // The business's "day" for a given date runs from that date's midnight
 // through 02:00 the following morning (matches the nightly sync itself
 // running at 02:00 Aktau) — not a strict calendar-day cutoff at 23:59.
-function dayWindow(date: string): { from: string; to: string } {
+export function dayWindow(date: string): { from: string; to: string } {
   const [y, m, d] = date.split("-").map(Number);
   const next = new Date(Date.UTC(y, m - 1, d + 1));
   const nextDate = next.toISOString().slice(0, 10);

@@ -12,6 +12,7 @@ import {
 import { aggregateSales } from "@/lib/salesAggregate";
 import { REGISTER_STORE, SAYA_PARK_REGISTER_ID, SAYA_PARK_RETIRED_FROM } from "@/lib/registers";
 import { fetchTrafficUntilHour } from "@/lib/trafficCounters";
+import { certificateSummary, type CertSummary } from "@/lib/reports/certificates";
 
 // compact: укороченный формат — без валового, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. У Актау и Актобе
@@ -252,7 +253,7 @@ async function ltvBlock(dayRows: SalesRow[], from: string, to: string): Promise<
 // МойСклад за те же кассы, что вошли в итоги дня. Возвраты вычитаются, как и из
 // выручки, так что нал + безнал = выручка дня. Безнал = всё, что не наличные
 // (карта, QR).
-async function paymentBlock(dayRows: SalesRow[], from: string, to: string): Promise<string> {
+async function paymentBlock(dayRows: SalesRow[], from: string, to: string, scope?: ReportScope): Promise<string> {
   const registerIds = new Set(dayRows.map((r) => r.register_id));
   const payments = await fetchPaymentSummariesForRange(from, to);
   let total = 0;
@@ -264,7 +265,43 @@ async function paymentBlock(dayRows: SalesRow[], from: string, to: string): Prom
     cash += sign * p.cash;
   }
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
-  return pre([line("Наличные", money(cash / 100)), line("Безнал", money((total - cash) / 100))].join("\n"));
+  const cashT = cash / 100;
+  const nonT = (total - cash) / 100;
+  const lines = [line("Наличные", money(cashT)), line("Безнал", money(nonT))];
+
+  // Сертификаты (учёт в боте): продажи, возвраты и оплата чеков сертификатами; сбой чтения не ломает отчёт
+  const cert: CertSummary | null = scope ? await certificateSummary(scope.cityCodes, from, to).catch(() => null) : null;
+  if (cert?.hasActivity) {
+    const l2 = (label: string, value: string) => `${label.padEnd(19)}${value.padStart(13)}`;
+    if (cert.soldCash > 0) lines.push(l2("Серт. продано нал", money(cert.soldCash)));
+    if (cert.soldNoncash > 0) lines.push(l2("Серт. продано безнал", money(cert.soldNoncash)));
+    const returned = cert.returnedCash + cert.returnedNoncash;
+    if (returned > 0) lines.push(l2("Серт. возвраты", `-${money(returned)}`));
+    const inChecks = cert.deductCash + cert.deductNoncash;
+    if (inChecks > 0) lines.push(l2("Серт. в чеках", `-${money(inChecks)}`));
+    const inCash = cashT - cert.deductCash + cert.soldCash - cert.returnedCash;
+    const inNon = nonT - cert.deductNoncash + cert.soldNoncash - cert.returnedNoncash;
+    lines.push("─".repeat(32), l2("Поступило нал", money(inCash)), l2("Поступило безнал", money(inNon)), l2("Поступило всего", money(inCash + inNon)));
+  }
+  return pre(lines.join("\n"));
+}
+
+// Раздел «СЕРТИФИКАТЫ» недельного и месячного отчёта: сколько продано, использовано, возвращено, что осталось.
+async function certificatesBlock(scope: ReportScope, from: string, to: string): Promise<string | null> {
+  const c = await certificateSummary(scope.cityCodes, from, to).catch(() => null);
+  if (!c) return null;
+  if (c.soldCount + c.usedCount + c.returnedCount + c.unusedCount + c.expiredCount === 0) return null;
+  const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+  const cnt = (n: number, amount: number) => `${num(n)} шт · ${money(amount)}`;
+  const lines = [
+    line("Продано", cnt(c.soldCount, c.soldCash + c.soldNoncash)),
+    line("Использовано", cnt(c.usedCount, c.usedAmount)),
+    line("Возвращено", cnt(c.returnedCount, c.returnedCash + c.returnedNoncash)),
+  ];
+  if (c.burned > 0) lines.push(line("Сгорело при исп.", money(c.burned)));
+  lines.push(line("Не использовано", cnt(c.unusedCount, c.unusedAmount)));
+  if (c.expiredCount > 0) lines.push(line("Просрочено", cnt(c.expiredCount, c.expiredAmount)));
+  return pre(lines.join("\n"));
 }
 
 function kassaBlock(rows: SalesRow[], compact: boolean): string {
@@ -505,10 +542,12 @@ export async function buildPeriodReport(scope: ReportScope, kind: "week" | "mont
   const receipts = rows.reduce((a, r) => a + r.receipts_count, 0);
 
   const title = `📊 <b>Продажи · ${escapeHtml(scope.title)}</b>\n<i>${shortDate(from)} – ${shortDate(to)}</i>`;
+  const certBlockPeriod = await certificatesBlock(scope, from, to);
   return packSections([
     title,
     section(kind === "week" ? "ИТОГИ НЕДЕЛИ" : "ИТОГИ МЕСЯЦА", kpiBlock(rows, visitors, true)),
-    section("ПО СПОСОБУ ОПЛАТЫ", await paymentBlock(rows, from, to)),
+    section("ПО СПОСОБУ ОПЛАТЫ", await paymentBlock(rows, from, to, scope)),
+    ...(certBlockPeriod ? [section("СЕРТИФИКАТЫ", certBlockPeriod)] : []),
     section("ПО СОТРУДНИКАМ", await buildEmployeeBlock(scope, from, to, false)),
     section("ВОЗВРАТЫ", await buildReturnsBlock(scope, from, to, rows)),
     section("ТРАФИК", trafficBlock(receipts, visitors, trafficPlan)),
@@ -545,10 +584,12 @@ export async function buildCashReport(scope: ReportScope, from: string, to: stri
       section("ТРАФИК", trafficBlock(receipts, visitors, trafficPlan)),
     ]);
   }
+  const certBlockCash = await certificatesBlock(scope, from, to);
   return packSections([
     title,
     section("ИТОГИ", kpiBlock(rows, visitors, true)),
-    section("ПО СПОСОБУ ОПЛАТЫ", await paymentBlock(rows, from, to)),
+    section("ПО СПОСОБУ ОПЛАТЫ", await paymentBlock(rows, from, to, scope)),
+    ...(certBlockCash ? [section("СЕРТИФИКАТЫ", certBlockCash)] : []),
     section("ВОЗВРАТЫ", await buildReturnsBlock(scope, from, to, rows)),
     section("ТРАФИК", trafficBlock(receipts, visitors, trafficPlan)),
     // LTV видит только руководящий состав: отчёт «по городу» консультантам недоступен.
@@ -638,7 +679,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
   const compact = !!scope.compact;
   const employeesBlock = compact ? await buildEmployeeBlock(scope, date, date) : null;
   const returnsBlock = compact ? await buildReturnsBlock(scope, date, date, dayRows) : null;
-  const paymentsBlock = compact ? await paymentBlock(dayRows, date, date) : null;
+  const paymentsBlock = compact ? await paymentBlock(dayRows, date, date, scope) : null;
   const ltvSection = compact ? await ltvBlock(dayRows, date, date) : null;
   const coreSections = [
     title,
