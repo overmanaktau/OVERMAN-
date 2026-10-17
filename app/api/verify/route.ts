@@ -15,6 +15,21 @@ export const maxDuration = 300;
 // каждую ночь: «всё сходится», «исправлено», либо «отчёты задержаны» с кнопками.
 // ?dry=1 — вернуть результат и текст без изменений и отправки, ?date=YYYY-MM-DD — сверить
 // другой день, ?fix=0 — не исправлять автоматически.
+// Сама сверка может упасть из-за МойСклад (например, 429 — слишком много запросов сразу от других ночных заданий): пробуем до трёх раз
+// с паузой 30 и 60 секунд, и только после третьей неудачи пишем владельцу.
+async function verifyWithRetries(o: Parameters<typeof runVerification>[0]) {
+  let last: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await runVerification(o);
+    } catch (e) {
+      last = e;
+      if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 30_000));
+    }
+  }
+  throw last;
+}
+
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || (request.headers.get("authorization") ?? "") !== `Bearer ${cronSecret}`) {
@@ -40,7 +55,7 @@ async function handle(request: Request) {
   const summary: { date: string; ok: boolean; held: string[]; fixActions: string[]; sentReports: string[]; text?: string }[] = [];
   for (const date of dates) {
     try {
-      const r = await runVerification({ origin: url.origin, secret: cronSecret, date, fix, recheck, dry });
+      const r = await verifyWithRetries({ origin: url.origin, secret: cronSecret, date, fix, recheck, dry });
       summary.push({ date, ok: r.result.ok, held: r.heldStores, fixActions: r.fixActions, sentReports: r.sentReports, ...(dry ? { text: r.text } : {}) });
       if (!dry) await notifyOwner(r.text, r.markup);
     } catch (e) {

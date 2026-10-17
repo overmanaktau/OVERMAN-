@@ -22,6 +22,21 @@ type Cand = { ms_id: string; name: string; phone: string; bonus_expired: number 
 const BUDGET_MS = 230_000;
 const fmt = (n: number) => Math.round(n).toLocaleString("ru-RU");
 
+// МойСклад отвечает 429 при слишком частых запросах — ждём и повторяем (до 3 раз), а не записываем клиента в ошибки.
+async function retry429<T>(fn: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i < 3 && /429/.test(getErrorMessage(e))) {
+        await new Promise((r) => setTimeout(r, 4000 * (i + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 async function loadCandidates(): Promise<Cand[]> {
   const { data, error } = await supabaseAdmin.from("kassa_clients").select("ms_id, name, phone, bonus_expired").gt("bonus_expired", 0).order("bonus_expired", { ascending: false });
   if (error) throw error;
@@ -81,17 +96,17 @@ async function runApproved() {
   const processOne = async (id: string) => {
     try {
       // свежий пересчёт клиента перед списанием: сумму берём из него, а не из запроса
-      await syncOneClient(id);
+      await retry429(() => syncOneClient(id));
       const { data: fresh } = await supabaseAdmin.from("kassa_clients").select("name, phone, bonus_expired").eq("ms_id", id).maybeSingle();
       const value = Math.round(Number(fresh?.bonus_expired ?? 0));
       if (value > 0) {
-        const op = await createBonusWriteOff(id, value, `expire-${id}-${req.run_date}`, `Сгорание бонусов (срок 4 месяца), ${req.run_date}`);
+        const op = await retry429(() => createBonusWriteOff(id, value, `expire-${id}-${req.run_date}`, `Сгорание бонусов (срок 4 месяца), ${req.run_date}`));
         if (op.created) {
           written++;
           writtenTotal += value;
           const { error: logError } = await supabaseAdmin.from("kassa_bonus_expiry_log").insert({ run_date: req.run_date, client_ms_id: id, client_name: fresh?.name ?? "", phone: fresh?.phone ?? "", value, tx_id: op.id, request_id: req.id });
           if (logError) throw logError;
-          await syncOneClient(id); // после списания в списке портала сгоревших уже нет
+          await retry429(() => syncOneClient(id)); // после списания в списке портала сгоревших уже нет
         }
       }
       finished.push(id);
@@ -105,7 +120,7 @@ async function runApproved() {
   const worker = async () => {
     while (next < queue.length && Date.now() - startedAt < BUDGET_MS) await processOne(queue[next++]);
   };
-  await Promise.all([worker(), worker(), worker()]);
+  await worker(); // один поток: параллельные запросы упирались в лимит МойСклад (429) и мешали ночной сверке
 
   const done = new Set(finished);
   const remaining = queue.filter((id) => !done.has(id));
