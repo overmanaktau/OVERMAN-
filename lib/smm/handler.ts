@@ -9,9 +9,10 @@ import { MAX_DAYS, PERIOD_BUTTONS, codeFromPeriod, daysIn, parseCustomPeriod, pe
 import { allPostsText, postsReport, spendText, targetReport } from "@/lib/smm/reports";
 import { listPosts } from "@/lib/smm/meta";
 import { categoryProducts, categorySales, onlineProducts, onlineSales, productsMessage } from "@/lib/smm/sales";
-import { cityCode, cityFromCode, sendCategories, sendLong, sendStories } from "@/lib/smm/flows";
+import { cityCode, cityFromCode, renderCategories, sendCategories, sendLong, sendStories } from "@/lib/smm/flows";
 import { storiesList } from "@/lib/smm/stories";
 import { notifyOwnerOfRequest } from "@/lib/smm/approvals";
+import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { BTN, canUse, menuFor, type Feat } from "@/lib/smm/menu";
 import type { ReplyMarkup, Transport } from "@/lib/smm/telegram";
 import type { SmmUser } from "@/lib/smm/users";
@@ -36,11 +37,38 @@ async function setAwaiting(u: SmmUser, awaiting: string | null) {
 
 // ---------- запуск функций ----------
 
-function periodKeyboard(feat: Feat, code: string): ReplyMarkup {
+// Новое сообщение или правка текущего (кнопка «Назад» меняет сообщение на месте).
+async function editOrSend(t: Transport, chat: number, messageId: number | undefined, html: string, markup?: ReplyMarkup) {
+  if (messageId) await t.edit(chat, messageId, html, markup);
+  else await t.send(chat, html, markup);
+}
+
+const ROLE_PROMPT = "Здравствуйте! Это бот <b>OVERMAN</b> для СММ.\n\nВыберите свою должность — заявку подтвердит администратор.";
+const ROLE_MARKUP: ReplyMarkup = { inline_keyboard: SMM_ROLES.map((r) => [{ text: ROLE_TITLE[r], callback_data: `rg|${r}` }]) };
+const CANCEL_REQUEST: ReplyMarkup = { inline_keyboard: [[{ text: "❌ Отменить запрос", callback_data: "rx" }]] };
+
+const MENU_HINT = "Выберите раздел кнопкой внизу.";
+
+function periodKeyboard(feat: Feat, code: string, back: string): ReplyMarkup {
   const rows: { text: string; callback_data: string }[][] = [];
   for (let i = 0; i < PERIOD_BUTTONS.length; i += 2) rows.push(PERIOD_BUTTONS.slice(i, i + 2).map((b) => ({ text: b.text, callback_data: `p|${feat}|${code}|${b.code}` })));
   rows.push([{ text: "✏️ Свой период", callback_data: `p|${feat}|${code}|x` }]);
+  rows.push([{ text: "← Назад", callback_data: back }]);
   return { inline_keyboard: rows };
+}
+
+// Города, из которых выбирают для раздела.
+function featCities(u: SmmUser, feat: Feat): CityKey[] {
+  return feat === "on" ? (["aktau"] as CityKey[]) : feat === "sp" ? [] : citiesOf(u.role);
+}
+// Куда ведёт «Назад» на шаге выбора периода: к выбору города (если он был) или в меню.
+const periodBack = (u: SmmUser, feat: Feat) => (featCities(u, feat).length > 1 ? `bk|c|${feat}` : "bk|m");
+
+function cityStep(u: SmmUser, feat: Feat): { text: string; markup: ReplyMarkup } {
+  const rows = featCities(u, feat).map((c) => [{ text: CITIES[c].title, callback_data: `c|${feat}|${cityCode(c)}` }]);
+  if (feat !== "ps") rows.push([{ text: "Оба города", callback_data: `c|${feat}|ab` }]);
+  rows.push([{ text: "← Назад", callback_data: "bk|m" }]);
+  return { text: "Какой город?", markup: { inline_keyboard: rows } };
 }
 
 function citiesFromCode(user: SmmUser, code: string): CityKey[] {
@@ -56,26 +84,25 @@ async function startFeature(t: Transport, u: SmmUser, chat: number, feat: Feat) 
     await t.send(chat, "Этот раздел вам недоступен.");
     return;
   }
-  const cities = feat === "on" ? (["aktau"] as CityKey[]) : feat === "sp" ? [] : citiesOf(u.role);
   if (feat === "sp") {
-    await t.send(chat, "За какой период показать расход на рекламу?", periodKeyboard(feat, "ab"));
+    await t.send(chat, "За какой период показать расход на рекламу?", periodKeyboard(feat, "ab", "bk|m"));
     return;
   }
+  const cities = featCities(u, feat);
   if (cities.length === 1) {
     await afterCity(t, u, chat, feat, cityCode(cities[0]));
     return;
   }
-  const rows = cities.map((c) => [{ text: CITIES[c].title, callback_data: `c|${feat}|${cityCode(c)}` }]);
-  if (feat !== "ps") rows.push([{ text: "Оба города", callback_data: `c|${feat}|ab` }]);
-  await t.send(chat, "Какой город?", { inline_keyboard: rows });
+  const step = cityStep(u, feat);
+  await t.send(chat, step.text, step.markup);
 }
 
-async function afterCity(t: Transport, u: SmmUser, chat: number, feat: Feat, code: string) {
+async function afterCity(t: Transport, u: SmmUser, chat: number, feat: Feat, code: string, messageId?: number) {
   if (!FEAT_ASKS_PERIOD[feat]) {
     await runFeature(t, u, chat, feat, code, null);
     return;
   }
-  await t.send(chat, "За какой период?", periodKeyboard(feat, code));
+  await editOrSend(t, chat, messageId, "За какой период?", periodKeyboard(feat, code, periodBack(u, feat)));
 }
 
 async function runFeature(t: Transport, u: SmmUser, chat: number, feat: Feat, code: string, p: Period | null) {
@@ -118,6 +145,7 @@ function pickKeyboard(p: PickState): ReplyMarkup {
   const rows = p.cats.map((c, i) => [{ text: `${p.sel[i] ? "✅" : "⬜️"} ${c}`, callback_data: `k|t|${i}` }]);
   rows.push([{ text: p.sel.every(Boolean) ? "Снять все" : "Выбрать все", callback_data: "k|a" }]);
   rows.push([{ text: "📋 Показать товары", callback_data: "k|go" }]);
+  rows.push([{ text: "← Назад", callback_data: "k|b" }]);
   return { inline_keyboard: rows };
 }
 const PICK_TEXT = "Выберите категории (одну, несколько или все) и нажмите «Показать товары».";
@@ -149,21 +177,19 @@ export async function handleSmmUpdate(update: SmmUpdate, t: Transport): Promise<
       return;
     }
     if (user?.status === "pending") {
-      await t.send(chat, "Заявка уже отправлена и ждёт подтверждения администратора.");
+      await t.send(chat, "Заявка уже отправлена и ждёт подтверждения администратора.", CANCEL_REQUEST);
       return;
     }
     if (user?.status === "disabled") {
       await t.send(chat, "Доступ к боту отключён. Обратитесь к руководителю.");
       return;
     }
-    await t.send(chat, "Здравствуйте! Это бот <b>OVERMAN</b> для СММ.\n\nВыберите свою должность — заявку подтвердит администратор.", {
-      inline_keyboard: SMM_ROLES.map((r) => [{ text: ROLE_TITLE[r], callback_data: `rg|${r}` }]),
-    });
+    await t.send(chat, ROLE_PROMPT, ROLE_MARKUP);
     return;
   }
   if (!user) return;
   if (user.status === "pending") {
-    await t.send(chat, "Заявка ждёт подтверждения администратора.");
+    await t.send(chat, "Заявка ждёт подтверждения администратора.", CANCEL_REQUEST);
     return;
   }
   if (user.status !== "approved") {
@@ -203,13 +229,35 @@ async function handleCallback(cb: NonNullable<SmmUpdate["callback_query"]>, t: T
   if (!chat) return;
   const user = await getUser(cb.from.id);
 
-  // выбор должности — до подтверждения
-  if (kind === "rg") {
+  // выбор должности и заявка — до подтверждения
+  if (kind === "rg" || kind === "rb" || kind === "rc" || kind === "rx") {
     await t.answer(cb.id);
+    if (kind === "rx") {
+      // отмена своей заявки (пока она не рассмотрена)
+      if (user?.status !== "pending") {
+        await editOrSend(t, chat, messageId, user?.status === "approved" ? "Заявка уже подтверждена." : "Заявка уже рассмотрена.");
+        return;
+      }
+      await supabaseAdmin.from("smm_users").update({ status: "left", awaiting: null }).eq("id", user.id);
+      await editOrSend(t, chat, messageId, "Запрос отменён. Чтобы подать заявку заново, нажмите /start.");
+      await notifyOwner(`ℹ️ <b>${escapeHtml(user.name)}</b>${user.username ? ` (@${escapeHtml(user.username)})` : ""} отменил(а) запрос в бот СММ (${ROLE_TITLE[user.role]}). Решать ничего не нужно.`);
+      return;
+    }
+    if (user?.status === "approved" || user?.status === "pending") {
+      await editOrSend(t, chat, messageId, user.status === "approved" ? "Вы уже в боте." : "Заявка уже отправлена.", user.status === "pending" ? CANCEL_REQUEST : undefined);
+      return;
+    }
+    if (kind === "rb") {
+      await editOrSend(t, chat, messageId, ROLE_PROMPT, ROLE_MARKUP);
+      return;
+    }
     const role = args[0] as SmmRole;
     if (!SMM_ROLES.includes(role)) return;
-    if (user?.status === "approved" || user?.status === "pending") {
-      await t.send(chat, user.status === "approved" ? "Вы уже в боте." : "Заявка уже отправлена.");
+    if (kind === "rg") {
+      // сначала подтверждение выбора — с кнопкой «Назад»
+      await editOrSend(t, chat, messageId, `Вы выбрали должность: <b>${ROLE_TITLE[role]}</b>.\nОтправить заявку администратору?`, {
+        inline_keyboard: [[{ text: "✅ Отправить заявку", callback_data: `rc|${role}` }], [{ text: "← Назад", callback_data: "rb" }]],
+      });
       return;
     }
     const { data, error } = await supabaseAdmin
@@ -218,7 +266,7 @@ async function handleCallback(cb: NonNullable<SmmUpdate["callback_query"]>, t: T
       .select("*")
       .single();
     if (error) throw error;
-    await t.send(chat, `Заявка отправлена: ${ROLE_TITLE[role]}. Когда администратор подтвердит, придёт сообщение.`);
+    await editOrSend(t, chat, messageId, `Заявка отправлена: <b>${ROLE_TITLE[role]}</b>. Когда администратор подтвердит, придёт сообщение.\n\nВыбрали не ту должность? Запрос можно отменить.`, CANCEL_REQUEST);
     await notifyOwnerOfRequest(data as SmmUser);
     return;
   }
@@ -231,8 +279,26 @@ async function handleCallback(cb: NonNullable<SmmUpdate["callback_query"]>, t: T
   await t.answer(cb.id);
   const today = todayInAlmaty();
 
+  if (kind === "bk") {
+    if (args[0] === "m") {
+      await setAwaiting(me, null);
+      await editOrSend(t, chat, messageId, MENU_HINT);
+    } else if (args[0] === "c") {
+      await setAwaiting(me, null);
+      const feat = args[1] as Feat;
+      const step = cityStep(me, feat);
+      if (featCities(me, feat).length > 1) await editOrSend(t, chat, messageId, step.text, step.markup);
+      else await editOrSend(t, chat, messageId, MENU_HINT);
+    } else if (args[0] === "p") {
+      await setAwaiting(me, null);
+      const feat = args[1] as Feat;
+      await editOrSend(t, chat, messageId, "За какой период?", periodKeyboard(feat, args[2], periodBack(me, feat)));
+    }
+    return;
+  }
+
   if (kind === "c") {
-    await afterCity(t, me, chat, args[0] as Feat, args[1]);
+    await afterCity(t, me, chat, args[0] as Feat, args[1], messageId);
     return;
   }
 
@@ -240,7 +306,9 @@ async function handleCallback(cb: NonNullable<SmmUpdate["callback_query"]>, t: T
     const [feat, code, pc] = args;
     if (pc === "x") {
       await setAwaiting(me, `custom|${feat}|${code}`);
-      await t.send(chat, "Напишите период, например: <code>01.10-15.10</code> (или одну дату <code>15.10</code>). Отмена: /cancel");
+      await t.send(chat, "Напишите период, например: <code>01.10-15.10</code> (или одну дату <code>15.10</code>). Отмена: /cancel", {
+        inline_keyboard: [[{ text: "← Назад", callback_data: `bk|p|${feat}|${code}` }]],
+      });
       return;
     }
     const p = periodFromCode(pc, today);
@@ -273,6 +341,12 @@ async function handleCallback(cb: NonNullable<SmmUpdate["callback_query"]>, t: T
     const pick = (me.state as { pick?: PickState } | null)?.pick;
     if (!pick) {
       await t.send(chat, "Выбор устарел — нажмите «Посмотреть товары» ещё раз.");
+      return;
+    }
+    if (args[0] === "b") {
+      // назад к категориям за этот период
+      const r = await renderCategories(pick.city, { from: pick.from, to: pick.to }, pick.feat === "on" ? "online" : "all");
+      if (r) await editOrSend(t, chat, messageId, r.text, r.markup);
       return;
     }
     if (args[0] === "t") pick.sel[Number(args[1])] = !pick.sel[Number(args[1])];

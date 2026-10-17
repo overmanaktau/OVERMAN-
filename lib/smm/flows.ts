@@ -9,16 +9,27 @@ export const cityCode = (c: CityKey) => (c === "aktau" ? "a" : "b");
 export const cityFromCode = (code: string): CityKey | null => (code === "a" ? "aktau" : code === "b" ? "aktobe" : null);
 
 // Категории продаж города (или онлайн-продаж) + кнопки «Посмотреть все категории» и «Посмотреть товары».
-export async function sendCategories(t: Transport, chat: number, city: CityKey, p: Period, kind: SalesSource, all = false, skipEmpty = false): Promise<void> {
+export async function renderCategories(
+  city: CityKey,
+  p: Period,
+  kind: SalesSource,
+  all = false,
+  skipEmpty = false
+): Promise<{ text: string; markup?: Record<string, unknown> } | null> {
   const report = kind === "online" ? (await onlineSales(p)).report : await categorySales(city, p);
-  if (skipEmpty && report.rows.length === 0) return; // в рассылке пустые онлайн-продажи не присылаем
+  if (skipEmpty && report.rows.length === 0) return null; // в рассылке пустые онлайн-продажи не присылаем
   const { text, hasRest } = categoryMessage(city, p, report, kind, all);
   const feat = kind === "online" ? "on" : "cs";
   const tail = `${cityCode(city)}|${codeFromPeriod(p)}`;
   const rows: { text: string; callback_data: string }[][] = [];
   if (hasRest && !all) rows.push([{ text: "📂 Посмотреть все категории", callback_data: `ca|${feat}|${tail}` }]);
   if (report.rows.length > 0) rows.push([{ text: "📋 Посмотреть товары", callback_data: `g|${feat}|${tail}` }]);
-  await t.send(chat, text, rows.length ? { inline_keyboard: rows } : undefined);
+  return { text, markup: rows.length ? { inline_keyboard: rows } : undefined };
+}
+
+export async function sendCategories(t: Transport, chat: number, city: CityKey, p: Period, kind: SalesSource, all = false, skipEmpty = false): Promise<void> {
+  const r = await renderCategories(city, p, kind, all, skipEmpty);
+  if (r) await t.send(chat, r.text, r.markup);
 }
 
 export async function sendStories(t: Transport, chat: number, city: CityKey, p: Period, now = new Date()): Promise<void> {
