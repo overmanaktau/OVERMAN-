@@ -141,6 +141,11 @@ async function runApproved() {
       { inline_keyboard: [[{ text: "🔄 Повторить сейчас", callback_data: `be:retry:${req.id}` }]] }
     );
   }
+  // после повтора по кнопке «Повторить сейчас» владельцу приходит подтверждение, что всё проведено
+  if (isDone && errorIds.size === 0 && /повтор/.test(req.decided_by ?? "")) {
+    await notifyOwner(`✅ <b>Повтор списания бонусов выполнен</b> (запрос от ${req.run_date.split("-").reverse().join(".")}).
+Всего по запросу списано у ${patch.written} клиентов: ${fmt(patch.written_total)} бонусов. Ошибок нет.`);
+  }
   return { ok: true, request: req.id, written, writtenTotal, remaining: remaining.length, done: isDone, errors: errors.slice(0, 10) };
 }
 

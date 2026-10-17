@@ -14,6 +14,7 @@ export type ExpiryRequest = {
   error_ids: string[];
   written: number;
   written_total: number;
+  decided_by?: string | null;
 };
 
 const fmt = (n: number) => Math.round(n).toLocaleString("ru-RU");
