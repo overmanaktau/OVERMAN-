@@ -96,7 +96,8 @@ async function runApproved() {
       }
       finished.push(id);
     } catch (e) {
-      errorIds.add(id);
+      // в error_ids храним «id|причина», чтобы в итоговом сообщении была причина и по прошлым порциям
+      errorIds.add(`${id}|${getErrorMessage(e).slice(0, 200)}`);
       errors.push(`${id}: ${getErrorMessage(e)}`);
       finished.push(id); // ошибку не повторяем бесконечно — попадёт в итог
     }
@@ -121,7 +122,7 @@ async function runApproved() {
   // владельцу — только если что-то не удалось списать (успешный итог не присылаем)
   if (isDone && errorIds.size > 0) {
     await notifyOwner(
-      `⚠️ <b>Сгорание бонусов: не удалось списать у ${errorIds.size} клиентов</b> (запрос от ${req.run_date.split("-").reverse().join(".")}).\nОстальным списано: ${patch.written} клиентов, ${fmt(patch.written_total)} бонусов.\nНе списанные попробуем снова следующей ночью.\n${errors.slice(0, 3).map(escapeHtml).join("\n")}`
+      `⚠️ <b>Сгорание бонусов: не удалось списать у ${errorIds.size} клиентов</b> (запрос от ${req.run_date.split("-").reverse().join(".")}).\nОстальным списано: ${patch.written} клиентов, ${fmt(patch.written_total)} бонусов.\nНе списанные попробуем снова следующей ночью.\n${[...errorIds].slice(0, 3).map((x) => escapeHtml(x.replace("|", ": "))).join("\n")}`
     );
   }
   return { ok: true, request: req.id, written, writtenTotal, remaining: remaining.length, done: isDone, errors: errors.slice(0, 10) };
