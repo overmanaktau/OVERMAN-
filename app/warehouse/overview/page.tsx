@@ -303,7 +303,7 @@ function Block({
 
 export default function WarehouseOverviewPage() {
   const { isAdmin, permissions, accessibleStoreCodes } = useAuth();
-  const canView = isAdmin || permissions["warehouse.stock"].canView;
+  const canView = isAdmin || permissions["warehouse.overview"].canView;
 
   const stocked = useStockedWarehouses();
   const accessibleWarehouseCodes = warehousesForCities(accessibleStoreCodes).filter((c) => !stocked || stocked.has(c));

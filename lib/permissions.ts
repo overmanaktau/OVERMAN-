@@ -25,7 +25,10 @@ export type PermissionGroupKey = (typeof PERMISSION_GROUPS)[number]["key"];
 // into the confusing "view unchecked, edit checked" state the UI used to
 // allow.
 export const SECTIONS = [
-  { key: "warehouse.stock", label: "Склад (АВС/XYZ, Зависшие остатки, По поставщикам)", group: "warehouse", hasEdit: false },
+  { key: "warehouse.overview", label: "Склад: Обзор", group: "warehouse", hasEdit: false },
+  { key: "warehouse.abc_xyz", label: "Склад: АВС/XYZ анализ", group: "warehouse", hasEdit: false },
+  { key: "warehouse.stale", label: "Склад: Зависшие остатки", group: "warehouse", hasEdit: false },
+  { key: "warehouse.suppliers", label: "Склад: По поставщикам", group: "warehouse", hasEdit: false },
 
   { key: "marketing.statistics", label: "Статистика (+ Обзор, Продажа)", group: "marketing", hasEdit: false },
   { key: "marketing.data_entry", label: "Внесение данных", group: "marketing", hasEdit: true },
@@ -52,6 +55,9 @@ export const SECTIONS = [
 ] as const;
 
 export type SectionKey = (typeof SECTIONS)[number]["key"];
+
+// Страницы склада — у каждой своя галочка; «Склад» открывается, если есть хотя бы одна из них.
+export const WAREHOUSE_SECTIONS = ["warehouse.overview", "warehouse.abc_xyz", "warehouse.stale", "warehouse.suppliers"] as const satisfies readonly SectionKey[];
 
 export type SectionAccess = { canView: boolean; canEdit: boolean };
 export type Permissions = Record<SectionKey, SectionAccess>;

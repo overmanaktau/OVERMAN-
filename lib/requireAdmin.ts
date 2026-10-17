@@ -68,6 +68,15 @@ export function requireSettingsAccess(request: Request, need: "view" | "edit") {
   return requireSectionAccess(request, "settings.employees", need);
 }
 
+// Доступ по любой из нескольких секций (например, картинки товаров нужны всем страницам склада).
+export async function requireAnySectionAccess(request: Request, sections: readonly string[], need: "view" | "edit") {
+  for (const section of sections) {
+    const ok = await requireSectionAccess(request, section, need);
+    if (ok) return ok;
+  }
+  return null;
+}
+
 export function requireRequestsAccess(request: Request, need: "view" | "edit") {
   return requireSectionAccess(request, "requests", need);
 }

@@ -367,7 +367,7 @@ const ROWS_WITH_SIZES_BY_DEFAULT = 300;
 export default function AbcXyzPage() {
   const { isAdmin, permissions, accessibleStoreCodes } = useAuth();
   const { mobileLayout } = useSiteVersion();
-  const canView = isAdmin || permissions["warehouse.stock"].canView;
+  const canView = isAdmin || permissions["warehouse.abc_xyz"].canView;
 
   // Independent of the city picker in the sidebar — that one drives every
   // other page; this page filters by real склад (not city) on its own.

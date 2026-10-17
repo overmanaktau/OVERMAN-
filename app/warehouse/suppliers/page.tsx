@@ -805,7 +805,7 @@ function SupplierTable({
 
 export default function SuppliersPage() {
   const { isAdmin, permissions, accessibleStoreCodes } = useAuth();
-  const canView = isAdmin || permissions["warehouse.stock"].canView;
+  const canView = isAdmin || permissions["warehouse.suppliers"].canView;
 
   // склады, где сейчас есть товар (пустые в фильтрах не показываем)
   const stocked = useStockedWarehouses();

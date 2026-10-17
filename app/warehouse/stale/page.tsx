@@ -521,7 +521,7 @@ function MultiSelectFilter({
 export default function StaleInventoryPage() {
   const { isAdmin, permissions, accessibleStoreCodes } = useAuth();
   const { mobileLayout } = useSiteVersion();
-  const canView = isAdmin || permissions["warehouse.stock"].canView;
+  const canView = isAdmin || permissions["warehouse.stale"].canView;
 
   // Independent of the city picker in the sidebar — that one drives every
   // other page; this page filters by real склад (not city) on its own, so

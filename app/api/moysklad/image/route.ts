@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { requireSectionAccess } from "@/lib/requireAdmin";
+import { requireAnySectionAccess } from "@/lib/requireAdmin";
+import { WAREHOUSE_SECTIONS } from "@/lib/permissions";
 
 // Full-resolution product photos live behind a МойСклад download link that
 // needs our API token (confirmed live: 401 without it) — this proxies that
@@ -7,7 +8,7 @@ import { requireSectionAccess } from "@/lib/requireAdmin";
 // miniature (moysklad_products.image_url) is safe to use directly as
 // <img src>; this route is for the "open full photo" lightbox.
 export async function GET(request: Request) {
-  const caller = await requireSectionAccess(request, "warehouse.stock", "view");
+  const caller = await requireAnySectionAccess(request, WAREHOUSE_SECTIONS, "view");
   if (!caller) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const href = new URL(request.url).searchParams.get("href") ?? "";
