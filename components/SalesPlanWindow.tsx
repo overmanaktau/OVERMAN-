@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
-import { addDaysYmd, dayPlanForDate, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
+import { addDaysYmd, adjustedDayPlan, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
 
 const MONTH_NAMES = [
   "январь", "февраль", "март", "апрель", "май", "июнь",
@@ -76,6 +76,8 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
         const firstMonth = `${mondayYmd(range.from).slice(0, 8)}01`;
         const lastPlanDay = addDaysYmd(mondayYmd(range.to), 6);
         const factTo = range.to < todayStr ? range.to : todayStr;
+        // план дня зависит от факта с начала месяца (недобор делится на оставшиеся дни) — продажи берём с 1-го числа месяца начала периода
+        const factFrom = `${range.from.slice(0, 8)}01`;
         const [planRes, periodsRes] = await Promise.all([
           supabase
             .from("sales_plan_monthly")
@@ -95,11 +97,11 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
 
         // Факт постранично: за длинный период строк больше 1000, а сервер отдаёт не больше за запрос.
         const facts: FactRow[] = [];
-        for (let offset = 0; range.from <= factTo; offset += 1000) {
+        for (let offset = 0; factFrom <= factTo; offset += 1000) {
           const { data, error: factError } = await supabase
             .from("moysklad_sales_daily")
             .select("sale_date, revenue, register_id, moysklad_registers(store)")
-            .gte("sale_date", range.from)
+            .gte("sale_date", factFrom)
             .lte("sale_date", factTo)
             .order("sale_date")
             .order("register_id")
@@ -134,9 +136,12 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storesKey, refreshKey, range.from, range.to]);
 
-  // План периода: сумма дневных планов дней периода по каждой точке (lib/dayPlan: план недели по долям дней недели).
+  // План периода: сумма планов дней периода по каждой точке. План дня — по долям дней недели плюс недобор месяца, поделённый поровну на
+  // оставшиеся дни (lib/dayPlan, adjustedDayPlan): так он приводит к плану месяца. В базе план внесён по продавцам — на точку суммируем.
+  const planByStoreMonth = new Map<string, number>();
+  for (const p of plans) planByStoreMonth.set(`${p.store}|${p.plan_month}`, (planByStoreMonth.get(`${p.store}|${p.plan_month}`) ?? 0) + (Number(p.sales_plan) || 0));
   const lookupFor = (store: string): PlanLookup => ({
-    monthPlan: (m) => Number(plans.find((p) => p.store === store && p.plan_month === m)?.sales_plan) || 0,
+    monthPlan: (m) => planByStoreMonth.get(`${store}|${m}`) ?? 0,
     periods: (m) => {
       const row = periods.find((r) => r.store === store && r.plan_month === m);
       if (!row) return null;
@@ -148,28 +153,24 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
         .map((c) => ({ from: c.from, to: c.to, percent: Number(c.percent) || 0 }));
     },
   });
+  const factByStoreDate = new Map<string, number>();
+  for (const r of factRows) factByStoreDate.set(`${r.store}|${r.date}`, (factByStoreDate.get(`${r.store}|${r.date}`) ?? 0) + r.revenue);
+  const planOfDay = (store: string, date: string) => adjustedDayPlan(store, date, lookupFor(store), (d) => factByStoreDate.get(`${store}|${d}`) ?? 0, todayStr);
   let plan = 0;
-  for (const p of plans) {
-    if ((Number(p.sales_plan) || 0) <= 0) continue;
-    const [y, m] = p.plan_month.split("-").map(Number);
-    const daysInMonth = new Date(y, m, 0).getDate();
-    const lk = lookupFor(p.store);
-    for (let d = 1; d <= daysInMonth; d++) {
-      const date = `${y}-${pad2(m)}-${pad2(d)}`;
-      if (date < range.from || date > range.to) continue;
-      plan += dayPlanForDate(p.store, date, lk);
-    }
+  let planToday = 0;
+  for (const store of stores) {
+    for (let date = range.from; date <= range.to; date = addDaysYmd(date, 1)) plan += planOfDay(store, date);
+    if (range.to >= todayStr) planToday += planOfDay(store, todayStr);
   }
+  const inRange = (r: FactRow) => r.date >= range.from && r.date <= range.to;
   // Факт сравниваем с планом только по тем точкам и месяцам, где план внесён: иначе
   // выручка точки без плана (или месяцев без плана при «Всё время») раздувала бы процент.
-  const plannedMonths = new Set(plans.filter((p) => (Number(p.sales_plan) || 0) > 0).map((p) => `${p.store}|${p.plan_month.slice(0, 7)}`));
-  const fact = factRows.filter((r) => plannedMonths.has(`${r.store}|${r.date.slice(0, 7)}`)).reduce((a, r) => a + r.revenue, 0);
-  const totalFact = factRows.reduce((a, r) => a + r.revenue, 0);
+  const plannedMonths = new Set([...planByStoreMonth.entries()].filter(([, v]) => v > 0).map(([k]) => k.slice(0, k.length - 3)));
+  const fact = factRows.filter((r) => inRange(r) && plannedMonths.has(`${r.store}|${r.date.slice(0, 7)}`)).reduce((a, r) => a + r.revenue, 0);
+  const totalFact = factRows.filter(inRange).reduce((a, r) => a + r.revenue, 0);
   const pct = plan > 0 ? (fact / plan) * 100 : null;
-  // Если в периоде есть дни впереди (например, «Эта неделя»), показываем, сколько нужно в день.
+  // Если в периоде есть сегодняшний или будущие дни (например, «Эта неделя»), показываем план на сегодня — с добавкой недобора месяца.
   const hasFuture = range.to >= todayStr;
-  const daysLeft = hasFuture ? daysBetween(todayStr, range.to) + 1 : 0;
-  const perDay = plan > 0 && daysLeft > 0 ? Math.max(0, plan - fact) / daysLeft : null;
   const dates = range.from === range.to ? shortDate(range.from) : `${shortDate(range.from)}–${shortDate(range.to)}`;
 
   return (
@@ -202,8 +203,8 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
             </div>
             {hasFuture && (
               <div className="flex flex-col gap-1.5">
-                <div className="text-xs text-muted">Нужно в день до конца периода</div>
-                <div className="font-serif text-[22px] font-semibold num">{perDay !== null ? money(perDay) : "—"}</div>
+                <div className="text-xs text-muted">План на сегодня</div>
+                <div className="font-serif text-[22px] font-semibold num">{planToday > 0 ? money(planToday) : "—"}</div>
               </div>
             )}
           </div>
@@ -319,14 +320,32 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
 
   const plan = Object.values(planByStore).reduce((a, b) => a + b, 0);
   const fact = factRows.reduce((a, r) => a + r.revenue, 0);
-  const daysLeft = daysInMonth - today.getDate() + 1;
   const pct = plan > 0 ? (fact / plan) * 100 : null;
-  const perDay = plan > 0 && daysLeft > 0 ? Math.max(0, plan - fact) / daysLeft : null;
+  // План на сегодня — по долям дня недели плюс недобор месяца, поделённый поровну на оставшиеся дни (lib/dayPlan): приводит к плану месяца.
+  const monthKey = ymd(monthStart);
+  const factByStoreDate = new Map<string, number>();
+  for (const r of factRows) factByStoreDate.set(`${r.store}|${r.date}`, (factByStoreDate.get(`${r.store}|${r.date}`) ?? 0) + r.revenue);
+  let planToday = 0;
+  for (const store of stores) {
+    const row = periodRows.find((r) => r.store === store);
+    const lk: PlanLookup = {
+      monthPlan: (m) => (m === monthKey ? planByStore[store] ?? 0 : 0),
+      periods: (m) => {
+        if (m !== monthKey || !row) return null;
+        return [
+          { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
+          { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
+        ]
+          .filter((c): c is { from: string; to: string; percent: number | null } => !!c.from && !!c.to)
+          .map((c) => ({ from: c.from, to: c.to, percent: Number(c.percent) || 0 }));
+      },
+    };
+    planToday += adjustedDayPlan(store, todayStr, lk, (d) => factByStoreDate.get(`${store}|${d}`) ?? 0, todayStr);
+  }
 
   // Текущий период по каждой точке, где он задан и сегодня попадает в него.
   let periodPlan = 0;
   let periodFact = 0;
-  let periodNeed = 0;
   const periodLabels = new Set<string>();
   for (const row of periodRows) {
     const candidates = [
@@ -339,10 +358,8 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
     const storeFact = factRows
       .filter((r) => r.store === row.store && r.date >= current.from! && r.date <= current.to!)
       .reduce((a, r) => a + r.revenue, 0);
-    const daysLeftPeriod = daysBetween(todayStr, current.to) + 1;
     periodPlan += storePlan;
     periodFact += storeFact;
-    if (storePlan > 0 && daysLeftPeriod > 0) periodNeed += Math.max(0, storePlan - storeFact) / daysLeftPeriod;
     periodLabels.add(`${shortDate(current.from)}–${shortDate(current.to)} (${Number(current.percent) || 0}%)`);
   }
   const hasPeriod = periodLabels.size > 0;
@@ -377,8 +394,8 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
               <div className="font-serif text-[22px] font-semibold num">{pct !== null ? `${pct.toFixed(2)}%` : "—"}</div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <div className="text-xs text-muted">Нужно в день до конца месяца</div>
-              <div className="font-serif text-[22px] font-semibold num">{perDay !== null ? money(perDay) : "—"}</div>
+              <div className="text-xs text-muted">План на сегодня</div>
+              <div className="font-serif text-[22px] font-semibold num">{planToday > 0 ? money(planToday) : "—"}</div>
             </div>
           </div>
 
@@ -391,7 +408,7 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
           {hasPeriod && (
             <div className="flex flex-col gap-3 pt-3.5 border-t border-borderSoft">
               <div className="text-[13px] font-bold">Текущий период: {[...periodLabels].join(" · ")}</div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1.5">
                   <div className="text-xs text-muted">План периода</div>
                   <div className="font-serif text-[22px] font-semibold num">{periodPlan > 0 ? money(periodPlan) : "—"}</div>
@@ -405,10 +422,6 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
                   <div className="font-serif text-[22px] font-semibold num">
                     {periodPct !== null ? `${periodPct.toFixed(2)}%` : "—"}
                   </div>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <div className="text-xs text-muted">Нужно в день до конца периода</div>
-                  <div className="font-serif text-[22px] font-semibold num">{periodPlan > 0 ? money(periodNeed) : "—"}</div>
                 </div>
               </div>
             </div>

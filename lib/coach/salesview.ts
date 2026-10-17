@@ -392,10 +392,10 @@ const pctText = (fact: number, plan: number) => (plan > 0 ? `${Math.round((fact 
 
 type PlanDay = { date: string; plan: number; fact: number | null }; // fact null — день ещё не закончился
 
-async function planDays(store: string, from: string, to: string): Promise<PlanDay[]> {
+async function planDays(store: string, from: string, to: string): Promise<{ days: PlanDay[]; monthPlan: number }> {
   const today = todayInAlmaty();
   const w = await loadPeriod(store, from, to, false);
-  return w.days.map((d) => ({ date: d.date, plan: d.planRevenue, fact: d.date < today ? d.revenue : null }));
+  return { days: w.days.map((d) => ({ date: d.date, plan: d.planRevenue, fact: d.date < today ? d.revenue : null })), monthPlan: w.monthPlan ?? 0 };
 }
 
 function planTotals(days: PlanDay[]) {
@@ -404,7 +404,8 @@ function planTotals(days: PlanDay[]) {
   return { planAll, planPast: past.reduce((a, d) => a + d.plan, 0), fact: past.reduce((a, d) => a + (d.fact ?? 0), 0), pastCount: past.length };
 }
 
-function planCityBlock(days: PlanDay[]): string[] {
+// monthPlan — только для периода «Месяц»: в итогах показываем план месяца, а не сумму дневных планов (в них прошедшие дни уже с добавкой недобора).
+function planCityBlock(days: PlanDay[], monthPlan?: number): string[] {
   if (days.length === 1) {
     const d = days[0];
     const lines = [dayLabel(d.date), `План дня   ${money(d.plan)}`];
@@ -417,6 +418,11 @@ function planCityBlock(days: PlanDay[]): string[] {
     lines.push(`${dayLabel(d.date).padEnd(9)}${num(d.plan).padStart(11)}${(d.fact === null ? "—" : num(d.fact)).padStart(11)}${(d.fact === null ? "" : pctText(d.fact, d.plan)).padStart(6)}`);
   }
   const t = planTotals(days);
+  if (monthPlan !== undefined && monthPlan > 0) {
+    lines.push("─".repeat(37), `План месяца ${money(monthPlan)}`, `Факт ${money(t.fact)}`, `Выполнение ${pctText(t.fact, monthPlan)}`);
+    if (t.fact < monthPlan) lines.push(`Осталось ${money(monthPlan - t.fact)}`);
+    return lines;
+  }
   lines.push("─".repeat(37), `План периода ${money(t.planAll)}`);
   if (t.pastCount > 0) lines.push(`План за прошедшие дни ${money(t.planPast)}`, `Факт ${money(t.fact)}`, `Выполнение ${pctText(t.fact, t.planPast)}`);
   return lines;
@@ -428,19 +434,22 @@ async function buildPlanReport(store: string, period: Period, custom?: Range): P
   const label = store === "all" ? "Все города" : (CITY[store] ?? store);
   const title = `📈 <b>Продажи и план продаж · ${label}</b>\n${PERIOD_LABEL[period]}: ${from === to ? fmt(from) : `${fmt(from)}–${fmt(to)}`}`;
   const cities = store === "all" ? ALL_STORES : [store];
-  const data = await Promise.all(cities.map(async (c) => ({ c, days: await planDays(c, from, to) })));
-  const note = "\n<i>План дня — по долям дней недели от плана месяца (как в окне «План продаж» на портале). Факт — по вчера включительно.</i>";
-  if (cities.length === 1) return `${title}\n${pre(planCityBlock(data[0].days).join("\n"))}${note}`;
-  const blocks = data.map(({ c, days }) => `<b>${CITY[c]}</b>${pre(planCityBlock(days).join("\n"))}`);
+  const data = await Promise.all(cities.map(async (c) => ({ c, ...(await planDays(c, from, to)) })));
+  const isMonth = period === "m";
+  const note = "\n<i>План дня — по долям дней недели плюс недобор месяца, поделённый поровну на оставшиеся дни: так он приводит к плану месяца (как в окне «План продаж» на портале). Факт — по вчера включительно.</i>";
+  if (cities.length === 1) return `${title}\n${pre(planCityBlock(data[0].days, isMonth ? data[0].monthPlan : undefined).join("\n"))}${note}`;
+  const blocks = data.map(({ c, days, monthPlan }) => `<b>${CITY[c]}</b>${pre(planCityBlock(days, isMonth ? monthPlan : undefined).join("\n"))}`);
   const total = data.reduce(
-    (a, { days }) => {
+    (a, { days, monthPlan }) => {
       const t = planTotals(days);
-      return { planAll: a.planAll + t.planAll, planPast: a.planPast + t.planPast, fact: a.fact + t.fact, pastCount: Math.max(a.pastCount, t.pastCount) };
+      return { planAll: a.planAll + t.planAll, planPast: a.planPast + t.planPast, fact: a.fact + t.fact, pastCount: Math.max(a.pastCount, t.pastCount), monthPlan: a.monthPlan + monthPlan };
     },
-    { planAll: 0, planPast: 0, fact: 0, pastCount: 0 }
+    { planAll: 0, planPast: 0, fact: 0, pastCount: 0, monthPlan: 0 }
   );
-  const sum = [`План ${money(total.planAll)}`];
-  if (total.pastCount > 0) sum.push(`План за прошедшие дни ${money(total.planPast)}`, `Факт ${money(total.fact)}`, `Выполнение ${pctText(total.fact, total.planPast)}`);
+  const sum =
+    isMonth && total.monthPlan > 0
+      ? [`План месяца ${money(total.monthPlan)}`, `Факт ${money(total.fact)}`, `Выполнение ${pctText(total.fact, total.monthPlan)}`, ...(total.fact < total.monthPlan ? [`Осталось ${money(total.monthPlan - total.fact)}`] : [])]
+      : [`План ${money(total.planAll)}`, ...(total.pastCount > 0 ? [`План за прошедшие дни ${money(total.planPast)}`, `Факт ${money(total.fact)}`, `Выполнение ${pctText(total.fact, total.planPast)}`] : [])];
   return `${title}\n\n${blocks.join("\n")}\n<b>Всего по городам</b>${pre(sum.join("\n"))}${note}`;
 }
 

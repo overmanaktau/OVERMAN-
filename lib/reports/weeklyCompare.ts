@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { addDays, mondayOf } from "@/lib/coach/metrics";
-import { addDaysYmd, dayPlanForDate, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
+import { addDaysYmd, adjustedDayPlan, mondayYmd, type PlanLookup } from "@/lib/dayPlan";
 
 export type CompareDay = {
   date: string;
@@ -16,7 +16,8 @@ export type CompareDay = {
   receipts: number;
   items: number;
 };
-export type CompareWeek = { from: string; to: string; days: CompareDay[] };
+// monthPlan — план месяца города (сумма планов продавцов) для месяца начала периода; нужен итогам «Продажи и план» в боте.
+export type CompareWeek = { from: string; to: string; days: CompareDay[]; monthPlan?: number };
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 const WEEKDAY = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
@@ -45,13 +46,16 @@ export async function loadPeriod(store: string, from: string, to: string, useOve
   // планы нужны за все недели периода целиком (неделя может начинаться в прошлом месяце и заканчиваться в следующем)
   const planFrom = `${mondayYmd(from).slice(0, 7)}-01`;
   const planTo = addDaysYmd(mondayYmd(to), 6);
+  // план дня зависит от факта с начала месяца (недобор месяца делится на оставшиеся дни) — продажи берём с 1-го числа месяца начала периода
+  const factFrom = `${from.slice(0, 7)}-01`;
+  const todayYmd = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(new Date());
   const regRes = await supabaseAdmin.from("moysklad_registers").select("id").eq("store", store);
   if (regRes.error) throw regRes.error;
   const registerIds = (regRes.data ?? []).map((r) => r.id as string);
 
   const [salesRes, trafficRes, plansRes, periodsRes, overridesRes] = await Promise.all([
     registerIds.length
-      ? supabaseAdmin.from("moysklad_sales_daily").select("sale_date, revenue, receipts_count, items_count").in("register_id", registerIds).gte("sale_date", from).lte("sale_date", to).limit(5000)
+      ? supabaseAdmin.from("moysklad_sales_daily").select("sale_date, revenue, receipts_count, items_count").in("register_id", registerIds).gte("sale_date", factFrom).lte("sale_date", to).limit(5000)
       : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("traffic_entries").select("entry_date, traffic_fact, traffic_plan").eq("store", store).gte("entry_date", from).lte("entry_date", to).limit(5000),
     supabaseAdmin.from("sales_plan_monthly").select("plan_month, sales_plan").eq("store", store).gte("plan_month", planFrom).lte("plan_month", planTo),
@@ -103,13 +107,14 @@ export async function loadPeriod(store: string, from: string, to: string, useOve
   return {
     from,
     to,
+    monthPlan: monthPlans.get(`${from.slice(0, 7)}-01`) ?? 0,
     days: Array.from({ length: daysBetween(from, to) + 1 }, (_, i) => {
       const date = addDays(from, i);
       const s = sales.get(date);
       const t = traffic.get(date);
       return {
         date,
-        planRevenue: (useOverrides ? overrides.get(date) : undefined) ?? dayPlanForDate(store, date, lookup),
+        planRevenue: (useOverrides ? overrides.get(date) : undefined) ?? adjustedDayPlan(store, date, lookup, (d) => sales.get(d)?.revenue ?? 0, todayYmd),
         planTraffic: t?.plan ?? 0,
         revenue: s?.revenue ?? 0,
         visitors: t?.fact ?? 0,

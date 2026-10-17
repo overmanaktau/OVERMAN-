@@ -67,3 +67,42 @@ export function dayPlanForDate(store: string, date: string, lk: PlanLookup): num
   const shareSum = shares.reduce((a, v) => a + v, 0);
   return weekPlan * (shares[weekdayIndex(date)] / shareSum);
 }
+
+// ---- План дня, который приводит к плану месяца (правило владельца 17.10.2026) ----
+// Базовый план дня (dayPlanForDate) — доля дня недели. К нему добавляется недобор месяца: недобор = план месяца − факт за прошлые дни − базовые
+// планы оставшихся дней; он делится ПОРОВНУ на оставшиеся дни (считая сам день) и прибавляется к плану каждого из них. Тогда сумма планов
+// оставшихся дней + факт прошлых дней = план месяца. Это и есть «План» — везде, где показывается план дня (портал, отчёты, боты).
+// Для прошедшего дня считаем «как было утром этого дня» (по факту до него), для сегодняшнего и будущих дней — «как сегодня утром».
+export type FactLookup = (date: string) => number; // выручка по дате (0, если данных нет)
+
+function monthEndYmd(date: string): string {
+  const [y, m] = date.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+// Добавка (может быть отрицательной, если месяц идёт с опережением) к базовому плану каждого дня месяца с точки зрения дня asOf.
+export function planAddOn(store: string, date: string, lk: PlanLookup, fact: FactLookup, today: string): number {
+  const month = `${date.slice(0, 7)}-01`;
+  const monthPlan = lk.monthPlan(month);
+  if (!(monthPlan > 0)) return 0;
+  const end = monthEndYmd(date);
+  let asOf = date < today ? date : today;
+  if (asOf < month) asOf = month;
+  let factBefore = 0;
+  for (let d = month; d < asOf; d = addDaysYmd(d, 1)) factBefore += fact(d);
+  let futureBase = 0;
+  let n = 0;
+  for (let d = asOf; d <= end; d = addDaysYmd(d, 1)) {
+    const base = dayPlanForDate(store, d, lk);
+    futureBase += base;
+    if (base > 0) n++;
+  }
+  return n > 0 ? (monthPlan - factBefore - futureBase) / n : 0;
+}
+
+// План дня с добавкой: тот, что ведёт к плану месяца. День без базового плана (вне периодов / план не внесён) остаётся 0.
+export function adjustedDayPlan(store: string, date: string, lk: PlanLookup, fact: FactLookup, today: string): number {
+  const base = dayPlanForDate(store, date, lk);
+  if (base <= 0) return 0;
+  return Math.max(0, base + planAddOn(store, date, lk, fact, today));
+}
