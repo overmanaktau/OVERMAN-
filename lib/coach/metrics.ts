@@ -328,6 +328,39 @@ export type WeekSummary = {
   };
 };
 
+// Источник планов для расчёта плана дня (lib/dayPlan): планы месяцев сотрудника и периоды месяца города.
+function makePlanLookup(plans: Map<string, number | null>, periodsByMonth: Map<string, PeriodsRow | null>): PlanLookup {
+  return {
+    monthPlan: (m) => plans.get(m) ?? 0,
+    periods: (m) => {
+      const row = periodsByMonth.get(m);
+      if (!row) return null;
+      return [
+        { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
+        { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
+      ]
+        .filter((c): c is { from: string; to: string; percent: number | null } => !!c.from && !!c.to)
+        .map((c) => ({ from: c.from, to: c.to, percent: Number(c.percent) || 0 }));
+    },
+  };
+}
+
+// Личный план сотрудника по дням за период (null — на месяц этого дня план не вносили).
+export async function employeeDayPlans(emp: EmployeeRef, from: string, to: string): Promise<{ date: string; plan: number | null }[]> {
+  // план дня зависит от всей недели, в которую он попадает, — месяцы берём по неделям целиком
+  const planFrom = mondayOf(from);
+  const planTo = addDays(mondayOf(to), 6);
+  const months: string[] = [];
+  for (let m = monthStartOf(planFrom); m <= planTo; m = monthStartOf(addDays(monthEndOf(m), 1))) months.push(m);
+  const [plans, periodsList] = await Promise.all([loadMonthPlans(emp, months), Promise.all(months.map((m) => loadPeriods(emp.store, m)))]);
+  const lookup = makePlanLookup(plans, new Map(months.map((m, i) => [m, periodsList[i]])));
+  const out: { date: string; plan: number | null }[] = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    out.push({ date: d, plan: plans.get(monthStartOf(d)) == null ? null : dayPlanForDate(emp.store, d, lookup) });
+  }
+  return out;
+}
+
 // План на день берётся из плана, распределённого на периоды месяца: план
 // продавца на месяц × процент периода ÷ число дней периода, для периода, в
 // который попадает эта дата. Если периоды на этот месяц не заданы — средний
@@ -352,19 +385,7 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
   const periodsByMonth = new Map(months.map((m, i) => [m, periodsList[i]]));
 
   // Тот же расчёт, что в портале (lib/dayPlan): план недели по долям дней недели — чтобы бот и портал показывали одно и то же.
-  const lookup: PlanLookup = {
-    monthPlan: (m) => plans.get(m) ?? 0,
-    periods: (m) => {
-      const row = periodsByMonth.get(m);
-      if (!row) return null;
-      return [
-        { from: row.p1_from, to: row.p1_to, percent: row.p1_percent },
-        { from: row.p2_from, to: row.p2_to, percent: row.p2_percent },
-      ]
-        .filter((c): c is { from: string; to: string; percent: number | null } => !!c.from && !!c.to)
-        .map((c) => ({ from: c.from, to: c.to, percent: Number(c.percent) || 0 }));
-    },
-  };
+  const lookup = makePlanLookup(plans, periodsByMonth);
   const planPerDay = (date: string): number | null => {
     const p = plans.get(monthStartOf(date)) ?? null;
     if (p === null) return null; // на месяц этого дня план не вносили

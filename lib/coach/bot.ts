@@ -81,9 +81,9 @@ export const MENU_MARKUP: ReplyMarkup = {
   is_persistent: true,
 };
 
-// Стилист-консультант: «Сертификат» (продать / использовать / вернуть) плюс «Помощь» и «Выход».
+// Стилист-консультант: «План», «Сертификат» (продать / использовать / вернуть) плюс «Помощь» и «Выход».
 export const CONSULTANT_MENU_MARKUP: ReplyMarkup = {
-  keyboard: [[{ text: "Сертификат" }], [{ text: "Помощь" }, { text: "Выход" }]],
+  keyboard: [[{ text: "План" }, { text: "Сертификат" }], [{ text: "Помощь" }, { text: "Выход" }]],
   resize_keyboard: true,
   is_persistent: true,
 };

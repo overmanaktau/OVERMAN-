@@ -11,6 +11,7 @@ import { handleVerifyCallback } from "@/lib/verify/botActions";
 import { handleCompareCallback, handleCompareInput, sendCompareStart } from "@/lib/coach/compareReport";
 import { handleEditRequestCallback } from "@/lib/editRequests";
 import { handleSmmOwnerCallback } from "@/lib/smm/approvals";
+import { handlePlanCallback, sendPlanMenu } from "@/lib/coach/planview";
 import { clearCertDraft, handleCertAdminCallback, handleCertCallback, handleCertOwnerCallback, handleCertText, sendCertAdminMenu, sendConsultantMenu } from "@/lib/coach/certificates";
 import {
   AUTO_ONLY_TEXT,
@@ -161,7 +162,11 @@ async function showSection(t: Transport, u: CoachUser, section: string) {
   }
   // Стилисту-консультанту план и продажи по запросу не показываются — бот сам присылает сообщения
   // (утром после смены и по понедельникам); у администраторов личных продаж нет вовсе.
-  if (["plan", "advice", "week", "last"].includes(section)) {
+  if (section === "planview") {
+    // «План» — только у стилиста-консультанта (личный и общий план дня и недели)
+    if (!u.is_admin) await sendPlanMenu(t, u.telegram_chat_id);
+    else await t.send(u.telegram_chat_id, noSuchSection(u), menu);
+  } else if (["plan", "advice", "week", "last"].includes(section)) {
     await t.send(u.telegram_chat_id, noSuchSection(u), menu);
   } else if (section === "requests" || section === "staff") {
     // «Сотрудники» смотрят владельцы; «Заявки» — только главный владелец.
@@ -224,6 +229,7 @@ const HELP_MENU_KEYBOARD: ReplyMarkup = {
 const HELP_BACK_KEYBOARD: ReplyMarkup = { inline_keyboard: [[{ text: "← Назад", callback_data: "help:menu" }]] };
 
 const SECTION_BY_TEXT: Record<string, string> = {
+  план: "planview",
   "мой план": "plan",
   "/plan": "plan",
   "что повысить": "advice",
@@ -408,6 +414,13 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     if (!existing || existing.status !== "approved" || !existing.is_protected) return;
     await clearCurrent();
     await t.send(chatId, await handleEditRequestCallback(cb.data, existing.employee_name));
+    return;
+  }
+
+  if (cb.data.startsWith("pl:")) {
+    // План продаж (личный / общий) — только подтверждённый стилист-консультант.
+    if (!existing || existing.status !== "approved" || existing.is_admin || existing.is_test) return;
+    await handlePlanCallback(cb.data, t, chatId, refOf(existing), dropCurrent);
     return;
   }
 

@@ -6,6 +6,7 @@ import { menuFor, telegramTransport } from "@/lib/coach/bot";
 import { syncCoachNames } from "@/lib/coach/syncNames";
 import { refOf, type CoachUser } from "@/lib/coach/handler";
 import { dailyMessage, weekMessage } from "@/lib/coach/messages";
+import { PLAN_ASK_MARKUP, PLAN_ASK_TEXT } from "@/lib/coach/planview";
 import { addDays, buildAdvice, dayStats, loadEmployeeDays, monthStatus, todayInAlmaty, weekSummary } from "@/lib/coach/metrics";
 import { NO_CONVERSION_EMPLOYEE_IDS, pct2 } from "@/lib/reports/sales";
 
@@ -78,6 +79,8 @@ async function handle(request: Request) {
       try {
         await telegramTransport.send(user.telegram_chat_id, text, menuFor(user));
         await supabaseAdmin.from("coach_messages_sent").insert({ user_id: user.id, kind, ref_date: refDate });
+        // после итогов смены — вопрос, нужен ли план на сегодня (дальше человек выбирает личный или общий план)
+        if (kind === "daily") await telegramTransport.send(user.telegram_chat_id, PLAN_ASK_TEXT, PLAN_ASK_MARKUP).catch(() => null);
         results.push({ user: label, kind, action: "отправлено" });
       } catch (e) {
         results.push({ user: label, kind, action: `ошибка: ${getErrorMessage(e)}` });
