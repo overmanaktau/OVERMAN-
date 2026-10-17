@@ -6,17 +6,16 @@ import { createBonusWriteOff } from "@/lib/moysklad";
 import { syncOneClient } from "@/lib/kassa/clientSync";
 import { todayAlmaty } from "@/lib/kassa/sync";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
-import { sendExpiryRequest, type ExpiryRequest } from "@/lib/kassa/expiryRequests";
+import { type ExpiryRequest } from "@/lib/kassa/expiryRequests";
 import { escapeHtml } from "@/lib/telegram";
 
 export const maxDuration = 300;
 
 // Сгорание бонусов: бонус хранится 4 месяца с момента начисления. Сам МойСклад бонусы не сжигает, поэтому клиентам со сгоревшими и ещё не
 // списанными бонусами (kassa_clients.bonus_expired) создаётся операция списания «Сгорание бонусов» в программе «5% OVER».
-// ТОЛЬКО С РАЗРЕШЕНИЯ ВЛАДЕЛЬЦА (с 17.10.2026):
-//  · без параметров (pg_cron ночью, 03:35) — собирает запрос «к сгоранию N клиентов, X бонусов» и присылает владельцу в бот-помощник
-//    с кнопками «Разрешить» / «Отклонить» / «Список»; сама ничего не списывает;
-//  · ?run=1 (pg_cron каждые 5 минут) — если владелец разрешил, списывает порциями (до ~230 с за запуск) и в конце шлёт итог;
+// АВТОМАТИЧЕСКИ, БЕЗ РАЗРЕШЕНИЯ (решение владельца 17.10.2026); в Telegram владельцу приходит только то, что НЕ удалось списать:
+//  · без параметров (pg_cron ночью, 03:35) — собирает запрос «к сгоранию N клиентов» (статус «разрешён» сразу, decided_by = автоматически);
+//  · ?run=1 (pg_cron каждые 5 минут) — списывает порциями (до ~230 с за запуск); ошибки по клиентам и сбои запуска → сообщение владельцу;
 //  · ?dry=1 — только показать, кому и сколько.
 // Повтор безопасен: у каждой операции externalCode expire-<клиент>-<дата запроса>, перед списанием клиент пересчитывается заново.
 type Cand = { ms_id: string; name: string; phone: string; bonus_expired: number };
@@ -38,24 +37,30 @@ async function propose(dry: boolean) {
   if (candidates.length === 0) return { ok: true, today, clients: 0 };
 
   const { data: running } = await supabaseAdmin.from("kassa_bonus_expiry_requests").select("id").eq("status", "approved").limit(1);
-  if (running && running.length > 0) return { ok: true, today, skipped: "идёт списание по разрешённому запросу" };
+  if (running && running.length > 0) return { ok: true, today, skipped: "идёт списание по предыдущему запросу" };
 
-  const row = { run_date: today, clients: candidates.length, total, pending_ids: candidates.map((c) => c.ms_id), error_ids: [], written: 0, written_total: 0 };
-  const { data: existing } = await supabaseAdmin.from("kassa_bonus_expiry_requests").select("*").eq("status", "pending").order("id", { ascending: false }).limit(1);
-  let req: ExpiryRequest;
-  const reminder = !!existing && existing.length > 0;
-  if (reminder) {
-    // владелец ещё не ответил — обновляем тот же запрос свежими цифрами и напоминаем
-    const { data, error } = await supabaseAdmin.from("kassa_bonus_expiry_requests").update(row).eq("id", existing![0].id).select("*").single();
+  const row = {
+    run_date: today,
+    status: "approved",
+    clients: candidates.length,
+    total,
+    pending_ids: candidates.map((c) => c.ms_id),
+    error_ids: [],
+    written: 0,
+    written_total: 0,
+    decided_at: new Date().toISOString(),
+    decided_by: "автоматически",
+  };
+  // если от прошлых ночей остался неразрешённый запрос — обновляем его тем же способом, иначе создаём новый
+  const { data: stale } = await supabaseAdmin.from("kassa_bonus_expiry_requests").select("id").eq("status", "pending").order("id", { ascending: false }).limit(1);
+  if (stale && stale.length > 0) {
+    const { error } = await supabaseAdmin.from("kassa_bonus_expiry_requests").update(row).eq("id", stale[0].id);
     if (error) throw error;
-    req = data as ExpiryRequest;
-  } else {
-    const { data, error } = await supabaseAdmin.from("kassa_bonus_expiry_requests").insert(row).select("*").single();
-    if (error) throw error;
-    req = data as ExpiryRequest;
+    return { ok: true, today, request: stale[0].id, clients: row.clients, total: Math.round(total), auto: true };
   }
-  await sendExpiryRequest(req, candidates, reminder);
-  return { ok: true, today, request: req.id, clients: req.clients, total: Math.round(total), reminder };
+  const { data, error } = await supabaseAdmin.from("kassa_bonus_expiry_requests").insert(row).select("id").single();
+  if (error) throw error;
+  return { ok: true, today, request: (data as { id: number }).id, clients: row.clients, total: Math.round(total), auto: true };
 }
 
 // Списание по разрешённому запросу — порциями.
@@ -113,9 +118,10 @@ async function runApproved() {
   };
   const { error: upError } = await supabaseAdmin.from("kassa_bonus_expiry_requests").update(patch).eq("id", req.id);
   if (upError) throw upError;
-  if (isDone) {
+  // владельцу — только если что-то не удалось списать (успешный итог не присылаем)
+  if (isDone && errorIds.size > 0) {
     await notifyOwner(
-      `🔥 <b>Сгорание бонусов выполнено</b> (запрос от ${req.run_date.split("-").reverse().join(".")})\nОбнулено у ${patch.written} клиентов: ${fmt(patch.written_total)} бонусов.${errorIds.size > 0 ? `\n⚠️ Ошибок: ${errorIds.size} клиентов — они в этот раз не списаны, придут в следующем запросе.\n${errors.slice(0, 3).map(escapeHtml).join("\n")}` : ""}`
+      `⚠️ <b>Сгорание бонусов: не удалось списать у ${errorIds.size} клиентов</b> (запрос от ${req.run_date.split("-").reverse().join(".")}).\nОстальным списано: ${patch.written} клиентов, ${fmt(patch.written_total)} бонусов.\nНе списанные попробуем снова следующей ночью.\n${errors.slice(0, 3).map(escapeHtml).join("\n")}`
     );
   }
   return { ok: true, request: req.id, written, writtenTotal, remaining: remaining.length, done: isDone, errors: errors.slice(0, 10) };
@@ -130,7 +136,20 @@ async function handle(request: Request) {
     if (params.get("run") === "1") return NextResponse.json(await runApproved());
     return NextResponse.json(await propose(params.get("dry") === "1"));
   } catch (e) {
-    return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
+    const message = getErrorMessage(e);
+    // сбой всего запуска (например, МойСклад не отвечает) — сообщаем владельцу, но не чаще раза в 3 часа, чтобы не слать каждые 5 минут
+    try {
+      const { data: last } = await supabaseAdmin.from("kassa_bonus_expiry_requests").select("id, error_notified_at").eq("status", "approved").order("id", { ascending: false }).limit(1);
+      const row = (last ?? [])[0] as { id: number; error_notified_at: string | null } | undefined;
+      const recent = row?.error_notified_at && Date.now() - new Date(row.error_notified_at).getTime() < 3 * 3600000;
+      if (!recent) {
+        await notifyOwner(`⚠️ <b>Сгорание бонусов: сбой запуска</b>\n${escapeHtml(message)}\nБонусы не списаны, повторю автоматически.`);
+        if (row) await supabaseAdmin.from("kassa_bonus_expiry_requests").update({ error_notified_at: new Date().toISOString() }).eq("id", row.id);
+      }
+    } catch {
+      // сообщение о сбое не должно маскировать сам сбой
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

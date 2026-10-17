@@ -1,7 +1,7 @@
-// Запрос владельцу на сгорание бонусов: сообщение с кнопками, решение владельца и показ списка. Само списание — в маршруте /api/kassa/expire-bonus.
+// Кнопки старого режима «с разрешением» (сообщения с кнопками уже могли остаться в чате владельца) — решение и список. С 17.10.2026 сгорание автоматическое,
+// само списание — в маршруте /api/kassa/expire-bonus.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
-import { notifyOwner } from "@/lib/verify/notifyOwner";
 import type { ReplyMarkup } from "@/lib/coach/bot";
 
 export type ExpiryRequest = {
@@ -31,17 +31,6 @@ export function requestMarkup(id: number): ReplyMarkup {
 }
 
 const line = (c: Cand) => `${escapeHtml(c.name || "без имени")}${c.phone ? ` · ${escapeHtml(c.phone)}` : ""} — ${fmt(Number(c.bonus_expired))}`;
-
-// Сообщение владельцу: сколько клиентов и бонусов предлагается сжечь и пять самых крупных.
-export async function sendExpiryRequest(req: ExpiryRequest, top: Cand[], reminder: boolean): Promise<void> {
-  const text =
-    `🔥 <b>Сгорание бонусов — нужно ваше разрешение</b>${reminder ? " (напоминание)" : ""}\n` +
-    `Дата: ${ru(req.run_date)}\n` +
-    `К сгоранию (срок 4 месяца с начисления, не потрачены): <b>${req.clients}</b> клиентов, <b>${fmt(Number(req.total))}</b> бонусов.\n\n` +
-    `Самые крупные:\n${top.slice(0, 5).map((c, i) => `${i + 1}. ${line(c)}`).join("\n")}\n\n` +
-    `Пока вы не разрешите, бонусы в МойСклад остаются на балансе и клиент может их потратить на кассе. После «Разрешить» списание идёт порциями, итог пришлю отдельным сообщением.`;
-  await notifyOwner(text, requestMarkup(req.id));
-}
 
 async function load(id: number): Promise<ExpiryRequest | null> {
   const { data } = await supabaseAdmin.from("kassa_bonus_expiry_requests").select("*").eq("id", id).maybeSingle();
