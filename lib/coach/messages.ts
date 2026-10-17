@@ -260,12 +260,13 @@ export function lastWeekMessage(emp: EmployeeRef, w: WeekSummary, conv?: string 
   return `📊 <b>Итоги прошлой недели</b>\n${escapeHtml(emp.name)}\n\n${weekLines(w, conv).last}`;
 }
 
-export function dailyMessage(emp: EmployeeRef, date: string, day: DayRow, s: MonthStatus, a: Advice, conv?: string | null): string {
+export function dailyMessage(emp: EmployeeRef, date: string, day: DayRow, s: MonthStatus, a: Advice, conv?: string | null, dayPlan?: number | null): string {
   const avgCheck = day.receipts > 0 ? day.revenue / day.receipts : 0;
   const depth = day.receipts > 0 ? day.items / day.receipts : 0;
   let text = `📊 <b>Итоги вашей смены · ${shortDate(date)}</b>\n${escapeHtml(emp.name)}\n${pre(
     [
       line("Оборот", money(day.revenue)),
+      ...(dayPlan != null && dayPlan > 0 ? [line("План дня", money(dayPlan)), line("Выполнение", pct((day.revenue / dayPlan) * 100))] : []),
       line("Чеков", num(day.receipts)),
       line("Средний чек", day.receipts > 0 ? money(avgCheck) : "—"),
       line("Глубина чека", day.receipts > 0 ? depth.toFixed(2) : "—"),
