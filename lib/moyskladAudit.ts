@@ -13,8 +13,18 @@ async function get(path: string, params?: Record<string, string>) {
   const url = new URL(`${BASE_URL}${path}`);
   for (const [k, v] of Object.entries(params ?? {})) url.searchParams.set(k, v);
   for (let attempt = 0; attempt < 5; attempt++) {
-    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token()}`, Accept: "application/json;charset=utf-8" } });
-    if (res.status === 429 || res.status === 503) {
+    // журнал МойСклад на больших промежутках иногда отвечает 504 или обрывает соединение — повторяем, а не падаем
+    let res: Response;
+    try {
+      res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token()}`, Accept: "application/json;charset=utf-8" }, signal: AbortSignal.timeout(60_000) });
+    } catch (e) {
+      if (attempt < 4) {
+        await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    }
+    if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
       await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
       continue;
     }
