@@ -156,9 +156,16 @@ export async function checkOtherMsChanges(opts: { since?: string; apply?: boolea
     return true;
   });
   const logins = await fetchEmployeeLogins().catch(() => new Map<string, string>());
+  // запись на границе курсора читается повторно — то, что уже есть в журнале, второй раз не показываем
+  const seen = new Set<string>();
+  if (meaningful.length > 0) {
+    const { data: known } = await supabaseAdmin.from("moysklad_change_log").select("audit_id").in("audit_id", meaningful.map((r) => r.id));
+    for (const k of (known ?? []) as { audit_id: string }[]) seen.add(k.audit_id);
+  }
   const rows: Record<string, unknown>[] = [];
   const lines: string[] = [];
   for (const rec of meaningful) {
+    if (seen.has(rec.id)) continue;
     const evs = await fetchAuditEvents(rec.id).catch(() => []);
     const kind = ENTITY_RU[rec.entityType] ?? rec.entityType;
     const who = shortName(logins.get(rec.uid) ?? rec.uid);
