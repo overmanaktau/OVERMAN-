@@ -6,7 +6,7 @@
 //  • ночью проверяется, не было ли возврата по чеку, к которому привязан сертификат.
 // Деньги — в тенге (в МойСклад копейки, их переводит lib/moysklad). В отчёты сертификаты пока не входят.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { nextCertificateNumber } from "@/lib/kassa/certNumber";
+import { checkSellNumber, nextCertificateNumber } from "@/lib/kassa/certNumber";
 import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployees, fetchCheckById, fetchChecksForDate, type CheckInfo } from "@/lib/moysklad";
 import { REGISTER_STORE } from "@/lib/registers";
@@ -337,8 +337,12 @@ export async function handleCertText(t: Transport, user: CertUser, text: string)
     return true;
   }
   if (draft.step === "number") {
-    const number = text.trim().replace(/\s+/g, " ");
+    let number = text.trim().replace(/\s+/g, " ");
     if (number.length < 1 || number.length > 32) return retry("Номер должен быть не длиннее 32 символов. Напишите номер сертификата.");
+    // только очередной номер: меньший или пропущенный не принимается (даже если такого номера в системе не было)
+    const numberCheck = await checkSellNumber(user.store, number);
+    if (!numberCheck.ok) return retry(`Номер должен быть очередным: <b>${escapeHtml(numberCheck.next)}</b>. Другой номер указать нельзя — напишите очередной.`);
+    number = numberCheck.number;
     const { data: dup, error } = await supabaseAdmin.from("certificates").select("id").eq("store", user.store).ilike("number", number.replace(/[\\%_]/g, "\\$&")).limit(1);
     if (error) throw error;
     if (dup && dup.length > 0) return retry(`Сертификат с номером <b>${escapeHtml(number)}</b> уже есть в вашем городе. Проверьте номер и напишите ещё раз.`);

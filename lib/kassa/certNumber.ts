@@ -25,3 +25,20 @@ export async function nextCertificateNumber(store: string): Promise<string | nul
   }
   return null;
 }
+
+// Проверка номера при продаже: можно ввести ТОЛЬКО очередной номер (меньший или пропущенный нельзя, даже если такого номера в системе не было).
+// Пока в городе нет ни одного сертификата с числом в номере, очередного нет — принимается любой номер (первый). Ведущие нули не важны:
+// «104» и «0104» — один и тот же очередной номер; сохраняется канонический вид очередного номера.
+export async function checkSellNumber(store: string, typed: string): Promise<{ ok: true; number: string } | { ok: false; next: string }> {
+  const next = await nextCertificateNumber(store);
+  const clean = typed.trim().replace(/\s+/g, " ");
+  if (!next) return { ok: true, number: clean };
+  const parse = (v: string) => {
+    const m = v.trim().match(/^(.*?)(\d+)$/);
+    return m ? { prefix: m[1].toLowerCase(), n: Number(m[2]) } : null;
+  };
+  const a = parse(clean);
+  const b = parse(next);
+  if (a && b && a.prefix === b.prefix && a.n === b.n) return { ok: true, number: next };
+  return { ok: false, next };
+}

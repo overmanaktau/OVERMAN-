@@ -2,6 +2,7 @@
 // (lib/coach/certificates.ts): продать, использовать (привязка к чеку со сверкой способа оплаты), вернуть.
 // Поиск только в городе входа; сертификат, который нельзя использовать (использован, возвращён, ждёт решения
 // руководителя, срок истёк), «не найден» — причину не раскрываем.
+import { checkSellNumber } from "@/lib/kassa/certNumber";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchCheckById, fetchChecksForDate, type CheckInfo } from "@/lib/moysklad";
 import { REGISTER_STORE } from "@/lib/registers";
@@ -158,8 +159,12 @@ export async function sell(store: string, input: SellInput, actor: string) {
   if (client.length < 2 || client.length > 80) return { error: "Укажите имя клиента." };
   const phone = normalizePhone(String(input.phone ?? ""));
   if (!phone) return { error: "Номер телефона клиента указан неверно." };
-  const number = String(input.number ?? "").trim().replace(/\s+/g, " ");
+  let number = String(input.number ?? "").trim().replace(/\s+/g, " ");
   if (number.length < 1 || number.length > 32) return { error: "Укажите номер сертификата." };
+  // только очередной номер: меньший или пропущенный не принимается (даже если такого номера в системе не было)
+  const numberCheck = await checkSellNumber(store, number);
+  if (!numberCheck.ok) return { error: `Номер должен быть очередным: ${numberCheck.next}. Другой номер указать нельзя.` };
+  number = numberCheck.number;
   const seller = (await citySellers(store)).find((s) => s.id === input.sellerId);
   if (!seller) return { error: "Выберите, кто продаёт сертификат." };
   if (await findCertByNumber(store, number)) return { error: `Сертификат с номером ${number} уже есть в вашем городе.` };
