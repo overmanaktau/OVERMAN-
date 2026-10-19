@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { SCOPES, buildCashReport, money, num, pre, shortName } from "@/lib/reports/sales";
 import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
-import { addDays, daysBetween, monthEndOf, monthStartOf, mondayOf, shortDate, todayInAlmaty } from "@/lib/coach/metrics";
+import { addDays, daysBetween, employeeDayPlans, loadEmployeeDays, monthEndOf, monthStartOf, mondayOf, shortDate, todayInAlmaty } from "@/lib/coach/metrics";
 import { loadPeriod } from "@/lib/reports/weeklyCompare";
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
@@ -21,8 +21,8 @@ const CASH_MAX_DAYS_ALL = 20; // касса по всем городам (два
 export const ALL_STORES = Object.keys(CITY);
 
 // Что показывать: продажи по сотрудникам (e) или общая касса города (k).
-type Mode = "e" | "k" | "p";
-const MODE_LABEL: Record<Mode, string> = { e: "по сотрудникам", k: "по городу (общая касса)", p: "и план продаж" };
+type Mode = "e" | "k" | "p" | "q"; // q — план продаж по сотрудникам
+const MODE_LABEL: Record<Mode, string> = { e: "по сотрудникам", k: "по городу (общая касса)", p: "и план продаж", q: "· план по сотрудникам" };
 
 // Вход в раздел: сначала выбор — по сотрудникам или по городу (общая касса).
 export async function sendSalesStart(t: Transport, chatId: number | string, _stores?: string[]) {
@@ -31,6 +31,7 @@ export async function sendSalesStart(t: Transport, chatId: number | string, _sto
       [{ text: "👥 По сотрудникам", callback_data: "adm:s:m:e" }],
       [{ text: "🏙 По городу (общая касса)", callback_data: "adm:s:m:k" }],
       [{ text: "📈 Продажи и план продаж", callback_data: "adm:s:m:p" }],
+      [{ text: "👥 План продаж по сотрудникам", callback_data: "adm:s:m:q" }],
     ],
   });
 }
@@ -51,7 +52,7 @@ async function sendCityMenu(t: Transport, chatId: number | string, mode: Mode, s
 }
 
 async function sendPeriodMenu(t: Transport, chatId: number | string, mode: Mode, store: string, canGoBack: boolean) {
-  const list: Period[] = mode === "p" ? ["t", "y", "cw", "m"] : ["y", "w", "m"];
+  const list: Period[] = mode === "p" || mode === "q" ? ["t", "y", "cw", "m"] : ["y", "w", "m"];
   const rows: { text: string; callback_data: string }[][] = list.map((p) => [
     { text: PERIOD_LABEL[p], callback_data: `adm:s:p:${mode}:${store}:${p}` },
   ]);
@@ -135,7 +136,7 @@ export async function handleCustomPeriodInput(
 ): Promise<void> {
   // sales:<режим>:<город>
   const [, modeRaw, store] = awaiting.split(":");
-  const mode: Mode = modeRaw === "k" ? "k" : modeRaw === "p" ? "p" : "e";
+  const mode: Mode = modeRaw === "k" ? "k" : modeRaw === "p" ? "p" : modeRaw === "q" ? "q" : "e";
   if (!store || (store === "all" ? stores.length < 2 : !stores.includes(store))) {
     await setAwaiting(user.id, null);
     return;
@@ -151,7 +152,7 @@ export async function handleCustomPeriodInput(
     await t.send(chat, "Начало периода позже конца. Напишите ещё раз, например <b>01.10-15.10</b>.", retry);
     return;
   }
-  const maxDays = mode === "p" ? MAX_PLAN_DAYS : MAX_CUSTOM_DAYS;
+  const maxDays = mode === "p" || mode === "q" ? MAX_PLAN_DAYS : MAX_CUSTOM_DAYS;
   if (daysBetween(range.from, range.to) + 1 > maxDays) {
     await t.send(chat, `Период слишком длинный — не больше ${maxDays} дней. Напишите ещё раз.`, retry);
     return;
@@ -209,7 +210,7 @@ async function sendReport(t: Transport, chatId: number | string, mode: Mode, sto
   const back: ReplyMarkup = { inline_keyboard: [[{ text: "← Другой период", callback_data: `adm:s:c:${mode}:${store}` }]] };
   let messages: string[];
   try {
-    messages = mode === "k" ? await buildCashMessages(store, period, custom) : mode === "p" ? [await buildPlanReport(store, period, custom)] : [await buildReport(store, period, custom)];
+    messages = mode === "k" ? await buildCashMessages(store, period, custom) : mode === "p" ? [await buildPlanReport(store, period, custom)] : mode === "q" ? [await buildEmployeePlanReport(store, period, custom)] : [await buildReport(store, period, custom)];
   } catch (e) {
     messages = [`Не удалось собрать продажи: ${escapeHtml(e instanceof Error ? e.message : String(e))}`];
   }
@@ -465,6 +466,77 @@ async function buildPlanReport(store: string, period: Period, custom?: Range): P
   return `${title}\n\n${blocks.join("\n")}\n<b>Всего по городам</b>${pre(sum.join("\n"))}${note}`;
 }
 
+// ---- План продаж по сотрудникам: личный план каждого продавца города за период, «+ недобор» и факт ----
+// План — личный (по плану сотрудника на месяц, доли дней недели), недобор — его месячный недобор, поделённый поровну на оставшиеся дни;
+// % — факт к плану прошедших дней. Сотрудники без плана на месяц не показываются.
+
+type EmpPlanRow = { id: string; name: string; plan: number; addOn: number; planPast: number; fact: number };
+
+async function employeePlanRows(store: string, from: string, to: string): Promise<EmpPlanRow[]> {
+  const today = todayInAlmaty();
+  const yesterday = addDays(today, -1);
+  const months: string[] = [];
+  for (let m = monthStartOf(from); m <= to; m = monthStartOf(addDays(monthEndOf(m), 1))) months.push(m);
+  const { data, error } = await supabaseAdmin.from("sales_plan_monthly").select("employee_ms_id, employee_name, sales_plan").eq("store", store).in("plan_month", months);
+  if (error) throw error;
+  const people = new Map<string, string>();
+  for (const r of (data ?? []) as { employee_ms_id: string; employee_name: string; sales_plan: number | null }[]) {
+    if ((Number(r.sales_plan) || 0) > 0 && !HIDDEN_NAME.test(r.employee_name)) people.set(r.employee_ms_id, r.employee_name);
+  }
+  const rows = await Promise.all(
+    [...people.entries()].map(async ([id, name]): Promise<EmpPlanRow> => {
+      const emp = { id, name, store };
+      const [plans, days] = await Promise.all([employeeDayPlans(emp, from, to), from <= yesterday ? loadEmployeeDays(id, from, to < yesterday ? to : yesterday) : Promise.resolve([])]);
+      const factOf = new Map(days.map((d) => [d.date, d.revenue]));
+      let plan = 0;
+      let addOn = 0;
+      let planPast = 0;
+      let fact = 0;
+      for (const d of plans) {
+        plan += d.plan ?? 0;
+        addOn += d.addOn;
+        if (d.date < today) {
+          planPast += d.plan ?? 0;
+          fact += factOf.get(d.date) ?? 0;
+        }
+      }
+      return { id, name, plan, addOn, planPast, fact };
+    })
+  );
+  return rows.filter((r) => r.plan > 0).sort((a, b) => b.plan - a.plan);
+}
+
+function employeePlanLines(rows: EmpPlanRow[]): string[] {
+  const lines = [`${"сотрудник".padEnd(13)}${"план".padStart(11)}${"факт".padStart(11)}${"%".padStart(6)}`];
+  for (const r of rows) {
+    lines.push(`${shortName(r.name).slice(0, 13).padEnd(13)}${num(r.plan).padStart(11)}${(r.planPast > 0 || r.fact > 0 ? num(r.fact) : "—").padStart(11)}${(r.planPast > 0 ? pctText(r.fact, r.planPast) : "").padStart(6)}`);
+    if (r.addOn > 0) lines.push(`  + недобор ${money(r.addOn)} (всего ${money(r.plan + r.addOn)})`);
+    else if (r.addOn < 0) lines.push(`  − опережение ${money(-r.addOn)} (всего ${money(r.plan + r.addOn)})`);
+  }
+  const plan = rows.reduce((a, r) => a + r.plan, 0);
+  const addOn = rows.reduce((a, r) => a + r.addOn, 0);
+  const planPast = rows.reduce((a, r) => a + r.planPast, 0);
+  const fact = rows.reduce((a, r) => a + r.fact, 0);
+  lines.push("─".repeat(37), `Итого план ${money(plan)}`);
+  if (addOn > 0) lines.push(`+ недобор ${money(addOn)} (всего ${money(plan + addOn)})`);
+  else if (addOn < 0) lines.push(`− опережение ${money(-addOn)} (всего ${money(plan + addOn)})`);
+  if (planPast > 0) lines.push(`Факт ${money(fact)}`, `Выполнение ${pctText(fact, planPast)}`);
+  return lines;
+}
+
+async function buildEmployeePlanReport(store: string, period: Period, custom?: Range): Promise<string> {
+  const { from, to } = rangeFor(period, custom, true);
+  const fmt = (d: string) => (d.slice(0, 4) === todayInAlmaty().slice(0, 4) ? shortDate(d) : `${shortDate(d)}.${d.slice(0, 4)}`);
+  const label = store === "all" ? "Все города" : (CITY[store] ?? store);
+  const title = `👥 <b>План продаж по сотрудникам · ${label}</b>\n${PERIOD_LABEL[period]}: ${from === to ? fmt(from) : `${fmt(from)}–${fmt(to)}`}`;
+  const cities = store === "all" ? ALL_STORES : [store];
+  const data = await Promise.all(cities.map(async (c) => ({ c, rows: await employeePlanRows(c, from, to) })));
+  const note = "\n<i>План — личный план сотрудника по долям дней недели; «+ недобор» — его недобор месяца, поделённый поровну на оставшиеся дни. % — факт к плану прошедших дней. Без плана на месяц сотрудники не показываются.</i>";
+  if (data.every((d) => d.rows.length === 0)) return `${title}\n\nПлан на этот период по сотрудникам не внесён.${note}`;
+  if (cities.length === 1) return `${title}\n${pre(employeePlanLines(data[0].rows).join("\n"))}${note}`;
+  return `${title}\n\n${data.map(({ c, rows }) => `<b>${CITY[c]}</b>${rows.length === 0 ? " — плана нет." : pre(employeePlanLines(rows).join("\n"))}`).join("\n")}${note}`;
+}
+
 // Нажатия adm:s… ; stores — города, доступные этому администратору.
 export async function handleSalesCallback(parts: string[], t: Transport, chatId: number | string, stores: string[], userId: number) {
   // adm:s | adm:s:m:<режим> | adm:s:c:<режим>:<город> | adm:s:p:<режим>:<город>:<период> | adm:s:x:<режим>:<город>
@@ -475,7 +547,7 @@ export async function handleSalesCallback(parts: string[], t: Transport, chatId:
     await sendSalesStart(t, chatId);
     return;
   }
-  const mode: Mode = parts[3] === "k" ? "k" : parts[3] === "p" ? "p" : "e";
+  const mode: Mode = parts[3] === "k" ? "k" : parts[3] === "p" ? "p" : parts[3] === "q" ? "q" : "e";
   if (kind === "m") {
     await sendCityMenu(t, chatId, mode, stores);
     return;
@@ -499,7 +571,7 @@ export async function handleSalesCallback(parts: string[], t: Transport, chatId:
   }
   const period = parts[5] as Period;
   if (kind !== "p" || !(period in PERIOD_LABEL) || period === "c") return;
-  if (mode !== "p" && (period === "t" || period === "cw")) return;
+  if (mode !== "p" && mode !== "q" && (period === "t" || period === "cw")) return;
   await sendReport(t, chatId, mode, store, period);
 }
 
