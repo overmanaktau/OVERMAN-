@@ -73,19 +73,25 @@ function isShift(d: DayRow): boolean {
   return d.receipts > 0 || d.revenue > 0;
 }
 
+// Даты, с которых считается личный план (стажёры, пришедшие в середине месяца): первое число месяца → дата (если задана).
+const planStarts = new WeakMap<Map<string, number | null>, Map<string, string>>();
+
 async function loadMonthPlans(emp: EmployeeRef, months: string[]): Promise<Map<string, number | null>> {
   const unique = [...new Set(months)];
   const { data, error } = await supabaseAdmin
     .from("sales_plan_monthly")
-    .select("plan_month, sales_plan")
+    .select("plan_month, sales_plan, plan_from")
     .eq("store", emp.store)
     .eq("employee_ms_id", emp.id)
     .in("plan_month", unique);
   if (error) throw error;
   const map = new Map<string, number | null>(unique.map((m) => [m, null]));
-  for (const r of (data ?? []) as { plan_month: string; sales_plan: number | null }[]) {
+  const starts = new Map<string, string>();
+  for (const r of (data ?? []) as { plan_month: string; sales_plan: number | null; plan_from: string | null }[]) {
     map.set(r.plan_month, r.sales_plan === null ? null : Number(r.sales_plan));
+    if (r.plan_from) starts.set(r.plan_month, r.plan_from);
   }
+  planStarts.set(map, starts);
   return map;
 }
 
@@ -332,6 +338,7 @@ export type WeekSummary = {
 function makePlanLookup(plans: Map<string, number | null>, periodsByMonth: Map<string, PeriodsRow | null>): PlanLookup {
   return {
     monthPlan: (m) => plans.get(m) ?? 0,
+    activeFrom: (m) => planStarts.get(plans)?.get(m) ?? null,
     periods: (m) => {
       const row = periodsByMonth.get(m);
       if (!row) return null;
