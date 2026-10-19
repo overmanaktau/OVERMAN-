@@ -4,7 +4,7 @@
 // Владельцу в личку — сводка, что именно поменяли.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getErrorMessage } from "@/lib/errors";
-import { fetchAuditEvents, fetchAuditRecords, fetchEmployeeLogins, type AuditRecord } from "@/lib/moyskladAudit";
+import { fetchAuditAll, fetchAuditEvents, fetchAuditRecords, fetchEmployeeLogins, type AuditRecord } from "@/lib/moyskladAudit";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { escapeHtml } from "@/lib/telegram";
 import { shortName } from "@/lib/reports/sales";
@@ -118,4 +118,68 @@ export async function checkMsChanges(opts: { origin: string; secret: string; sin
     await notifyOwner(`🔄 <b>Изменения в МойСклад</b> (чеки и возвраты задним числом)\n${shown}${more}${done}${bad}`);
   }
   return { since, records: meaningful.length, events, affectedDays, resynced, failed, pendingLeft: Math.max(0, affectedDays.length - resynced.length - failed.length), lines };
+}
+
+// ---- Остальные изменения в МойСклад: товары, склад, документы, справочники (правило владельца 19.10.2026: «любое изменение должно ставить меня в курс») ----
+// Не показываем то, что делает сама система: свои запросы портала (source remap-1.2: бонусы, клиенты), печать, входы, настройки интерфейса и обычную работу кассы (posapi:
+// продажи, смены, внесения, клиенты); чеки и возвраты разбирает checkMsChanges. Остальное — правки из интерфейса МойСклад (товары, приёмки, перемещения, цены…) и любые удаления.
+export const ENTITY_RU: Record<string, string> = {
+  product: "товар", variant: "модификация", service: "услуга", bundle: "комплект", productfolder: "группа товаров", supply: "приёмка", enter: "оприходование", loss: "списание", move: "перемещение",
+  inventory: "инвентаризация", purchaseorder: "заказ поставщику", purchasereturn: "возврат поставщику", customerorder: "заказ покупателя", demand: "отгрузка", salesreturn: "возврат покупателя",
+  counterparty: "контрагент", store: "склад", employee: "сотрудник", retailstore: "точка продаж", bonusprogram: "бонусная программа", bonustransaction: "бонусная операция", pricelist: "прайс-лист",
+  paymentin: "входящий платёж", paymentout: "исходящий платёж", cashin: "приходный ордер", cashout: "расходный ордер", invoiceout: "счёт покупателю", invoicein: "счёт поставщика",
+  retaildemand: "чек", retailsalesreturn: "возврат", retaildrawercashin: "внесение", retaildrawercashout: "выплата", retailshift: "смена", user: "пользователь", role: "роль",
+};
+const NOISE_EVENTS = new Set(["print", "sendemailfromentity", "loginlogout", "export", "import", "sendtobooks", "download"]);
+const NOISE_ENTITIES = new Set(["usersettings", "retaildemand", "retailsalesreturn", ""]);
+const EVENT_RU: Record<string, string> = { create: "создан", update: "изменён", delete: "удалён" };
+const FIELD_RU: Record<string, string> = {
+  name: "название", salePrices: "цены продажи", buyPrice: "закупочная цена", minPrice: "минимальная цена", article: "артикул", code: "код", archived: "в архиве", description: "описание",
+  positions: "позиции", sum: "сумма", store: "склад", agent: "контрагент", moment: "дата", applicable: "проведён", deleted: "удалён", productFolder: "группа", phone: "телефон", email: "почта", tags: "теги",
+  owner: "ответственный", group: "отдел", barcodes: "штрихкоды", supplier: "поставщик", uom: "ед. измерения", weight: "вес", paymentItemType: "тип", attributes: "доп. поля",
+};
+
+export type OtherChangesSummary = { since: string; records: number; lines: string[] };
+
+export async function checkOtherMsChanges(opts: { since?: string; apply?: boolean; notify?: boolean }): Promise<OtherChangesSummary> {
+  const apply = opts.apply !== false;
+  const { data: st } = await supabaseAdmin.from("moysklad_sync_state").select("audit_cursor_all").eq("id", true).maybeSingle();
+  const stored = st?.audit_cursor_all as string | null | undefined;
+  const since = opts.since ?? stored ?? msStamp(new Date(Date.now() - 24 * 3600 * 1000));
+  const all = await fetchAuditAll(since);
+  const meaningful = all.filter((r) => {
+    if (NOISE_ENTITIES.has(r.entityType) || NOISE_EVENTS.has(r.eventType) || NOISE_EVENTS.has(r.source)) return false;
+    if (r.source === "remap-1.2") return false; // свои запросы портала
+    if (r.source === "posapi" && r.eventType !== "delete") return false; // обычная работа кассы
+    return true;
+  });
+  const logins = await fetchEmployeeLogins().catch(() => new Map<string, string>());
+  const rows: Record<string, unknown>[] = [];
+  const lines: string[] = [];
+  for (const rec of meaningful) {
+    const evs = await fetchAuditEvents(rec.id).catch(() => []);
+    const kind = ENTITY_RU[rec.entityType] ?? rec.entityType;
+    const who = shortName(logins.get(rec.uid) ?? rec.uid);
+    const act = EVENT_RU[rec.eventType] ?? rec.eventType;
+    const list = evs.length > 0 ? evs : [{ entityId: rec.id, name: "", docDate: null, diff: null, info: "" }];
+    for (const e of list) {
+      rows.push({ audit_id: rec.id, entity_id: e.entityId || rec.id, entity_type: rec.entityType, doc_name: e.name, doc_date: e.docDate, event_type: rec.eventType, source: rec.source, uid: rec.uid, at_ms: rec.moment, diff: e.diff, info: e.info, applied_at: new Date().toISOString() });
+      const fields = rec.eventType === "update" ? Object.keys(e.diff ?? {}).map((k) => FIELD_RU[k] ?? k) : [];
+      lines.push(`${kind}${e.name ? ` «${e.name.slice(0, 60)}»` : ""} — ${act}${fields.length ? `: ${fields.join(", ")}` : ""} (${who})`);
+    }
+  }
+  if (apply && rows.length > 0) {
+    for (let i = 0; i < rows.length; i += 200) {
+      const { error } = await supabaseAdmin.from("moysklad_change_log").upsert(rows.slice(i, i + 200), { onConflict: "audit_id,entity_id", ignoreDuplicates: true });
+      if (error) throw error;
+    }
+  }
+  const last = all.reduce((m, r) => (r.moment > m ? r.moment : m), since);
+  if (apply) await supabaseAdmin.from("moysklad_sync_state").update({ audit_cursor_all: last }).eq("id", true);
+  if (opts.notify !== false && apply && lines.length > 0) {
+    const shown = lines.slice(0, 20).map((l) => `• ${escapeHtml(l)}`).join("\n");
+    const more = lines.length > 20 ? `\n… и ещё ${lines.length - 20}` : "";
+    await notifyOwner(`📦 <b>Изменения в МойСклад</b> (товары, склад, документы, справочники)\n${shown}${more}`);
+  }
+  return { since, records: meaningful.length, lines };
 }

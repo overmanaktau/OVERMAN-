@@ -2,6 +2,7 @@
 // сгорание бонусов, доступы и заявки сотрудников, таргет, подписчики бота клиентов, сбои и задержанные отчёты. Каждый раздел — только если было что показать.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml, packSections } from "@/lib/telegram";
+import { ENTITY_RU } from "@/lib/verify/msChanges";
 
 const NL = "\n";
 const money = (n: number) => `${Math.round(n).toLocaleString("ru-RU")} ₸`;
@@ -53,11 +54,11 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
   }, []);
   parts.push(
     section(
-      "🧾 МойСклад — правки чеков и возвратов",
+      "🧾 МойСклад — изменения (чеки, возвраты, товары, склад, документы)",
       ms.map((r) => {
-        const kind = r.entity_type === "retailsalesreturn" ? "возврат" : "чек";
+        const kind = ENTITY_RU[r.entity_type] ?? r.entity_type;
         const fields = Object.keys(r.diff ?? {}).map((k) => FIELD_RU[k] ?? k);
-        const what = r.event_type === "delete" ? "удалён" : fields.length ? `изменено: ${fields.join(", ")}` : "изменён";
+        const what = r.event_type === "delete" ? "удалён" : r.event_type === "create" ? "создан" : fields.length ? `изменено: ${fields.join(", ")}` : "изменён";
         const info = (r.info ?? "").replace(/^от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*/, "").slice(0, 60);
         return `• ${kind} ${escapeHtml(r.doc_name)}${r.doc_date ? ` от ${ruDate(r.doc_date)}` : ""}${info ? ` · ${escapeHtml(info)}` : ""} — ${what} (${escapeHtml(r.uid ?? "?")})`;
       }),

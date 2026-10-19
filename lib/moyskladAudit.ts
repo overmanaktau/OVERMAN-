@@ -49,6 +49,19 @@ export async function fetchAuditRecords(entityType: "retaildemand" | "retailsale
   return out;
 }
 
+// Все записи журнала (любые типы) с момента `since`: нужны для сводки «что менялось в МойСклад».
+export async function fetchAuditAll(since: string): Promise<AuditRecord[]> {
+  const out: AuditRecord[] = [];
+  for (let offset = 0; offset < 20000; offset += 100) {
+    const page = await get("/audit", { limit: "100", offset: String(offset), order: "moment,asc", filter: `moment>=${since}` });
+    type Raw = { id: string; moment: string; uid?: string; source?: string; eventType?: string; entityType?: string; objectCount?: number };
+    const rows: Raw[] = page.rows ?? [];
+    for (const r of rows) out.push({ id: r.id, moment: r.moment, uid: r.uid ?? "", source: r.source ?? "", eventType: r.eventType ?? "", entityType: r.entityType ?? "", objectCount: r.objectCount ?? 1 });
+    if (rows.length < 100) break;
+  }
+  return out;
+}
+
 export type AuditEvent = {
   entityId: string;
   name: string;

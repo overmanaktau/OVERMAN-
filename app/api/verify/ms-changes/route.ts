@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
-import { checkMsChanges } from "@/lib/verify/msChanges";
+import { checkMsChanges, checkOtherMsChanges } from "@/lib/verify/msChanges";
 
 export const maxDuration = 300;
 
@@ -18,7 +18,9 @@ async function handle(request: Request) {
   try {
     const secret = cronSecret ?? "";
     const result = await checkMsChanges({ origin: url.origin, secret, since, apply: !dry, notify: url.searchParams.get("notify") !== "0" });
-    return NextResponse.json({ ok: true, dry, ...result });
+    // остальные изменения (товары, склад, документы) — отдельным курсором; сбой тут не должен ломать разбор чеков
+    const other = await checkOtherMsChanges({ since, apply: !dry, notify: url.searchParams.get("notify") !== "0" }).catch((e) => ({ error: getErrorMessage(e) }));
+    return NextResponse.json({ ok: true, dry, ...result, other });
   } catch (e) {
     return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
   }
