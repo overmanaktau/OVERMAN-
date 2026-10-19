@@ -42,7 +42,9 @@ export async function checkMsChanges(opts: { origin: string; secret: string; sin
   const since = opts.since ?? (storedCursor as string);
 
   // 1. Записи журнала с момента последней проверки
-  const all: AuditRecord[] = [...(await fetchAuditRecords("retaildemand", since)), ...(await fetchAuditRecords("retailsalesreturn", since))];
+  // Запрос журнала по типу документа в МойСклад на промежутках в несколько дней отвечает по минуте и дольше (504), поэтому читаем весь журнал и отбираем чеки и возвраты сами.
+  const every = await fetchAuditAll(since);
+  const all: AuditRecord[] = every.filter((r) => r.entityType === "retaildemand" || r.entityType === "retailsalesreturn");
   const meaningful = all.filter((r) => !(r.eventType === "create" && r.source === "posapi")); // обычные продажи с кассы — не правка
   const logins = await fetchEmployeeLogins().catch(() => new Map<string, string>());
 
@@ -108,7 +110,7 @@ export async function checkMsChanges(opts: { origin: string; secret: string; sin
   }
 
   // 4. Курсор — на последнюю прочитанную запись; сводка владельцу
-  const last = all.reduce((m, r) => (r.moment > m ? r.moment : m), since);
+  const last = every.reduce((m, r) => (r.moment > m ? r.moment : m), since);
   if (apply) await supabaseAdmin.from("moysklad_sync_state").update({ audit_cursor: last }).eq("id", true);
   if (opts.notify !== false && apply && (lines.length > 0 || failed.length > 0)) {
     const shown = lines.slice(0, 15).map((l) => `• ${escapeHtml(l)}`).join("\n");
