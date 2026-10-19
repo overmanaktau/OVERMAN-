@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getErrorMessage } from "@/lib/errors";
 import { requireKassa } from "@/lib/kassa/access";
 import * as cert from "@/lib/kassa/certificates";
+import { nextCertificateNumber } from "@/lib/kassa/certNumber";
 
 export const maxDuration = 60;
 
@@ -10,6 +11,7 @@ const CITY: Record<string, string> = { point_1: "Актау", point_3: "Акто
 const actorOf = (caller: { name: string; admin: boolean }, store: string) => (caller.admin ? `${caller.name} (касса ${CITY[store] ?? store})` : `Касса ${CITY[store] ?? store}`);
 
 // Сертификаты на кассе. GET: ?store=&number= поиск, ?store=&sellers=1 продавцы, ?store=&checks=1 чеки дня.
+// ?store=&next=1 очередной номер сертификата (подсказка при продаже).
 // ?store=&status=1&certId= статус запроса руководителю, ?store=&pending=1 запросы, ждущие ответа.
 // POST: {store, action: verify|use|request|cancelRequest|return|sell, …}. Город — только из доступов входа.
 function pickStore(caller: { stores: string[] }, requested: string | null): string | null {
@@ -24,6 +26,7 @@ export async function GET(request: Request) {
   const store = pickStore(caller, url.searchParams.get("store"));
   if (!store) return NextResponse.json({ error: "Выберите город." }, { status: 400 });
   try {
+    if (url.searchParams.get("next") === "1") return NextResponse.json({ next: await nextCertificateNumber(store) });
     if (url.searchParams.get("sellers") === "1") return NextResponse.json({ sellers: await cert.sellers(store) });
     if (url.searchParams.get("checks") === "1") return NextResponse.json({ checks: await cert.todayChecks(store) });
     if (url.searchParams.get("pending") === "1") return NextResponse.json({ pending: await cert.pendingRequests(store) });

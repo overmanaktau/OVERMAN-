@@ -462,9 +462,15 @@ function SellFlow({ store, onBack }: { store: string; onBack: () => void }) {
   const [client, setClient] = useState("");
   const [phone, setPhone] = useState("");
   const [number, setNumber] = useState("");
+  const [nextNumber, setNextNumber] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ number: string; expiresAt: string } | null>(null);
+
+  useEffect(() => {
+    // очередной номер сертификата города — подсказка к полю номера
+    kassaApi<{ next: string | null }>(`/api/kassa/certificates?store=${store}&next=1`).then((r) => setNextNumber(r.next)).catch(() => setNextNumber(null));
+  }, [store]);
 
   useEffect(() => {
     kassaApi<{ sellers: { id: string; name: string }[] }>(`/api/kassa/certificates?store=${store}&sellers=1`)
@@ -531,7 +537,14 @@ function SellFlow({ store, onBack }: { store: string; onBack: () => void }) {
           <Field label="Имя клиента"><input value={client} onChange={(e) => setClient(e.target.value)} className={inputCls} /></Field>
           <Field label="Телефон клиента"><input inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="8 701 123 45 67" className={inputCls} /></Field>
         </div>
-        <Field label="Номер сертификата"><input value={number} onChange={(e) => setNumber(e.target.value)} className={inputCls} /></Field>
+        <Field label="Номер сертификата">
+          <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder={nextNumber ? `Очередной: ${nextNumber}` : undefined} className={inputCls} />
+          {nextNumber && (
+            <button type="button" onClick={() => setNumber(nextNumber)} className="self-start text-sm text-muted underline decoration-dotted underline-offset-4 hover:text-ink">
+              Очередной номер: <b className="text-ink">{nextNumber}</b> — подставить
+            </button>
+          )}
+        </Field>
         {error && <ErrorBox text={error} />}
         <button type="button" disabled={busy || !sellerId || !amount || !client || !phone || !number} onClick={submit} className={btnPrimary}>
           {busy ? "Оформляю…" : "Продать сертификат"}

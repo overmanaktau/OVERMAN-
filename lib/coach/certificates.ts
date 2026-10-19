@@ -6,6 +6,7 @@
 //  • ночью проверяется, не было ли возврата по чеку, к которому привязан сертификат.
 // Деньги — в тенге (в МойСклад копейки, их переводит lib/moysklad). В отчёты сертификаты пока не входят.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { nextCertificateNumber } from "@/lib/kassa/certNumber";
 import { escapeHtml } from "@/lib/telegram";
 import { fetchActiveEmployees, fetchCheckById, fetchChecksForDate, type CheckInfo } from "@/lib/moysklad";
 import { REGISTER_STORE } from "@/lib/registers";
@@ -330,7 +331,9 @@ export async function handleCertText(t: Transport, user: CertUser, text: string)
     const phone = normalizePhone(text);
     if (!phone) return retry("Не понял номер. Напишите телефон, например <b>8 701 123 45 67</b>.");
     await saveDraft(user.id, "number", { ...d, phone }, true);
-    await t.send(chat, "Номер сертификата (как напечатан на нём):", cancelMarkup);
+    const next = await nextCertificateNumber(user.store).catch(() => null);
+    await t.send(chat, `Номер сертификата (как напечатан на нём):${next ? `
+Очередной номер: <b>${escapeHtml(next)}</b>` : ""}`, cancelMarkup);
     return true;
   }
   if (draft.step === "number") {
