@@ -221,6 +221,19 @@ async function syncProductSales(date: string): Promise<number> {
       returned_quantity: agg.returnedQuantity,
     };
   });
+  // Товарные строки этого дня и этих складов, которых в МойСклад больше нет (чек поправили или удалили задним числом), убираем — иначе они
+  // копятся и завышают продажи по товарам (обзор склада, АВС/XYZ, по поставщикам). Кассы и сотрудники так же чистятся ниже по коду.
+  {
+    const syncedStores = [...new Set(warehouseIds.map((id) => WAREHOUSE_STORE[id]))];
+    const keep = new Set(productRowsToUpsert.map((r) => `${r.product_ms_id}|${r.store}`));
+    const { data: existingRows, error: existingError } = await supabaseAdmin.from("moysklad_product_sales_daily").select("id, product_ms_id, store").eq("sale_date", date).in("store", syncedStores);
+    if (existingError) throw existingError;
+    const staleIds = (existingRows ?? []).filter((r) => !keep.has(`${r.product_ms_id}|${r.store}`)).map((r) => r.id as number);
+    for (const batch of chunk(staleIds, 500)) {
+      const { error: deleteError } = await supabaseAdmin.from("moysklad_product_sales_daily").delete().in("id", batch);
+      if (deleteError) throw deleteError;
+    }
+  }
   for (const batch of chunk(productRowsToUpsert, 500)) {
     const { error: productSalesError } = await supabaseAdmin
       .from("moysklad_product_sales_daily")
