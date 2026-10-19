@@ -60,21 +60,16 @@ function avgDailyPlan(date: string, lk: PlanLookup): number {
 }
 
 // План дня: план недели этого дня (сумма средних планов семи дней недели) × доля дня недели.
-// Если у плана задана дата начала (activeFrom), дни до неё получают 0, а план месяца целиком раскладывается на дни с этой даты — сумма за месяц не меняется.
+// Если у плана задана дата начала (activeFrom), дни до неё получают 0, а план месяца целиком (ровно та сумма, что внесена) раскладывается на дни с этой даты по долям дней недели.
 export function dayPlanForDate(store: string, date: string, lk: PlanLookup): number {
   const month = `${date.slice(0, 7)}-01`;
   const from = lk.activeFrom?.(month) ?? null;
   if (!from || from <= month) return rawDayPlan(store, date, lk);
   if (date < from) return 0;
   const end = monthEndYmd(date);
-  let all = 0;
   let active = 0;
-  for (let d = month; d <= end; d = addDaysYmd(d, 1)) {
-    const v = rawDayPlan(store, d, lk);
-    all += v;
-    if (d >= from) active += v;
-  }
-  return active > 0 ? (rawDayPlan(store, date, lk) * all) / active : 0;
+  for (let d = from; d <= end; d = addDaysYmd(d, 1)) active += rawDayPlan(store, d, lk);
+  return active > 0 ? (rawDayPlan(store, date, lk) * lk.monthPlan(month)) / active : 0;
 }
 
 function rawDayPlan(store: string, date: string, lk: PlanLookup): number {
