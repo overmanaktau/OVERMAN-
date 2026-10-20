@@ -34,7 +34,7 @@ function pctText(v: number | null, digits = 1) {
   return v === null ? "—" : `${v.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
 }
 // Валовый % ниже 50 — лёгкое красное выделение (на экране и в PDF)
-const lowMargin = (v: number | null) => v !== null && v < 50;
+const lowMargin = (v: number | null) => v !== null && Math.round(v * 10) / 10 < 50; // по показанному значению: 49,96 выводится как 50,0% и не красится
 const LOW_MARGIN_CLS = "rounded px-1.5 py-0.5 bg-[#F6DAD2] text-[#A34B36]";
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
