@@ -136,6 +136,26 @@ function grossOf<T extends { revenue: number; receipts: number; items: number; r
   };
 }
 
+type SalesAgg = { revenue: number; receipts: number; items: number; returnedAmount: number; returnedReceipts: number; returnedItems: number };
+
+const emptyAgg = (): SalesAgg => ({ revenue: 0, receipts: 0, items: 0, returnedAmount: 0, returnedReceipts: 0, returnedItems: 0 });
+function addAgg(into: SalesAgg, row: { revenue?: number | null; receipts_count?: number | null; items_count?: number | null; returned_amount?: number | null; returned_receipts?: number | null; returned_items?: number | null }) {
+  into.revenue += row.revenue ?? 0;
+  into.receipts += row.receipts_count ?? 0;
+  into.items += row.items_count ?? 0;
+  into.returnedAmount += row.returned_amount ?? 0;
+  into.returnedReceipts += row.returned_receipts ?? 0;
+  into.returnedItems += row.returned_items ?? 0;
+}
+
+// Предыдущий период для сравнения: «Прошлый месяц» — месяц перед ним, «Всё время» — нет; остальные — такой же по длине период сразу перед выбранным.
+function previousRange(r: Range, periodIndex: number, custom: boolean): Range | null {
+  if (!custom && periodIndex === 5) return null;
+  if (!custom && periodIndex === 4) return { start: new Date(r.start.getFullYear(), r.start.getMonth() - 1, 1), end: new Date(r.start.getFullYear(), r.start.getMonth(), 0) };
+  const days = Math.round((stripTime(r.end).getTime() - stripTime(r.start).getTime()) / 86400000) + 1;
+  return { start: addDays(r.start, -days), end: addDays(r.start, -1) };
+}
+
 export default function SalesPage() {
   const { isAdmin, permissions, stores } = useAuth();
   const { mobileLayout } = useSiteVersion();
@@ -473,6 +493,128 @@ export default function SalesPage() {
   // back on) but drops out of every subtotal and the grand total.
   const activeRegisterSales = registerSales.filter((r) => !hiddenRegisterIds.has(r.registerId));
 
+  // Блоки «Сравнение периодов» для PDF: по кассам и по сотрудникам. Предыдущий период читается из базы только при формировании окна «Что скачать».
+  async function comparisonSections(r: Range, ru: (d: Date) => string): Promise<NonNullable<PdfDoc["sections"]>> {
+    const pr = previousRange(r, periodIndex, !!activeCustom);
+    if (!pr) return [];
+    const [{ data: regData, error: regErr }, { data: empData, error: empErr }] = await Promise.all([
+      supabase
+        .from("moysklad_sales_daily")
+        .select("register_id, revenue, receipts_count, items_count, returned_amount, returned_receipts, returned_items")
+        .gte("sale_date", ymd(pr.start))
+        .lte("sale_date", ymd(pr.end)),
+      supabase
+        .from("moysklad_employee_sales_daily")
+        .select("employee_ms_id, store, revenue, receipts_count, items_count, returned_amount, returned_receipts, returned_items")
+        .gte("sale_date", ymd(pr.start))
+        .lte("sale_date", ymd(pr.end)),
+    ]);
+    if (regErr) throw regErr;
+    if (empErr) throw empErr;
+    const prevReg = new Map<string, SalesAgg>();
+    for (const row of (regData ?? []) as { register_id: string }[]) {
+      const agg = prevReg.get(row.register_id) ?? emptyAgg();
+      addAgg(agg, row as never);
+      prevReg.set(row.register_id, agg);
+    }
+    const prevEmp = new Map<string, SalesAgg>();
+    for (const row of (empData ?? []) as { employee_ms_id: string; store: string | null }[]) {
+      const key = `${row.employee_ms_id}|${row.store ?? ""}`;
+      const agg = prevEmp.get(key) ?? emptyAgg();
+      addAgg(agg, row as never);
+      prevEmp.set(key, agg);
+    }
+
+    const shortRu = (d: Date) => ru(d).replace(/\.20(\d\d)$/, ".$1");
+    const dateLabel = (a: Date, b: Date) => (ymd(a) === ymd(b) ? ru(a) : `${shortRu(a)} –\n${shortRu(b)}`);
+    const subs = [dateLabel(pr.start, pr.end), dateLabel(r.start, r.end), "Разница"];
+    const groups = ["Оборот, ₸", "Чеков", "Средний чек, ₸"];
+    const num = (n: number) => Math.round(n).toLocaleString("ru-RU");
+    const sign = (n: number) => (Math.round(n) > 0 ? "+" : Math.round(n) < 0 ? "−" : "");
+    const values = (a: SalesAgg): (number | null)[] => {
+      const d = displayed(a);
+      return [d.revenue, d.receipts, d.receipts > 0 ? d.revenue / d.receipts : null];
+    };
+    const cells = (cur: SalesAgg, old: SalesAgg | undefined): string[] => {
+      const c = values(cur);
+      const o = old ? values(old) : null;
+      const out: string[] = [];
+      c.forEach((v, i) => {
+        const ov = o ? o[i] : null;
+        let diff = "—";
+        if (v !== null && ov !== null) {
+          const abs = v - ov;
+          const pct = ov > 0 ? ((v - ov) / ov) * 100 : null;
+          const pctText = pct === null ? "—" : `${pct > 0.05 ? "+" : pct < -0.05 ? "−" : ""}${Math.abs(pct).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+          diff = `${sign(abs)}${num(Math.abs(abs))}\n${pctText}`;
+        }
+        out.push(ov === null ? "—" : num(ov), v === null ? "—" : num(v), diff);
+      });
+      return out;
+    };
+    const sum = (list: SalesAgg[]): SalesAgg => list.reduce((acc, x) => {
+      acc.revenue += x.revenue;
+      acc.receipts += x.receipts;
+      acc.items += x.items;
+      acc.returnedAmount += x.returnedAmount;
+      acc.returnedReceipts += x.returnedReceipts;
+      acc.returnedItems += x.returnedItems;
+      return acc;
+    }, emptyAgg());
+    const widths = [2.2, 1.45, 1.45, 1.5, 0.95, 0.95, 1.25, 1.45, 1.45, 1.5];
+    const build = (title: string, first: string, cityGroups: { label: string; rows: { id: string; name: string; agg: SalesAgg }[] }[], prevMap: Map<string, SalesAgg>): NonNullable<PdfDoc["sections"]>[number] => {
+      const rows: (string | number)[][] = [];
+      const kinds: ("normal" | "group" | "total")[] = [];
+      const blank = Array.from({ length: 9 }, () => "");
+      const all: { cur: SalesAgg; old: SalesAgg }[] = [];
+      for (const g of cityGroups) {
+        if (g.rows.length === 0) continue;
+        rows.push([`Город: ${g.label}`, ...blank]);
+        kinds.push("group");
+        const part: { cur: SalesAgg; old: SalesAgg }[] = [];
+        for (const x of g.rows) {
+          const old = prevMap.get(x.id);
+          rows.push([x.name, ...cells(x.agg, old)]);
+          kinds.push("normal");
+          part.push({ cur: x.agg, old: old ?? emptyAgg() });
+        }
+        rows.push([`Итого: ${g.label}`, ...cells(sum(part.map((p) => p.cur)), sum(part.map((p) => p.old)))]);
+        kinds.push("total");
+        all.push(...part);
+      }
+      rows.push(["Итого", ...cells(sum(all.map((p) => p.cur)), sum(all.map((p) => p.old)))]);
+      kinds.push("total");
+      return {
+        title,
+        hint: "По каждому показателю: предыдущий период, выбранный и разница (цифра и %).",
+        note: `Слева — предыдущий период (${ru(pr.start)} — ${ru(pr.end)}), справа — выбранный (${ru(r.start)} — ${ru(r.end)}). Разница — выбранный минус предыдущий.`,
+        optional: true,
+        headers: [first, ...groups.flatMap((g) => subs.map((sName) => `${g.split(",")[0]} · ${sName.replace("\n", " ")}`))],
+        headGroups: [{ label: first, span: 1 }, ...groups.map((g) => ({ label: g, span: 3, subs }))],
+        rows,
+        rowKinds: kinds,
+        widths,
+        fontSize: 7.2,
+        grid: true,
+        align: ["left", ...Array.from({ length: 9 }, () => "center" as const)],
+        signColors: true,
+        pickLabels: rows.map((row) => String(row[0])),
+      };
+    };
+
+    const regGroups = visibleGroups.map((g) => ({
+      label: g.label,
+      rows: g.rows.filter((x) => !hiddenRegisterIds.has(x.registerId)).map((x) => ({ id: x.registerId, name: x.name, agg: x as SalesAgg })),
+    }));
+    const empGroups = visibleEmployeeGroups.map((g) => ({
+      label: g.label,
+      rows: g.rows.map((x) => ({ id: `${x.employeeId}|${x.store ?? ""}`, name: x.name, agg: x as SalesAgg })),
+    }));
+    const out = [build("По кассам — сравнение периодов", "Касса", regGroups, prevReg)];
+    if (empGroups.some((g) => g.rows.length > 0)) out.push(build("По сотрудникам — сравнение периодов", "Сотрудник", empGroups, prevEmp));
+    return out;
+  }
+
   const totalRevenue = activeRegisterSales.reduce((acc, r) => acc + displayed(r).revenue, 0);
   const totalReceipts = activeRegisterSales.reduce((acc, r) => acc + displayed(r).receipts, 0);
   const totalItems = activeRegisterSales.reduce((acc, r) => acc + displayed(r).items, 0);
@@ -750,7 +892,7 @@ export default function SalesPage() {
       <div className="flex justify-end -mt-2">
         <PdfButton
           disabled={loading || registerSales.length === 0}
-          build={(): PdfDoc => {
+          build={async (): Promise<PdfDoc> => {
             const r = activeCustom
               ? { start: parseYmd(activeCustom.start), end: parseYmd(activeCustom.end) }
               : getPeriodRange(periodIndex, new Date());
@@ -843,6 +985,8 @@ export default function SalesPage() {
                 pickLabels: empPick,
               });
             }
+            // «Сравнение периодов» (по галочке в окне «Что скачать», по умолчанию выключено): по каждому показателю предыдущий период, выбранный и разница (цифра и %)
+            sections.push(...(await comparisonSections(r, ru)));
             return {
               fileName: `Продажи ${ruPeriod(ymd(r.start), ymd(r.end))}`,
               title: "Продажи по кассам и сотрудникам",
