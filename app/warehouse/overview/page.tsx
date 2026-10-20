@@ -464,7 +464,7 @@ export default function WarehouseOverviewPage() {
   const blocks: { title: string; nameHeader: string; rows: Row[] }[] = [
     { title: "По категориям", nameHeader: "Категория", rows: categoriesOn },
     { title: "По поставщикам", nameHeader: "Поставщик", rows: bySupplier },
-    { title: "По складам", nameHeader: "Склад", rows: byStore },
+    ...(storeLabels.length > 1 ? [{ title: "По складам", nameHeader: "Склад", rows: byStore }] : []), // один склад — таблицы «По складам» нет
   ];
   const excelHeaders = (first: string) => [
     first,
