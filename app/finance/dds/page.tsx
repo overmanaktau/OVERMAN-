@@ -53,6 +53,7 @@ import KpiCard from "@/components/KpiCard";
 import PdfButton from "@/components/PdfButton";
 import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
+import { ruPeriod } from "@/lib/fileNames";
 
 export default function DdsPage() {
   return (
@@ -157,7 +158,7 @@ function Inner() {
   function buildOpsPdf(): PdfDoc {
     const flow = income - expense;
     return {
-      fileName: `ДДС_${start}_${end}`,
+      fileName: `ДДС ${ruPeriod(start, end)}`,
       title: "ДДС — движение денег",
       subtitle: `${fmtDate(start)} — ${fmtDate(end)} · ${isAll ? "все магазины" : selected.map(storeName).join(", ")}`,
       orientation: "landscape",
@@ -502,7 +503,7 @@ function DdsReport({
     push(["Чистый поток", ...months.map((_, i) => fmtMoney(inc[i] - exp[i])), fmtMoney(total(inc) - total(exp))], "total");
     push(["Остаток на конец", ...closing.map(fmtMoney), ""], "sub");
     return {
-      fileName: `ДДС_отчёт_${start}_${end}`,
+      fileName: `ДДС отчёт ${ruPeriod(start, end)}`,
       title: "Отчёт о движении денег по статьям",
       subtitle: `${fmtDate(start)} — ${fmtDate(end)}`,
       meta: ["Переводы между счетами не показаны — они меняют остатки по счетам, но не общую сумму денег"],

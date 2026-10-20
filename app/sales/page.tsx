@@ -11,6 +11,7 @@ import { getErrorMessage } from "@/lib/errors";
 import PdfButton from "@/components/PdfButton";
 import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
+import { ruPeriod } from "@/lib/fileNames";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 3; // "С начала месяца"
@@ -843,7 +844,7 @@ export default function SalesPage() {
               });
             }
             return {
-              fileName: `Продажа_${ymd(r.start)}_${ymd(r.end)}`,
+              fileName: `Продажи ${ruPeriod(ymd(r.start), ymd(r.end))}`,
               title: "Продажи по кассам и сотрудникам",
               subtitle: `${periodLabel}: ${ru(r.start)} — ${ru(r.end)}`,
               orientation: "landscape",

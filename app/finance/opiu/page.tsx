@@ -47,6 +47,7 @@ import {
   thCls,
   useSection,
 } from "@/components/finance/ui";
+import { ruPeriod } from "@/lib/fileNames";
 
 export default function OpiuPage() {
   return (
@@ -216,7 +217,7 @@ function Inner() {
     if (view === "months") {
       return {
         ...common,
-        fileName: `ОПИУ_по_месяцам_${start}_${end}`,
+        fileName: `ОПИУ по месяцам ${ruPeriod(start, end)}`,
         title: "ОПИУ — прибыли и убытки по месяцам",
         meta: ["В каждой ячейке: сумма и процент от оборота месяца. У себестоимости по категории — процент от оборота этой категории."],
         sections: [
@@ -239,7 +240,7 @@ function Inner() {
     }
     return {
       ...common,
-      fileName: `ОПИУ_план_факт_${start}_${end}`,
+      fileName: `ОПИУ план-факт ${ruPeriod(start, end)}`,
       title: "ОПИУ — план и факт",
       meta: ["План считается на дату: по неоконченному периоду берётся часть плана до сегодняшнего дня."],
       sections: [

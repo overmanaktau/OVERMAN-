@@ -9,6 +9,7 @@ import { WAREHOUSES, FILTER_WAREHOUSES, warehousesForCities } from "@/lib/wareho
 import PdfButton from "@/components/PdfButton";
 import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
+import { todayRu } from "@/lib/fileNames";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 5; // "Всё время"
@@ -823,7 +824,7 @@ export default function AbcXyzPage() {
             <PdfButton
               disabled={filtered.length === 0}
               build={(): PdfDoc => ({
-                fileName: "АВС_XYZ_анализ",
+                fileName: `АВС-XYZ ${todayRu()}`,
                 title: "АВС/XYZ анализ",
                 subtitle: `Дней в периоде: ${windowDays} · склады: ${effectiveStores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c).join(", ")}`,
                 meta: ["АВС — доля в обороте: A — верхние 80 %, B — 15 %, C — 5 %", "XYZ — ровность спроса по дням с продажами"],

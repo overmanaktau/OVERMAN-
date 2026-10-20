@@ -49,6 +49,7 @@ import {
   thCls,
   useSection,
 } from "@/components/finance/ui";
+import { ruDay } from "@/lib/fileNames";
 
 export default function PlannedPage() {
   return (
@@ -166,7 +167,7 @@ function Inner() {
 
   function buildPlannedPdf(): PdfDoc {
     return {
-      fileName: `Плановые_платежи_${today}`,
+      fileName: `Плановые платежи ${ruDay(today)}`,
       title: "Плановые платежи",
       subtitle: `На ${fmtDate(today)} · ${isAll ? "все магазины" : selected.map(storeName).join(", ")}`,
       meta: ["В прогноз входят остаток на счетах, плановые платежи и долги со сроком оплаты. Будущий оборот от продаж не учитывается."],

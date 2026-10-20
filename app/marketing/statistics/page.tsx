@@ -9,6 +9,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { downloadExcel } from "@/lib/exportExcel";
 import PdfButton from "@/components/PdfButton";
 import type { PdfDoc } from "@/lib/downloadPdf";
+import { ruPeriod } from "@/lib/fileNames";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 3; // "С начала месяца"
@@ -506,7 +507,7 @@ export default function StatisticsPage() {
     const ru = (d: Date) => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
     const last = t.rows.length - 1;
     return {
-      fileName: `Статистика_${ymd(range.start)}_${ymd(range.end)}`,
+      fileName: `Статистика ${ruPeriod(ymd(range.start), ymd(range.end))}`,
       title: "Статистика маркетинга",
       subtitle: `${ru(range.start)} — ${ru(range.end)}`,
       orientation: "landscape",

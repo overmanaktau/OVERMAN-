@@ -10,6 +10,7 @@ import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 import PdfButton from "@/components/PdfButton";
 import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
+import { todayRu } from "@/lib/fileNames";
 
 // Products currently in stock with zero recorded sales in this many days —
 // computed from our own synced sales history (moysklad_product_sales_daily),
@@ -710,7 +711,7 @@ export default function StaleInventoryPage() {
               sections.push(sizesSection(`Заморозка — ${bySearch(frozenRows).length} артикулов, с размерами`, frozenRows, ["frozen"], -1));
             }
             return {
-              fileName: "Зависшие_остатки",
+              fileName: `Зависшие остатки ${todayRu()}`,
               title: "Зависшие остатки",
               subtitle: `Склады: ${labels.join(", ")} · товар не продавался ${STALE_DAYS}+ дней${search.trim() ? ` · поиск: «${search.trim()}»` : ""}`,
               kpis: [

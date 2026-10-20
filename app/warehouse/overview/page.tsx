@@ -10,6 +10,7 @@ import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 import PdfButton from "@/components/PdfButton";
 import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc, PdfSection } from "@/lib/downloadPdf";
+import { ruPeriod } from "@/lib/fileNames";
 
 // Склад → «Обзор»: за выбранный период и склады — остаток (по факту на последний день периода, как в МойСклад),
 // сколько продано, себестоимость, валовая прибыль и оборачиваемость (себестоимость продаж ÷ средний остаток) —
@@ -642,7 +643,7 @@ ${deltaText(deltaPct(c, o))}`;
             build={async (): Promise<PdfDoc> => {
               const cmpData = prevData ?? (prevRange ? await fetchSet(prevRange.from, prevRange.to) : null);
               return {
-              fileName: "Склад_обзор",
+              fileName: `Склад обзор ${ruPeriod(range.from, range.to)}`,
               orientation: "landscape",
               title: "Склад — обзор",
               subtitle: `Период: ${range.label} · склады: ${storeLabels.join(", ")}`,

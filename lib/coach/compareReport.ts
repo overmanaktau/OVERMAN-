@@ -6,6 +6,7 @@ import { sendCoachDocument, type ReplyMarkup, type Transport } from "@/lib/coach
 import { addDays, daysBetween, monthStartOf, mondayOf, todayInAlmaty } from "@/lib/coach/metrics";
 import { ALL_STORES, parsePeriodInput, setAwaiting } from "@/lib/coach/salesview";
 import { buildWeeklyComparePdf, loadPeriodsCompare, type CompareLabels } from "@/lib/reports/weeklyCompare";
+import { ruDay } from "@/lib/fileNames";
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 const MAX_DAYS = 92; // период длиннее — таблица по дням не поместится в разумный файл
@@ -127,7 +128,7 @@ async function sendPdf(t: Transport, chatId: number | string, store: string, p1:
   await t.send(chatId, "⏳ Готовлю отчёт…");
   const { pdf, city } = await buildPeriodsComparePdf(store, p1, p2);
   const range = (r: Range) => (r.from === r.to ? fmtShort(r.from) : `${fmtShort(r.from)}–${fmtShort(r.to)}`);
-  await sendCoachDocument(chatId, `Сравнение_периодов_${city}_${p2.to}.pdf`, pdf, `Сравнение периодов · ${city}: ${range(p1)} и ${range(p2)}`);
+  await sendCoachDocument(chatId, `Сравнение периодов ${city} ${ruDay(p2.to)}.pdf`, pdf, `Сравнение периодов · ${city}: ${range(p1)} и ${range(p2)}`);
 }
 
 // Нажатия cmp:… ; stores — города, доступные этому администратору.

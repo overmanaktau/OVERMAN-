@@ -8,6 +8,7 @@ import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { todayInAlmaty } from "@/lib/coach/metrics";
 import { buildWeeklyComparePdf, loadWeeklyCompare } from "@/lib/reports/weeklyCompare";
 import { buildPeriodsComparePdf } from "@/lib/coach/compareReport";
+import { ruDay } from "@/lib/fileNames";
 
 export const maxDuration = 60;
 
@@ -74,7 +75,7 @@ async function handle(request: Request) {
     const pdf = await buildWeeklyComparePdf(weeks, city);
     const sendTo = Number(url.searchParams.get("send"));
     const fmt = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
-    const fileName = `Сравнение_недель_${city}_${weeks[1].to}.pdf`;
+    const fileName = `Сравнение недель ${city} ${ruDay(weeks[1].to)}.pdf`;
     const caption = `Сравнение недель · ${city}: ${fmt(weeks[0].from)}–${fmt(weeks[0].to)} и ${fmt(weeks[1].from)}–${fmt(weeks[1].to)}`;
     if (sendTo) {
       const { data: user, error } = await supabaseAdmin.from("coach_users").select("telegram_chat_id, employee_name").eq("id", sendTo).eq("status", "approved").maybeSingle();

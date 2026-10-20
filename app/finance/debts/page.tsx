@@ -48,6 +48,7 @@ import {
   thCls,
   useSection,
 } from "@/components/finance/ui";
+import { ruDay } from "@/lib/fileNames";
 
 export default function DebtsPage() {
   return (
@@ -268,7 +269,7 @@ function Inner() {
       ];
     });
     return {
-      fileName: `Долги_${today}`,
+      fileName: `Долги ${ruDay(today)}`,
       title: "Долги",
       subtitle: `На ${fmtDate(today)} · ${isAll ? "все магазины" : selected.map(storeName).join(", ")}`,
       orientation: "landscape",

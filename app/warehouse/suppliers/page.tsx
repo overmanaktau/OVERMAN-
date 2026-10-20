@@ -9,6 +9,7 @@ import { WAREHOUSES, FILTER_WAREHOUSES, warehousesForCities } from "@/lib/wareho
 import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 import PdfButton from "@/components/PdfButton";
 import type { PdfDoc } from "@/lib/downloadPdf";
+import { todayRu } from "@/lib/fileNames";
 
 // Склад → «По поставщикам». Поставщик — из карточки товара в МойСклад.
 // Вкладка «Остатки»: что сейчас лежит у каждого поставщика (штуки и себестоимость).
@@ -427,7 +428,7 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
           disabled={docs.length === 0}
           className="text-[12px] font-semibold text-accent bg-surface border border-border rounded-md px-3 py-1.5 hover:bg-paper disabled:opacity-50"
           build={(): PdfDoc => ({
-            fileName: title ? `Приходы_${title}` : `Приходы_${supplier}`,
+            fileName: `Приходы ${title || supplier} ${todayRu()}`,
             title: title ? `Приходы: ${title}` : `Приходы поставщика ${supplier}`,
             subtitle: `${title ? `Поставщик ${supplier} · ` : ""}${stores.map(warehouseLabel).join(", ")}${q ? ` · товар: «${query.trim()}»` : ""}`,
             meta: ["Приход — приёмка от поставщика, оприходование или перемещение на склад.", "Продажи и перемещения на другой склад списываются с самого старого прихода (FIFO); перемещённое показано отдельно и продажей не считается.", "В итоговых строках «Пришло» — только от поставщика (перемещения между складами не считаются закупкой); «Перемещено» — чистое: минус значит, что товар поступил перемещением с других складов."],
@@ -1104,7 +1105,7 @@ export default function SuppliersPage() {
                 : ["Итого", num(sumArticles), num(totalStock), money(totalMoney), pct(totalMoney, warehouseTotal), money(totalSale), turnText(totalTurnover)]
             );
             return {
-              fileName: stale ? "Зависшие_по_поставщикам" : "Остатки_по_поставщикам",
+              fileName: `${stale ? "Зависшие по поставщикам" : "Остатки по поставщикам"} ${todayRu()}`,
               title: stale ? "Зависшие остатки по поставщикам" : "Остатки по поставщикам",
               subtitle: `Склады: ${labels.join(", ")} · оборачиваемость за ${turnoverInfo.label}${search.trim() ? ` · поставщик: «${search.trim()}»` : ""}`,
               meta: stale

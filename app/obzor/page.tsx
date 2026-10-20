@@ -10,6 +10,7 @@ import { warehousesForCities } from "@/lib/warehouses";
 import PdfButton from "@/components/PdfButton";
 import SortHead, { type SortState } from "@/components/SortHead";
 import type { PdfDoc } from "@/lib/downloadPdf";
+import { ruPeriod } from "@/lib/fileNames";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
 const DEFAULT_PERIOD = 3; // "С начала месяца"
@@ -587,7 +588,7 @@ export default function ObzorPage() {
               });
             }
             return {
-              fileName: `Обзор_${ymd(range.start)}_${ymd(range.end)}`,
+              fileName: `Обзор ${ruPeriod(ymd(range.start), ymd(range.end))}`,
               title: "Обзор продаж",
               subtitle: `${periodLabel}: ${ru(range.start)} — ${ru(range.end)}`,
               kpis: [
