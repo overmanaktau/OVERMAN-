@@ -8,7 +8,8 @@ export type PurchaseInfo = { earned: number; activatesOn: string; spent?: number
 export function purchaseMessage(p: PurchaseInfo): string {
   const lines = ["🛍 <b>Спасибо за покупку в Overman!</b>", ""];
   if (p.spent && p.spent > 0) lines.push(`Списано бонусов: <b>${fmt(p.spent)}</b>`);
-  lines.push(`Начислено бонусов: <b>${fmt(p.earned)}</b> — станут доступны ${p.activatesOn}`, "", `Доступно сейчас: <b>${fmt(p.available)}</b>`, `Ожидает активации: <b>${fmt(p.pending)}</b>`);
+  if (p.earned > 0) lines.push(`Начислено бонусов: <b>${fmt(p.earned)}</b> — станут доступны ${p.activatesOn}`);
+  lines.push("", `Доступно сейчас: <b>${fmt(p.available)}</b>`, `Ожидает активации: <b>${fmt(p.pending)}</b>`);
   return lines.join("\n");
 }
 

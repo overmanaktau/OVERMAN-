@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { fetchDocAgentId } from "@/lib/moysklad";
 import { syncOneClient } from "@/lib/kassa/clientSync";
+import { notifyAfterPurchase } from "@/lib/clientBotNotify";
 
 export const maxDuration = 60;
 
@@ -45,6 +46,8 @@ async function handle(request: Request) {
       try {
         const r = await syncOneClient(id);
         results[id] = r.status;
+        // подписанному клиенту — сообщение о бонусах за покупку; сбой отправки не должен ломать обработку очереди
+        if (r.status === "updated") await notifyAfterPurchase(id).catch((e) => console.error("client bot notify error:", getErrorMessage(e)));
       } catch (e) {
         results[id] = `ошибка: ${getErrorMessage(e)}`;
         for (const [href, cid] of clientByHref) if (cid === id) errors.set(href, getErrorMessage(e));
