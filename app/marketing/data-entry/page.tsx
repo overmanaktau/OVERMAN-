@@ -1025,15 +1025,15 @@ export default function DataEntryPage() {
 
                 <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px_100px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
                   <div className="col-span-2">Итого</div>
-                  <div className="num">{totals.trafficPlan.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num">{totals.trafficFact.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num">{totals.instagram.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num">{totals.tiktok.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num">
+                  <div className="num text-right pr-[7px]">{totals.trafficPlan.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num text-right pr-[7px]">{totals.trafficFact.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num text-right pr-[7px]">{totals.instagram.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num text-right pr-[7px]">{totals.tiktok.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num text-right pr-[7px]">
                     {totals.instagramPublic.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}
                   </div>
-                  <div className="num">{totals.flyer.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num">{totals.twoGis.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num text-right pr-[7px]">{totals.flyer.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num text-right pr-[7px]">{totals.twoGis.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
                   <div />
                 </div>
               </>
