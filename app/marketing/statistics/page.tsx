@@ -526,8 +526,57 @@ export default function StatisticsPage() {
           rowKinds: t.rows.map((_, i) => (i === last ? "total" : "normal")),
           align: t.headers.map((_, i) => (i === 0 ? "left" : "right")),
         },
+        ...comparisonSection(ru),
       ],
     };
+  }
+
+  // «Сравнение периодов» для PDF: по каждому показателю предыдущий период, выбранный и разница (цифра и %). Появляется в окне «Что скачать» отдельной галочкой, по умолчанию выключена.
+  function comparisonSection(ru: (d: Date) => string): NonNullable<PdfDoc["sections"]> {
+    if (!range || !range.hasPrev) return [];
+    type Kind = "int" | "money" | "pct";
+    const prevConversion = prevTotals.fact > 0 ? (prevSalesTotals.receipts / prevTotals.fact) * 100 : null;
+    const items: { label: string; cur: number | null; prev: number | null; kind: Kind }[] = [
+      { label: "Трафик план", cur: totals.plan, prev: prevTotals.plan, kind: "int" },
+      { label: "Трафик факт", cur: totals.fact, prev: prevTotals.fact, kind: "int" },
+      { label: "Выполнение плана", cur: planCompletionPct, prev: prevPlanCompletionPct, kind: "pct" },
+      { label: "Количество чеков", cur: salesTotals.receipts, prev: prevSalesTotals.receipts, kind: "int" },
+      { label: "Конверсия", cur: conversionPct, prev: prevConversion, kind: "pct" },
+      { label: "Средний чек", cur: avgCheck, prev: prevAvgCheck, kind: "money" },
+      ...CHANNEL_DEFS.map((c) => ({ label: c.label, cur: totals[c.key], prev: prevTotals[c.key], kind: "money" as Kind })),
+      { label: "Итого по каналам", cur: channelTotal, prev: prevChannelTotal, kind: "money" },
+      { label: "Доп. расходы", cur: expensesTotal, prev: prevExpensesTotal, kind: "money" },
+      { label: "Всего расходов", cur: totalSpend, prev: prevTotalSpend, kind: "money" },
+      { label: "Цена одного посетителя", cur: costPerVisitor, prev: prevCostPerVisitor, kind: "money" },
+      { label: "Цена одного покупателя", cur: costPerBuyer, prev: prevCostPerBuyer, kind: "money" },
+    ];
+    const num = (n: number, digits: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" ? `${num(n, 1)}%` : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
+    const signed = (n: number, digits: number) => {
+      const r = Number(n.toFixed(digits));
+      return `${r > 0 ? "+" : r < 0 ? "−" : ""}${num(Math.abs(r), digits)}`;
+    };
+    const rows: (string | number)[][] = items.map((it) => {
+      if (it.cur === null || it.prev === null) return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), "—", "—"];
+      const abs = it.cur - it.prev;
+      const pc = pctChange(it.cur, it.prev);
+      const absText = it.kind === "pct" ? `${signed(abs, 1)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
+      return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), absText, pc === null ? "—" : `${signed(pc, 1)}%`];
+    });
+    const prevLabel = `${ru(range.prevStart)}${range.prevStart.getTime() === range.prevEnd.getTime() ? "" : ` — ${ru(range.prevEnd)}`}`;
+    const curLabel = `${ru(range.start)}${range.start.getTime() === range.end.getTime() ? "" : ` — ${ru(range.end)}`}`;
+    return [
+      {
+        title: "Сравнение периодов",
+        hint: "По каждому показателю: предыдущий период, выбранный и разница (цифра и %).",
+        note: `Предыдущий период: ${prevLabel}. Выбранный: ${curLabel}. Разница — выбранный минус предыдущий; у процентов — в процентных пунктах и в %.`,
+        optional: true,
+        headers: ["Показатель", prevLabel, curLabel, "Разница", "Разница, %"],
+        rows,
+        align: ["left", "right", "right", "right", "right"],
+        widths: [2.6, 1.9, 1.9, 1.5, 1.2],
+      },
+    ];
   }
 
   return (

@@ -48,6 +48,23 @@ export default function PdfButton({
   );
 }
 
+// Название кнопки со строками таблицы — по её первой колонке во множественном числе: «Поставщик» → «Поставщики», «Категория» → «Категории», «Склад» → «Склады».
+function rowsTitle(firstHeader: string | undefined): string {
+  const word = (firstHeader ?? "").split(/\s*[/(]/)[0].trim();
+  if (!word || /\s/.test(word)) return word ? word : "Строки";
+  if (word.toLowerCase() === "город") return "Города";
+  const stem = word.slice(0, -1);
+  const last = word.slice(-1).toLowerCase();
+  const soft = (c: string) => "гкхжчшщ".includes(c);
+  let plural: string;
+  if (word.toLowerCase().endsWith("ия")) plural = `${word.slice(0, -2)}ии`;
+  else if (last === "а") plural = `${stem}${soft(stem.slice(-1).toLowerCase()) ? "и" : "ы"}`;
+  else if (last === "я" || last === "ь") plural = `${stem}и`;
+  else if (soft(last)) plural = `${word}и`;
+  else plural = `${word}ы`;
+  return plural;
+}
+
 // ───────── структура таблицы: уровни вложенности и «единицы» строк
 
 type Shape = {
@@ -350,7 +367,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
 
                     <div className="flex flex-col gap-1.5">
                       <button type="button" className={`${linkBtn} text-left w-fit`} onClick={() => toggleOpen(`c${i}`)}>
-                        {colsOpen ? "▾" : "▸"} Колонки: {cfg.cols.filter((v, c) => v && !hiddenCols.has(c)).length} из {cfg.cols.length - hiddenCols.size}
+                        {colsOpen ? "▾" : "▸"} Показатели: {cfg.cols.filter((v, c) => v && !hiddenCols.has(c)).length} из {cfg.cols.length - hiddenCols.size}
                       </button>
                       {colsOpen && (
                         <div className="flex flex-wrap gap-x-4 gap-y-1.5 pl-3">
@@ -373,7 +390,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
                     {shape.unitLabels.length > 1 && (
                       <div className="flex flex-col gap-1.5">
                         <button type="button" className={`${linkBtn} text-left w-fit`} onClick={() => toggleOpen(`r${i}`)}>
-                          {rowsOpen ? "▾" : "▸"} Строки: {shape.unitLabels.length - cfg.excluded.size} из {shape.unitLabels.length}
+                          {rowsOpen ? "▾" : "▸"} {rowsTitle(sec.headers[0])}: {shape.unitLabels.length - cfg.excluded.size} из {shape.unitLabels.length}
                         </button>
                         {rowsOpen && (
                           <div className="pl-3 flex flex-col gap-1.5">
