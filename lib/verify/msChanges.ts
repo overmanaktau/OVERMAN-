@@ -77,9 +77,9 @@ export async function checkMsChanges(opts: { origin: string; secret: string; sin
         const kind = rec.entityType === "retailsalesreturn" ? "возврат" : "чек";
         let what = rec.eventType === "delete" ? "удалён" : rec.eventType === "create" ? "создан вручную" : "изменён";
         const owner = e.diff?.owner;
-        if (owner) what = `ответственный ${shortName(logins.get(String(owner.oldValue)) ?? String(owner.oldValue ?? "—"))} → ${shortName(logins.get(String(owner.newValue)) ?? String(owner.newValue ?? "—"))}`;
+        if (owner) what = `ответственный: был ${shortName(logins.get(String(owner.oldValue)) ?? String(owner.oldValue ?? "—"))}, стал ${shortName(logins.get(String(owner.newValue)) ?? String(owner.newValue ?? "—"))}`;
         else if (e.diff) what = `изменено: ${Object.keys(e.diff).join(", ")}`;
-        lines.push(`${kind} №${e.name} от ${dm(e.docDate)}: ${what} (${shortName(who)})`);
+        lines.push(`${kind} №${e.name} от ${dm(e.docDate)}: ${what}. Менял: ${shortName(who)}`);
       }
     }
   }
@@ -174,7 +174,7 @@ export async function checkOtherMsChanges(opts: { since?: string; apply?: boolea
     for (const e of list) {
       rows.push({ audit_id: rec.id, entity_id: e.entityId || rec.id, entity_type: rec.entityType, doc_name: e.name, doc_date: e.docDate, event_type: rec.eventType, source: rec.source, uid: rec.uid, at_ms: rec.moment, diff: e.diff, info: e.info, applied_at: new Date().toISOString() });
       const fields = rec.eventType === "update" ? Object.keys(e.diff ?? {}).map((k) => FIELD_RU[k] ?? k) : [];
-      lines.push(`${kind}${e.name ? ` «${e.name.slice(0, 60)}»` : ""} — ${act}${fields.length ? `: ${fields.join(", ")}` : ""} (${who})`);
+      lines.push(`${kind}${e.name ? ` «${e.name.slice(0, 60)}»` : ""} — ${act}${fields.length ? `: ${fields.join(", ")}` : ""}. Менял: ${who}`);
     }
   }
   if (apply && rows.length > 0) {

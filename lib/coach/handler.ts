@@ -24,6 +24,7 @@ import {
   SUPPORT_TEXT,
 } from "@/lib/coach/messages";
 import { type EmployeeRef } from "@/lib/coach/metrics";
+import { shortPerson } from "@/lib/personName";
 
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
 export type TgUpdate = {
@@ -516,7 +517,7 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
         : `Город: <b>${city}</b>. Выберите себя в списке:`;
     await t.send(chatId, heading, {
       inline_keyboard: [
-        ...employees.map((e) => [{ text: e.name, callback_data: `emp:${store}:${e.id}` }]),
+        ...employees.map((e) => [{ text: shortPerson(e.name), callback_data: `emp:${store}:${e.id}` }]),
         [{ text: TEST_LABEL, callback_data: `emp:${store}:${TEST_EMPLOYEE_ID}` }],
         [{ text: "← Назад", callback_data: "back" }],
       ],

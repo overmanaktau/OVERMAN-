@@ -8,6 +8,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import { useSiteVersion } from "@/components/SiteVersion";
 import AccountsModal from "@/components/AccountsModal";
+import { shortPerson } from "@/lib/personName";
 
 function IconSystem() {
   return (
@@ -91,7 +92,7 @@ export default function AccountMenu() {
           {initials(fullName, email)}
         </div>
         <div className={`${mobileLayout ? "hidden" : "flex"} flex-col items-start min-w-0 leading-tight`}>
-          <span className="text-[12px] font-semibold text-ink truncate max-w-[160px]">{fullName || "Без имени"}</span>
+          <span className="text-[12px] font-semibold text-ink truncate max-w-[160px]">{shortPerson(fullName) || "Без имени"}</span>
           <span className="text-[10.5px] text-mutedLight truncate max-w-[160px]">{email}</span>
         </div>
       </button>

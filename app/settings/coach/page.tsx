@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
+import { shortPerson } from "@/lib/personName";
 
 type CoachUser = {
   id: number;
@@ -170,7 +171,7 @@ export default function CoachPage() {
               <div key={u.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_270px_230px] items-center gap-x-4 gap-y-2 py-2.5 border-t border-borderSoft first:border-t-0">
                 <div className="flex flex-col gap-0.5 min-w-0">
                   <div className="text-[13.5px] font-semibold">
-                    {u.employee_name} <span className="text-mutedLight font-normal">· {storeName(u.store)}</span>
+                    {shortPerson(u.employee_name)} <span className="text-mutedLight font-normal">· {storeName(u.store)}</span>
                   </div>
                   <div className="text-[12px] text-muted">
                     Telegram: {u.telegram_name ?? "—"}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
 import { getErrorMessage } from "@/lib/errors";
+import { shortPerson } from "@/lib/personName";
 
 type Employee = { id: string; name: string };
 
@@ -115,7 +116,7 @@ function amountKeyDown(currentText: string) {
 export function SalesPlanEntry({ onSaved }: { onSaved?: () => void }) {
   const { isAdmin, permissions, stores, accessibleStoreCodes, fullName, email } = useAuth();
   const canEdit = isAdmin || permissions["sales.plan"].canEdit;
-  const requesterLabel = fullName || email || "Пользователь";
+  const requesterLabel = shortPerson(fullName) || email || "Пользователь";
   const accessibleStores = stores.filter((s) => accessibleStoreCodes.includes(s.code));
 
   const [open, setOpen] = useState(false);

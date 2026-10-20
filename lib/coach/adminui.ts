@@ -19,6 +19,7 @@ import {
 import { monthStatus, todayInAlmaty } from "@/lib/coach/metrics";
 import { handleSalesCallback } from "@/lib/coach/salesview";
 import { money } from "@/lib/reports/sales";
+import { shortPerson } from "@/lib/personName";
 
 type Row = {
   id: number;
@@ -82,7 +83,7 @@ export async function sendStaffList(t: Transport, chatId: number | string, kind:
   await t.send(chatId, `${title}${legend}\nНажмите на имя, чтобы открыть карточку.`, {
     inline_keyboard: rows.map((r) => [
       {
-        text: `${STATUS_ICON[r.status]} ${r.employee_name} · ${CITY[r.store] ?? r.store}${r.is_admin ? (r.admin_scope === "all" ? " · 👑" : " · 🛡") : ""}`,
+        text: `${STATUS_ICON[r.status]} ${shortPerson(r.employee_name)} · ${CITY[r.store] ?? r.store}${r.is_admin ? (r.admin_scope === "all" ? " · 👑" : " · 🛡") : ""}`,
         callback_data: `adm:u:${r.id}`,
       },
     ]),
@@ -148,7 +149,7 @@ async function sendCard(t: Transport, chatId: number | string, id: number, store
   }
   await t.send(
     chatId,
-    `<b>${escapeHtml(r.employee_name)}</b> · ${CITY[r.store] ?? r.store}${r.is_admin ? ` · ${roleLabel(r)}` : ""}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}\nTelegram: ${escapeHtml(tgLabel(r))}${month}`,
+    `<b>${escapeHtml(shortPerson(r.employee_name))}</b> · ${CITY[r.store] ?? r.store}${r.is_admin ? ` · ${roleLabel(r)}` : ""}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}\nTelegram: ${escapeHtml(tgLabel(r))}${month}`,
     markup
   );
 }
@@ -202,7 +203,7 @@ export async function handleAdminCallback(
     if (!target || !stores.includes(target.store)) return;
     const current = roleOf(target);
     if (kind === "r") {
-      await t.send(chatId, `<b>${escapeHtml(target.employee_name)}</b>\nТекущая роль: <b>${ROLE_TITLE[current]}</b>\nВыберите новую роль:`, {
+      await t.send(chatId, `<b>${escapeHtml(shortPerson(target.employee_name))}</b>\nТекущая роль: <b>${ROLE_TITLE[current]}</b>\nВыберите новую роль:`, {
         inline_keyboard: [
           ...COACH_ROLES.map((role) => [
             {
@@ -217,7 +218,7 @@ export async function handleAdminCallback(
     }
     const role = parts[2] as CoachRole;
     if (kind === "rq") {
-      await t.send(chatId, `Сделать <b>${escapeHtml(target.employee_name)}</b> владельцем? Владельцу доступны заявки, сотрудники и продажи по всем городам.`, {
+      await t.send(chatId, `Сделать <b>${escapeHtml(shortPerson(target.employee_name))}</b> владельцем? Владельцу доступны заявки, сотрудники и продажи по всем городам.`, {
         inline_keyboard: [[{ text: "Да", callback_data: `adm:rs:owner:${roleId}` }, { text: "Нет", callback_data: `adm:r:${roleId}` }]],
       });
       return;
@@ -245,7 +246,7 @@ export async function handleAdminCallback(
 
   if (kind === "ask") {
     const r = target;
-    await t.send(chatId, `${ACTION_ASK[action] ?? ACTION_BUTTON[action]}: <b>${escapeHtml(r.employee_name)}</b>?`, {
+    await t.send(chatId, `${ACTION_ASK[action] ?? ACTION_BUTTON[action]}: <b>${escapeHtml(shortPerson(r.employee_name))}</b>?`, {
       inline_keyboard: [[{ text: "Да", callback_data: `adm:do:${action}:${id}` }, { text: "Нет", callback_data: `adm:u:${id}` }]],
     });
     return;
@@ -281,7 +282,7 @@ export async function sendDemoStaffList(t: Transport, chatId: number | string, k
   const rows = kind === "pending" ? DEMO_STAFF.filter((r) => r.status === "pending") : DEMO_STAFF;
   const title = kind === "pending" ? `🕒 <b>Заявки на подтверждение · ${rows.length}</b>` : `👥 <b>Сотрудники · ${rows.length}</b>`;
   await t.send(chatId, `${DEMO_NOTE}\n\n${title}\nНажмите на имя, чтобы открыть карточку.`, {
-    inline_keyboard: rows.map((r) => [{ text: `${STATUS_ICON[r.status]} ${r.name} · ${r.city}`, callback_data: `dm:u:${r.id}` }]),
+    inline_keyboard: rows.map((r) => [{ text: `${STATUS_ICON[r.status]} ${shortPerson(r.name)} · ${r.city}`, callback_data: `dm:u:${r.id}` }]),
   });
 }
 
@@ -296,7 +297,7 @@ export async function handleDemoCallback(data: string, t: Transport, chatId: num
     if (!r) return;
     const acts: CoachAction[] =
       r.status === "pending" ? ["approve", "reject"] : r.status === "approved" ? ["disable", "remove"] : ["enable", "remove"];
-    await t.send(chatId, `${DEMO_NOTE}\n\n<b>${r.name}</b> · ${r.city}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}`, {
+    await t.send(chatId, `${DEMO_NOTE}\n\n<b>${shortPerson(r.name)}</b> · ${r.city}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}`, {
       inline_keyboard: [acts.map((a) => ({ text: ACTION_BUTTON[a], callback_data: `dm:act:${a}` })), [{ text: "← К списку", callback_data: "dm:list" }]],
     });
   } else if (parts[1] === "act") {
@@ -348,7 +349,7 @@ export async function notifyAdminsOfRequest(t: Transport, telegramUserId: number
     ]);
     if (!req) return;
     const r = req as Row & { rejoined: boolean };
-    const text = `🆕 <b>Новая заявка${r.rejoined ? " (возвращается)" : ""}</b>\n${escapeHtml(r.employee_name)} · ${CITY[r.store] ?? r.store}${r.is_admin ? ` · роль: ${roleLabel(r)}` : ""}\nTelegram: ${escapeHtml(tgLabel(r))}\nПроверьте, что это именно этот сотрудник.`;
+    const text = `🆕 <b>Новая заявка${r.rejoined ? " (возвращается)" : ""}</b>\n${escapeHtml(shortPerson(r.employee_name))} · ${CITY[r.store] ?? r.store}${r.is_admin ? ` · роль: ${roleLabel(r)}` : ""}\nTelegram: ${escapeHtml(tgLabel(r))}\nПроверьте, что это именно этот сотрудник.`;
     const markup: ReplyMarkup = {
       inline_keyboard: [[
         { text: "✅ Принять", callback_data: `adm:req:approve:${r.id}` },

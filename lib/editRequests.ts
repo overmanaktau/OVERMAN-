@@ -3,6 +3,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
+import { shortPerson } from "@/lib/personName";
 
 export type Reviewer = { id: string | null; name: string };
 export type Decision = { ok: true; summary: string } | { ok: false; status: number; error: string };
@@ -41,7 +42,7 @@ async function requesterName(userId: string | null): Promise<string> {
 
 // Краткое описание запроса для сообщений: что, где, за какую дату.
 export async function describeRequest(r: EditRequestRow): Promise<string> {
-  const who = await requesterName(r.requested_by);
+  const who = shortPerson(await requesterName(r.requested_by));
   const lines = [
     `Раздел: ${TABLE_LABEL[r.table_name] ?? r.table_name}`,
     `Кто просит: ${escapeHtml(who)}`,
@@ -131,7 +132,7 @@ export async function handleEditRequestCallback(data: string, ownerName: string)
   const id = Number(idRaw);
   if (!Number.isInteger(id) || (action !== "ap" && action !== "dn")) return "Неверная кнопка.";
   const { data: owner } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "owner").limit(1).maybeSingle();
-  const reviewer: Reviewer = { id: (owner?.user_id as string | undefined) ?? null, name: `${ownerName} (Telegram)` };
+  const reviewer: Reviewer = { id: (owner?.user_id as string | undefined) ?? null, name: `${shortPerson(ownerName)} (Telegram)` };
   const res = action === "ap" ? await approveEditRequest(id, reviewer) : await denyEditRequest(id, reviewer);
   if (!res.ok) return `⚠️ Запрос №${id}: ${escapeHtml(res.error)}`;
   return action === "ap"

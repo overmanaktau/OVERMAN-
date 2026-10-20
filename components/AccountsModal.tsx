@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
 import { recordLoginEvent } from "@/lib/loginEvents";
 import { getErrorMessage } from "@/lib/errors";
+import { shortPerson } from "@/lib/personName";
 
 // Accounts the user has manually signed into from this switcher, kept in
 // this browser only (never sent to the server) so they can jump back in
@@ -217,7 +218,7 @@ export default function AccountsModal({ onClose }: { onClose: () => void }) {
                 {initialsOf(currentName, currentEmail)}
               </div>
               <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-[13px] font-semibold text-ink truncate">{currentName || "Без имени"}</span>
+                <span className="text-[13px] font-semibold text-ink truncate">{shortPerson(currentName) || "Без имени"}</span>
                 <span className="text-[11.5px] text-mutedLight truncate">{currentEmail}</span>
               </div>
               <span className="text-[10px] uppercase tracking-wide text-accent font-bold flex-none">Текущий</span>
@@ -234,7 +235,7 @@ export default function AccountsModal({ onClose }: { onClose: () => void }) {
                   disabled={switchingId === a.id}
                   className="flex flex-col min-w-0 flex-1 text-left py-1 disabled:opacity-50"
                 >
-                  <span className="text-[13px] font-semibold text-ink truncate">{a.fullName || "Без имени"}</span>
+                  <span className="text-[13px] font-semibold text-ink truncate">{shortPerson(a.fullName) || "Без имени"}</span>
                   <span className="text-[11.5px] text-mutedLight truncate">
                     {switchingId === a.id ? "Переключаем…" : a.email}
                   </span>

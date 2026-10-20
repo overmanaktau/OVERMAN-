@@ -6,6 +6,7 @@ import { authFetch } from "@/lib/apiClient";
 import PeriodFilterBar, { type PeriodMode } from "@/components/PeriodFilterBar";
 import { useSiteVersion } from "@/components/SiteVersion";
 import { getErrorMessage } from "@/lib/errors";
+import { shortPerson } from "@/lib/personName";
 
 type EditHistoryRow = {
   id: number;
@@ -96,7 +97,7 @@ function EmployeeFilter({
           </button>
           {currentNames.map((name) => (
             <button key={name} type="button" onClick={() => pick(name)} className={itemClass(value === name)}>
-              {name}
+              {shortPerson(name)}
             </button>
           ))}
           {deletedNames.length > 0 && (
@@ -113,7 +114,7 @@ function EmployeeFilter({
               {deletedOpen &&
                 deletedNames.map((name) => (
                   <button key={name} type="button" onClick={() => pick(name)} className={itemClass(value === name) + " pl-5"}>
-                    {name}
+                    {shortPerson(name)}
                   </button>
                 ))}
             </>
@@ -254,7 +255,7 @@ export default function HistoryPage() {
             {visibleRows.map((r) => (
               <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold">{resolveName(r)}</span>
+                  <span className="font-semibold">{shortPerson(resolveName(r))}</span>
                   <span className="text-mutedLight text-[11px]">{formatDateTime(r.created_at)}</span>
                 </div>
                 <div className="text-mutedLight text-[11px] uppercase tracking-wide">{TABLE_LABEL[r.table_name]}</div>
@@ -276,7 +277,7 @@ export default function HistoryPage() {
                 className="min-w-[640px] grid grid-cols-[130px_150px_150px_1fr] gap-3 py-2.5 border-b border-borderSoft items-start text-[13px]"
               >
                 <div className="text-muted">{formatDateTime(r.created_at)}</div>
-                <div className="font-semibold">{resolveName(r)}</div>
+                <div className="font-semibold">{shortPerson(resolveName(r))}</div>
                 <div className="text-muted">{TABLE_LABEL[r.table_name]}</div>
                 <div className="text-muted">{r.summary}</div>
               </div>

@@ -7,6 +7,7 @@ import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
 import PeriodFilterBar, { type PeriodMode } from "@/components/PeriodFilterBar";
 import { getErrorMessage } from "@/lib/errors";
+import { shortPerson, shortenRequester } from "@/lib/personName";
 
 type EditRequest = {
   id: number;
@@ -171,11 +172,11 @@ export default function RequestsPage() {
                     {STATUS_LABEL[r.status]}
                   </span>
                 </div>
-                <div className="text-muted">{r.context ?? "—"}</div>
+                <div className="text-muted">{r.context ? shortenRequester(r.context) : "—"}</div>
                 <div className="text-mutedLight text-[11px]">{formatDateTime(r.created_at)}</div>
                 {r.status !== "pending" && r.reviewed_by_name && (
                   <div className="text-[10.5px] text-mutedLight">
-                    {r.reviewed_by_name}
+                    {shortPerson(r.reviewed_by_name)}
                     {r.reviewed_at ? `, ${formatDateTime(r.reviewed_at)}` : ""}
                   </div>
                 )}
@@ -224,7 +225,7 @@ export default function RequestsPage() {
               >
                 <div className="text-muted">{formatDateTime(r.created_at)}</div>
                 <div>{TABLE_LABEL[r.table_name]}</div>
-                <div className="text-muted min-w-0">{r.context ?? "—"}</div>
+                <div className="text-muted min-w-0">{r.context ? shortenRequester(r.context) : "—"}</div>
                 <div>
                   <span
                     className={`text-[11px] font-semibold uppercase tracking-wide rounded-full px-2.5 py-1 ${
@@ -239,7 +240,7 @@ export default function RequestsPage() {
                   </span>
                   {r.status !== "pending" && r.reviewed_by_name && (
                     <div className="text-[10.5px] text-mutedLight mt-1">
-                      {r.reviewed_by_name}
+                      {shortPerson(r.reviewed_by_name)}
                       {r.reviewed_at ? `, ${formatDateTime(r.reviewed_at)}` : ""}
                     </div>
                   )}

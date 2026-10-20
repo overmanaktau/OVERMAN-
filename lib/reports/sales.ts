@@ -13,6 +13,7 @@ import { aggregateSales } from "@/lib/salesAggregate";
 import { REGISTER_STORE, SAYA_PARK_REGISTER_ID, SAYA_PARK_RETIRED_FROM } from "@/lib/registers";
 import { fetchTrafficUntilHour } from "@/lib/trafficCounters";
 import { certificateSummary, type CertSummary } from "@/lib/reports/certificates";
+import { shortPerson } from "@/lib/personName";
 
 // compact: укороченный формат — без валового, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. У Актау и Актобе
@@ -37,9 +38,7 @@ export function num(n: number): string {
 // Имя сотрудника в отчётах: фамилия сокращается до первой буквы («Абилов Акылбек админ 04» → «А.Акылбек админ 04»).
 // Имя из одного слова остаётся как есть.
 export function shortName(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return name.trim();
-  return `${parts[0][0].toUpperCase()}.${parts.slice(1).join(" ")}`;
+  return shortPerson(name);
 }
 
 // Числа трафика в отчётах: два знака и запятая («94,05»).

@@ -13,6 +13,7 @@ import { REGISTER_STORE } from "@/lib/registers";
 import { money } from "@/lib/reports/sales";
 import { addDays, mondayOf, monthStartOf, todayInAlmaty } from "@/lib/coach/metrics";
 import { menuFor, type ReplyMarkup, type Transport } from "@/lib/coach/bot";
+import { shortPerson } from "@/lib/personName";
 
 export type CertUser = {
   id: number;
@@ -247,7 +248,7 @@ async function startSell(t: Transport, user: CertUser) {
   }
   await saveDraft(user.id, "seller", {}, false);
   await t.send(user.telegram_chat_id, "💳 <b>Продажа сертификата</b>\nКто продаёт сертификат?", {
-    inline_keyboard: [...sellers.slice(0, 60).map((s) => [{ text: s.name, callback_data: `cs:se:${s.id}` }]), CANCEL_ROW],
+    inline_keyboard: [...sellers.slice(0, 60).map((s) => [{ text: shortPerson(s.name), callback_data: `cs:se:${s.id}` }]), CANCEL_ROW],
   });
 }
 
@@ -739,7 +740,7 @@ async function cancelOwnRequest(t: Transport, user: CertUser, certId: number) {
   }
   await logEvent(certId, user.employee_name, "use_cancelled", "запрос отменён консультантом");
   await t.send(chat, `Запрос по сертификату №<b>${escapeHtml(data[0].number)}</b> отменён. Сертификат остался неиспользованным.`, menuFor(user));
-  for (const owner of await ownerChats()) await t.send(owner, `Консультант ${escapeHtml(user.employee_name)} отменил запрос по сертификату №<b>${escapeHtml(data[0].number)}</b>. Решать ничего не нужно.`);
+  for (const owner of await ownerChats()) await t.send(owner, `Консультант ${escapeHtml(shortPerson(user.employee_name))} отменил запрос по сертификату №<b>${escapeHtml(data[0].number)}</b>. Решать ничего не нужно.`);
 }
 
 // ───────── возврат ─────────
@@ -797,7 +798,7 @@ export async function handleCertCallback(data: string, t: Transport, user: CertU
     const seller = sellers.find((s) => s.id === a);
     if (!seller) return void (await t.send(chat, "Не нашёл этого сотрудника. Начните заново.", menuFor(user)));
     await saveDraft(user.id, "amount", { seller_id: seller.id, seller_name: seller.name }, true);
-    await t.send(chat, `Продаёт: <b>${escapeHtml(seller.name)}</b>.\nНа какую сумму сертификат? (тенге)`, cancelMarkup);
+    await t.send(chat, `Продаёт: <b>${escapeHtml(shortPerson(seller.name))}</b>.\nНа какую сумму сертификат? (тенге)`, cancelMarkup);
     return;
   }
   if (action === "pm") {
