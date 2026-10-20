@@ -1,4 +1,4 @@
-// Тексты сообщений клиентам о бонусах (бот @bonus_overman_bot). Только по-русски. Правила: бонус начисляется с покупки и становится доступным через 14 дней,
+// Тексты сообщений клиентам о бонусах (бот @bonus_overman_bot). Только по-казахски (решение владельца 20.10.2026). Правила: бонус начисляется с покупки и становится доступным через 14 дней,
 // хранится 4 месяца; клиент получает сообщение после каждой покупки, в день активации, за 14 дней до сгорания и в день сгорания.
 const fmt = (n: number) => Math.round(n).toLocaleString("ru-RU");
 
@@ -6,24 +6,24 @@ export type PurchaseInfo = { earned: number; activatesOn: string; spent?: number
 
 // После покупки: сколько начислено и когда станет доступно; если клиент потратил бонусы — сколько списано.
 export function purchaseMessage(p: PurchaseInfo): string {
-  const lines = ["🛍 <b>Спасибо за покупку в Overman!</b>", ""];
-  if (p.spent && p.spent > 0) lines.push(`Списано бонусов: <b>${fmt(p.spent)}</b>`);
-  if (p.earned > 0) lines.push(`Начислено бонусов: <b>${fmt(p.earned)}</b> — станут доступны ${p.activatesOn}`);
-  lines.push("", `Доступно сейчас: <b>${fmt(p.available)}</b>`, `Ожидает активации: <b>${fmt(p.pending)}</b>`);
+  const lines = ["🛍 <b>Overman-нан сатып алғаныңыз үшін рахмет!</b>", ""];
+  if (p.spent && p.spent > 0) lines.push(`Жұмсалған бонус: <b>${fmt(p.spent)}</b>`);
+  if (p.earned > 0) lines.push(`Есептелген бонус: <b>${fmt(p.earned)}</b> — ${p.activatesOn} күні қолжетімді болады`);
+  lines.push("", `Қазір қолжетімді: <b>${fmt(p.available)}</b>`, `Белсендіруді күтуде: <b>${fmt(p.pending)}</b>`);
   return lines.join("\n");
 }
 
 // В день, когда бонусы за покупку стали доступными.
-export function activatedMessage(amount: number, available: number): string {
-  return `✅ <b>Бонусы активированы</b>\n\nСтали доступны: <b>${fmt(amount)}</b>\nДоступно сейчас: <b>${fmt(available)}</b>`;
+export function activatedMessage(available: number): string {
+  return `✅ <b>Бонустар белсендірілді</b>\n\nҚазір қолжетімді: <b>${fmt(available)}</b>`;
 }
 
 // За 14 дней до сгорания.
 export function expiringSoonMessage(amount: number, burnsOn: string): string {
-  return `⏳ <b>Скоро сгорят бонусы</b>\n\n<b>${fmt(amount)}</b> бонусов сгорят ${burnsOn} (бонусы хранятся 4 месяца).\nУспейте потратить их в Overman.`;
+  return `⏳ <b>Бонустар жақында жойылады</b>\n\n<b>${fmt(amount)}</b> бонус ${burnsOn} күні жойылады (бонустар 4 ай сақталады).\nОларды Overman-да жұмсап үлгеріңіз.`;
 }
 
 // В день сгорания.
 export function expiredMessage(amount: number, available: number): string {
-  return `🔥 <b>Бонусы сгорели</b>\n\nСгорело: <b>${fmt(amount)}</b> (срок хранения — 4 месяца)\nДоступно сейчас: <b>${fmt(available)}</b>`;
+  return `🔥 <b>Бонустар жойылды</b>\n\nЖойылды: <b>${fmt(amount)}</b> (сақтау мерзімі — 4 ай)\nҚазір қолжетімді: <b>${fmt(available)}</b>`;
 }

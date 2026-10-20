@@ -84,7 +84,7 @@ export async function runDailyClientMessages(): Promise<{ clients: number; sent:
     const activated = sum((l) => l.activatesOn === today);
     const soon = sum((l) => l.expiresOn === plusDays(today, 14));
     const burned = sum((l) => l.expiresOn === today);
-    if (activated > 0 && (await sendOnce(id, subs, "activated", today, activatedMessage(activated, b.available)))) sent++;
+    if (activated > 0 && (await sendOnce(id, subs, "activated", today, activatedMessage(b.available)))) sent++;
     if (soon > 0 && (await sendOnce(id, subs, "expiring", plusDays(today, 14), expiringSoonMessage(soon, ru(plusDays(today, 14)))))) sent++;
     if (burned > 0 && (await sendOnce(id, subs, "expired", today, expiredMessage(burned, b.available)))) sent++;
   }

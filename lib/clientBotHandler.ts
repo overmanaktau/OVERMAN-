@@ -15,12 +15,12 @@ export type ClientTgUpdate = {
   my_chat_member?: { chat: { id: number; type: string }; from: { id: number }; new_chat_member: { status: string } };
 };
 
-const SHARE_MARKUP = { keyboard: [[{ text: "📱 Поделиться номером", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
+const SHARE_MARKUP = { keyboard: [[{ text: "📱 Нөмірді бөлісу", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
 const NO_KEYBOARD = { remove_keyboard: true };
 
 const WELCOME =
-  "Здравствуйте! Это бот <b>OVERMAN</b>.\n\n" +
-  "Нажмите кнопку «Поделиться номером» внизу — так мы узнаем вас и сможем сообщать о ваших бонусах.";
+  "Сәлеметсіз бе! Бұл <b>OVERMAN</b> боты.\n\n" +
+  "Төмендегі «Нөмірді бөлісу» түймесін басыңыз — сонда біз сізді танып, бонустарыңыз туралы хабарлап тұра аламыз.";
 
 function normalizePhone(raw: string): { phone: string; digits: string } | null {
   let d = raw.replace(/\D/g, "");
@@ -68,12 +68,12 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
   if (msg.contact) {
     // принимаем только собственный номер клиента, не чужой контакт
     if (msg.contact.user_id !== userId) {
-      await t.send(chatId, "Нужно поделиться именно своим номером — нажмите кнопку «Поделиться номером» внизу.", SHARE_MARKUP);
+      await t.send(chatId, "Тек өз нөміріңізбен бөлісу керек — төмендегі «Нөмірді бөлісу» түймесін басыңыз.", SHARE_MARKUP);
       return;
     }
     const p = normalizePhone(msg.contact.phone_number);
     if (!p) {
-      await t.send(chatId, "Не удалось распознать номер. Нажмите кнопку «Поделиться номером» ещё раз.", SHARE_MARKUP);
+      await t.send(chatId, "Нөмір танылмады. «Нөмірді бөлісу» түймесін қайта басыңыз.", SHARE_MARKUP);
       return;
     }
     const client = await findClient(p.digits);
@@ -100,7 +100,7 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
     const hello = client?.name ? `, ${escapeHtml(client.name)}` : "";
     await t.send(
       chatId,
-      `Спасибо${hello}! Теперь мы сможем сообщать вам о ваших бонусах OVERMAN.\n\nОтписаться: /stop`,
+      `Рахмет${hello}! Енді OVERMAN бонустарыңыз туралы хабарлап тұрамыз.\n\nЖазылымнан бас тарту: /stop`,
       NO_KEYBOARD
     );
     return;
@@ -111,7 +111,7 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
     const { data, error } = await supabaseAdmin.from("client_bot_subscribers").select("status, phone").eq("telegram_user_id", userId).maybeSingle();
     if (error) throw error;
     if (data?.status === "active") {
-      await t.send(chatId, "Вы уже подписаны. Отписаться: /stop", NO_KEYBOARD);
+      await t.send(chatId, "Сіз бұрыннан жазылғансыз. Жазылымнан бас тарту: /stop", NO_KEYBOARD);
       return;
     }
     await t.send(chatId, WELCOME, SHARE_MARKUP);
@@ -123,7 +123,7 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
       .update({ status: "stopped", stopped_at: now, updated_at: now })
       .eq("telegram_user_id", userId);
     if (error) throw error;
-    await t.send(chatId, "Вы отписались, сообщений больше не будет. Вернуться: /start", NO_KEYBOARD);
+    await t.send(chatId, "Сіз жазылымнан бас тарттыңыз, енді хабарлама келмейді. Қайта жазылу: /start", NO_KEYBOARD);
   }
   // всё остальное — молчим: у бота для клиентов нет меню и кнопок
 }
