@@ -53,6 +53,7 @@ function rowsTitle(firstHeader: string | undefined): string {
   const word = (firstHeader ?? "").split(/\s*[/(]/)[0].trim();
   if (!word || /\s/.test(word)) return word ? word : "Строки";
   if (word.toLowerCase() === "город") return "Города";
+  if (word.toLowerCase() === "показатель") return "Строки"; // «Показатели» уже занято кнопкой колонок
   const stem = word.slice(0, -1);
   const last = word.slice(-1).toLowerCase();
   const soft = (c: string) => "гкхжчшщ".includes(c);
