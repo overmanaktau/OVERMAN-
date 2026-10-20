@@ -24,6 +24,7 @@ export type PdfSection = {
   fontSize?: number; // размер текста таблицы (по умолчанию 8.4) — для широких таблиц
   grid?: boolean; // контуры: линии между всеми ячейками, группы колонок отделены жирнее
   signColors?: boolean; // ячейки, начинающиеся с «+» / «−», красятся зелёным / красным (разница к прошлому периоду)
+  softRed?: boolean[][]; // по строкам и колонкам: ячейки, выделяемые лёгким красным (например, валовый % ниже 50)
   indent?: number[]; // отступ первой колонки (уровень вложенности) по строкам
   // — для окна «Что скачать» (PdfButton): —
   optional?: boolean; // по умолчанию не отмечена (например, краткая сводка рядом с подробной)
@@ -298,6 +299,10 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
             data.cell.styles.textColor = C.red;
             data.cell.styles.fillColor = C.redBg;
           }
+        }
+        if (section.softRed?.[data.row.index]?.[data.column.index]) {
+          data.cell.styles.textColor = C.red;
+          data.cell.styles.fillColor = C.redBg;
         }
         const indent = section.indent?.[data.row.index] ?? 0;
         if (data.column.index === 0 && indent > 0) {

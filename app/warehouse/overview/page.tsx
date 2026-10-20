@@ -33,6 +33,9 @@ function money(n: number) {
 function pctText(v: number | null, digits = 1) {
   return v === null ? "—" : `${v.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
 }
+// Валовый % ниже 50 — лёгкое красное выделение (на экране и в PDF)
+const lowMargin = (v: number | null) => v !== null && v < 50;
+const LOW_MARGIN_CLS = "rounded px-1.5 py-0.5 bg-[#F6DAD2] text-[#A34B36]";
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -279,7 +282,7 @@ function Block({
                   <div className="num text-right">{money(r.revenue)}{cmp(r.revenue, pr?.revenue)}</div>
                   <div className="num text-right">{money(r.cogs)}{cmp(r.cogs, pr?.cogs)}</div>
                   <div className={`num text-right font-semibold ${m.profit < 0 ? "text-[#A34B36]" : ""}`}>{money(m.profit)}{cmp(m.profit, pm?.profit)}</div>
-                  <div className="num text-right text-muted">{pctText(m.margin)}{cmp(m.margin, pm?.margin)}</div>
+                  <div className="num text-right text-muted"><span className={lowMargin(m.margin) ? LOW_MARGIN_CLS : ""}>{pctText(m.margin)}</span>{cmp(m.margin, pm?.margin)}</div>
                   <div className="num text-right">{pctText(m.turnover)}{cmp(m.turnover, pm?.turnover)}</div>
                 </div>
               );
@@ -291,7 +294,7 @@ function Block({
               <div className="num text-right">{money(sum.revenue)}{prevSum && <Delta v={deltaPct(sum.revenue, prevSum.revenue)} />}</div>
               <div className="num text-right">{money(sum.cogs)}{prevSum && <Delta v={deltaPct(sum.cogs, prevSum.cogs)} />}</div>
               <div className="num text-right">{money(sumM.profit)}{prevSumM && <Delta v={deltaPct(sumM.profit, prevSumM.profit)} />}</div>
-              <div className="num text-right text-muted">{pctText(sumM.margin)}{prevSumM && <Delta v={deltaPct(sumM.margin, prevSumM.margin)} />}</div>
+              <div className="num text-right text-muted"><span className={lowMargin(sumM.margin) ? LOW_MARGIN_CLS : ""}>{pctText(sumM.margin)}</span>{prevSumM && <Delta v={deltaPct(sumM.margin, prevSumM.margin)} />}</div>
               <div className="num text-right">{pctText(sumM.turnover)}{prevSumM && <Delta v={deltaPct(sumM.turnover, prevSumM.turnover)} />}</div>
             </div>
           </div>
@@ -662,6 +665,7 @@ ${deltaText(deltaPct(c, o))}`;
                   headers: [b.nameHeader, "Остаток", "Продано", "Себестоимость", "Валовая прибыль", "Валовый %", "Оборачиваемость"],
                   rows: body,
                   rowKinds: body.map((_, i) => (i === body.length - 1 ? ("total" as const) : ("normal" as const))),
+                  softRed: [...sorted, total(b.rows)].map((r) => [false, false, false, false, false, lowMargin(metrics(r).margin), false]),
                   widths: [2.4, 1.6, 1.6, 1.6, 1.6, 0.9, 1.3],
                 };
               }), ...comparisonSections(cmpData)],
