@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml, packSections } from "@/lib/telegram";
 import { ENTITY_RU } from "@/lib/verify/msChanges";
 import { fetchEmployeeLogins } from "@/lib/moyskladAudit";
-import { shortPerson } from "@/lib/personName";
+import { shortPerson, shortenRequester } from "@/lib/personName";
 
 const NL = "\n";
 const money = (n: number) => `${Math.round(n).toLocaleString("ru-RU")} ₸`;
@@ -81,7 +81,7 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
     if (error) throw error;
     return (data ?? []) as { summary: string; changed_by_name: string; created_at: string }[];
   }, []);
-  parts.push(section("✏️ Портал — правки данных", hist.map((r) => `• ${hm(r.created_at)} ${escapeHtml(r.summary)} — ${escapeHtml(r.changed_by_name)}`), hist.length));
+  parts.push(section("✏️ Портал — правки данных", hist.map((r) => `• ${hm(r.created_at)} ${escapeHtml(r.summary)} — ${escapeHtml(shortPerson(r.changed_by_name))}`), hist.length));
 
   const plans = await safe("Планы", errors, async () => {
     const { data, error } = await supabaseAdmin.from("sales_plan_monthly").select("employee_name, plan_month, sales_plan, created_at").gte("created_at", sinceIso).lt("created_at", untilIso).limit(100);
@@ -97,7 +97,7 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
     return (data ?? []) as { id: number; table_name: string; status: string; context: string | null; created_at: string; reviewed_at: string | null; reviewed_by_name: string | null }[];
   }, []);
   const REQ_STATUS: Record<string, string> = { pending: "ждёт решения", approved: "одобрен", rejected: "отклонён", denied: "отклонён" };
-  parts.push(section("📝 Запросы на правку", reqs.map((r) => `• №${r.id}: ${REQ_STATUS[r.status] ?? escapeHtml(r.status)}${r.reviewed_by_name ? ` (${escapeHtml(shortPerson(r.reviewed_by_name))})` : ""}${r.context ? ` — ${escapeHtml(r.context.replace(/\s+/g, " ").slice(0, 70))}` : ""}`), reqs.length));
+  parts.push(section("📝 Запросы на правку", reqs.map((r) => `• №${r.id}: ${REQ_STATUS[r.status] ?? escapeHtml(r.status)}${r.reviewed_by_name ? ` (${escapeHtml(shortPerson(r.reviewed_by_name))})` : ""}${r.context ? ` — ${escapeHtml(shortenRequester(r.context.replace(/\s+/g, " ")).slice(0, 130))}` : ""}`), reqs.length));
 
   // 4. Сертификаты
   const certEv = await safe("Сертификаты", errors, async () => {
@@ -128,9 +128,9 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
   const people = await safe("Заявки сотрудников", errors, async () => {
     const out: string[] = [];
     const { data: coach } = await supabaseAdmin.from("coach_users").select("employee_name, status, requested_at, decided_at, decided_by").or(`and(requested_at.gte.${sinceIso},requested_at.lt.${untilIso}),and(decided_at.gte.${sinceIso},decided_at.lt.${untilIso})`).limit(50);
-    for (const c of (coach ?? []) as { employee_name: string; status: string; decided_by: string | null }[]) out.push(`• бот-помощник: ${escapeHtml(shortPerson(c.employee_name))} — ${c.status === "pending" ? "новая заявка" : c.status === "approved" ? "подтверждён" : escapeHtml(c.status)}${c.decided_by ? ` (${escapeHtml(c.decided_by)})` : ""}`);
+    for (const c of (coach ?? []) as { employee_name: string; status: string; decided_by: string | null }[]) out.push(`• бот-помощник: ${escapeHtml(shortPerson(c.employee_name))} — ${c.status === "pending" ? "новая заявка" : c.status === "approved" ? "подтверждён" : escapeHtml(c.status)}${c.decided_by ? ` (${escapeHtml(shortPerson(c.decided_by.replace(/^бот:\s*/, "")))})` : ""}`);
     const { data: smm } = await supabaseAdmin.from("smm_users").select("name, role, status, requested_at, decided_at, decided_by").or(`and(requested_at.gte.${sinceIso},requested_at.lt.${untilIso}),and(decided_at.gte.${sinceIso},decided_at.lt.${untilIso})`).limit(50);
-    for (const c of (smm ?? []) as { name: string; role: string; status: string; decided_by: string | null }[]) out.push(`• бот СММ: ${escapeHtml(shortPerson(c.name))} (${escapeHtml(c.role)}) — ${c.status === "pending" ? "новая заявка" : c.status === "approved" ? "подтверждён" : escapeHtml(c.status)}${c.decided_by ? ` (${escapeHtml(c.decided_by)})` : ""}`);
+    for (const c of (smm ?? []) as { name: string; role: string; status: string; decided_by: string | null }[]) out.push(`• бот СММ: ${escapeHtml(shortPerson(c.name))} (${escapeHtml(c.role)}) — ${c.status === "pending" ? "новая заявка" : c.status === "approved" ? "подтверждён" : escapeHtml(c.status)}${c.decided_by ? ` (${escapeHtml(shortPerson(c.decided_by.replace(/^бот:\s*/, "")))})` : ""}`);
     const list = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
     for (const u of list.data?.users ?? []) if (u.created_at >= sinceIso && u.created_at < untilIso) out.push(`• новый вход на сайт: ${escapeHtml(u.email ?? "без почты")}`);
     const { data: roles } = await supabaseAdmin.from("roles").select("name, is_personal, created_at").gte("created_at", sinceIso).lt("created_at", untilIso).eq("is_personal", false);
