@@ -100,7 +100,7 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
     const hello = client?.name ? `, ${escapeHtml(client.name)}` : "";
     await t.send(
       chatId,
-      `Рахмет${hello}! Енді OVERMAN бонустарыңыз туралы хабарлап тұрамыз.\n\nЖазылымнан бас тарту: /stop`,
+      `Рахмет${hello}! Енді OVERMAN бонустарыңыз туралы хабарлап тұрамыз.`,
       NO_KEYBOARD
     );
     return;
@@ -111,7 +111,7 @@ export async function handleClientUpdate(update: ClientTgUpdate, t: ClientTransp
     const { data, error } = await supabaseAdmin.from("client_bot_subscribers").select("status, phone").eq("telegram_user_id", userId).maybeSingle();
     if (error) throw error;
     if (data?.status === "active") {
-      await t.send(chatId, "Сіз бұрыннан жазылғансыз. Жазылымнан бас тарту: /stop", NO_KEYBOARD);
+      await t.send(chatId, "Сіз бұрыннан жазылғансыз.", NO_KEYBOARD);
       return;
     }
     await t.send(chatId, WELCOME, SHARE_MARKUP);
