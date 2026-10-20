@@ -15,8 +15,6 @@ type Code = "t" | "m" | "w" | "r"; // сегодня, завтра, неделя
 type Kind = "o" | "l"; // общий, личный
 const CODE_LABEL: Record<Code, string> = { t: "на сегодня", m: "на завтра", w: "на эту неделю", r: "до конца недели (с сегодняшним днём)" };
 
-export const PLAN_BUTTON = "План";
-
 export const PLAN_ASK_TEXT = "Нужен ли вам план продаж на сегодня?";
 export const PLAN_ASK_MARKUP: ReplyMarkup = {
   inline_keyboard: [[{ text: "✅ Да, показать", callback_data: "pl:p:t" }, { text: "Нет, спасибо", callback_data: "pl:n" }]],

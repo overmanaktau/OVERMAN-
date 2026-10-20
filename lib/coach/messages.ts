@@ -14,19 +14,11 @@ import {
   shortDate,
 } from "@/lib/coach/metrics";
 
-const MONTHS = [
-  "январь", "февраль", "март", "апрель", "май", "июнь",
-  "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
-];
-
 function line(label: string, value: string): string {
   return `${label.padEnd(20)}${value.padStart(12)}`;
 }
 function pct(n: number): string {
   return `${n.toFixed(2)}%`;
-}
-function monthTitle(date: string): string {
-  return `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
 }
 
 export const NO_PLAN_TEXT =
@@ -104,32 +96,6 @@ export const HELP_TEXT = [
 export const AUTO_ONLY_TEXT =
   "Бот сам присылает сообщения: утром после вашей смены и по понедельникам — план на неделю и итоги прошлой. Если нужна помощь, нажмите «Помощь».";
 
-export function myPlanMessage(emp: EmployeeRef, s: MonthStatus): string {
-  const head = `📌 <b>Мой план — ${monthTitle(s.today)}</b>\n${escapeHtml(emp.name)}`;
-  if (s.plan === null) return `${head}\n${pre(line("Факт (по вчера)", money(s.fact)))}\n${NO_PLAN_TEXT}`;
-  const rows = [
-    line("План на месяц", money(s.plan)),
-    line("Факт (по вчера)", money(s.fact)),
-    line("Выполнение", s.pct !== null ? pct(s.pct) : "—"),
-    line("Осталось закрыть", money(s.deficit)),
-    line("Смен впереди (≈)", num(s.remainingShifts)),
-    line("Нужно в ср. за смену", s.needPerShift !== null ? money(s.needPerShift) : "—"),
-  ];
-  let text = `${head}\n${pre(rows.join("\n"))}`;
-  if (s.deficit <= 0) text += "\n✅ План месяца уже закрыт — отличная работа!";
-  if (s.period) {
-    const p = s.period;
-    text += `\n\n<b>Текущий период ${shortDate(p.from)}–${shortDate(p.to)}</b> (${p.percent}% плана)\n${pre(
-      [
-        line("План периода", money(p.plan)),
-        line("Факт периода", money(p.fact)),
-        line("Нужно в ср. за смену", p.needPerShift !== null ? money(p.needPerShift) : "—"),
-      ].join("\n")
-    )}`;
-  }
-  return text;
-}
-
 const LAGGING_LABEL: Record<NonNullable<Advice["lagging"]>, string> = {
   receipts: "количество чеков в среднем за смену",
   avgCheck: "средний чек",
@@ -141,33 +107,6 @@ const LAGGING_TIP: Record<NonNullable<Advice["lagging"]>, string> = {
   avgCheck: "Предлагайте более дорогие модели и комплекты, показывайте топовые позиции.",
   depth: "К каждому товару предлагайте второй: рубашка + брюки, куртка + аксессуар, второй цвет.",
 };
-
-export function adviceMessage(emp: EmployeeRef, s: MonthStatus, a: Advice): string {
-  const head = `💡 <b>Что повысить</b>\n${escapeHtml(emp.name)}`;
-  if (a.noPlan) return `${head}\n\n${NO_PLAN_TEXT}`;
-  if (a.closed) return `${head}\n\n✅ План месяца уже закрыт. Держите темп — всё, что сверх плана, идёт в запас.`;
-  if (a.noHistory || a.factor === null || !s.perShift) {
-    return `${head}\n\nПока мало данных по вашим сменам за последние 4 недели — рекомендации появятся после нескольких смен.`;
-  }
-  const rows = a.rows.map((r) => `${r.label}\n  в среднем за смену ${r.now}${r.recent ? `\n  за последние 7 дней ${r.recent}` : ""}`);
-  const lines: string[] = [
-    head,
-    "",
-    scenariosText(s.perShift, a.needPerShift ?? 0),
-    "",
-    "<b>Ваши показатели сейчас:</b>",
-    pre(rows.join("\n")),
-  ];
-  if (a.lagging) {
-    lines.push(
-      a.laggingRatio !== null && a.laggingRatio < 1
-        ? `Сильнее всего просел относительно вашего же среднего: <b>${LAGGING_LABEL[a.lagging]}</b>.`
-        : `Медленнее всего растёт относительно вашего же среднего: <b>${LAGGING_LABEL[a.lagging]}</b>.`
-    );
-    lines.push(LAGGING_TIP[a.lagging]);
-  }
-  return lines.join("\n");
-}
 
 // Три способа закрыть план (или цель недели): тот же результат можно получить
 // большим количеством чеков по привычному среднему чеку, меньшим количеством чеков
@@ -255,10 +194,6 @@ export function weekMessage(emp: EmployeeRef, w: WeekSummary, forMonday = false,
   }
   if (forMonday) text += `\n\n${last}`;
   return text;
-}
-
-export function lastWeekMessage(emp: EmployeeRef, w: WeekSummary, conv?: string | null): string {
-  return `📊 <b>Итоги прошлой недели</b>\n${escapeHtml(emp.name)}\n\n${weekLines(w, conv).last}`;
 }
 
 export function dailyMessage(emp: EmployeeRef, date: string, day: DayRow, s: MonthStatus, a: Advice, conv?: string | null, dayPlan?: number | null): string {

@@ -777,7 +777,7 @@ export default function EmployeesPage() {
   // it, instead of only knowing about employee-row and city-name edits.
   const dirtyRegistry = useRef<Map<string, boolean>>(new Map());
   const saveRegistry = useRef<Map<string, () => Promise<void>>>(new Map());
-  const [registryTick, setRegistryTick] = useState(0);
+  const [, setRegistryTick] = useState(0);
 
   function registerDirty(key: string, isDirty: boolean, save: () => Promise<void>) {
     saveRegistry.current.set(key, save);

@@ -175,10 +175,6 @@ export type LtvCheck = {
   moment: string;
 };
 
-export async function fetchLtvChecksForDate(date: string): Promise<LtvCheck[]> {
-  return fetchLtvChecksForRange(date, date);
-}
-
 // То же за несколько дней подряд (недельный и месячный отчёты).
 export async function fetchLtvChecksForRange(fromDate: string, toDate: string): Promise<LtvCheck[]> {
   const from = dayWindow(fromDate).from;
@@ -231,10 +227,6 @@ export async function fetchLtvChecksForRange(fromDate: string, toDate: string): 
 // и сколько из неё наличными (cashSum) — всё остальное (карта, QR) безнал.
 // Лёгкая выгрузка без expand и позиций, как у fetchRetailDemandSummariesForDate.
 export type PaymentSummary = { kind: "sale" | "return"; retailStoreId: string; sum: number; cash: number };
-
-export async function fetchPaymentSummariesForDate(date: string): Promise<PaymentSummary[]> {
-  return fetchPaymentSummariesForRange(date, date);
-}
 
 // То же за несколько дней подряд (недельный и месячный отчёты): окно от начала
 // первого дня до 02:00 после последнего, как у dayWindow.
@@ -339,25 +331,6 @@ export async function fetchDemandInfo(demandHref: string): Promise<{ items: numb
   const demand = await res.json();
   const rows: { quantity?: number }[] = demand.positions?.rows ?? [];
   return { items: rows.reduce((acc, p) => acc + (p.quantity ?? 0), 0), moment: demand.moment ?? "" };
-}
-
-// A return doesn't carry its original check's total item count — only what
-// was returned. Need one extra lookup per return (there are only ever a
-// handful per day) to tell "the whole check was a single item" from "this
-// was one item out of several".
-export async function fetchDemandItemCount(demandHref: string): Promise<number> {
-  const url = new URL(demandHref);
-  url.searchParams.set("expand", "positions");
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${getToken()}`, Accept: "application/json;charset=utf-8" },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`МойСклад API ${res.status}: ${body.slice(0, 500)}`);
-  }
-  const demand = await res.json();
-  const rows: { quantity?: number }[] = demand.positions?.rows ?? [];
-  return rows.reduce((acc, p) => acc + (p.quantity ?? 0), 0);
 }
 
 // Full product catalog (name + category/productFolder + cost) — used to
@@ -583,38 +556,6 @@ export type StoreStockRow = {
   warehouseId: string;
   stock: number;
 };
-
-export async function fetchStockByStore(moment?: string): Promise<StoreStockRow[]> {
-  const limit = 1000; // safe at max page size — no expand param here either
-  let offset = 0;
-  const all: StoreStockRow[] = [];
-  for (;;) {
-    const page = await moyskladFetch("/report/stock/bystore", {
-      limit: String(limit),
-      offset: String(offset),
-      ...(moment ? { filter: `moment=${moment}` } : {}),
-    });
-    type Raw = {
-      meta?: { href?: string };
-      stockByStore?: { meta?: { href?: string }; stock?: number }[];
-    };
-    const rows: Raw[] = page.rows ?? [];
-    for (const r of rows) {
-      const href = r.meta?.href ?? "";
-      const productId = href.split("/").pop()?.split("?")[0] ?? "";
-      if (!productId) continue;
-      for (const w of r.stockByStore ?? []) {
-        const whHref = w.meta?.href ?? "";
-        const warehouseId = whHref.split("/").pop()?.split("?")[0] ?? "";
-        if (!warehouseId || !w.stock) continue; // 0/undefined stock at that склад — nothing to track
-        all.push({ productMsId: productId, warehouseId, stock: w.stock });
-      }
-    }
-    if (rows.length < limit) break;
-    offset += limit;
-  }
-  return all;
-}
 
 // Per-product revenue/cost/quantity for one business day, straight from
 // МойСклад's own profit report — it already nets sales against returns and

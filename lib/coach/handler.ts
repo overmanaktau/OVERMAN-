@@ -427,12 +427,11 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
   }
 
   if (cb.data.startsWith("be:")) {
-    // Сгорание бонусов (разрешить / отклонить / список) — только главный владелец.
+    // Сгорание бонусов («Повторить сейчас» после сбоя) — только главный владелец.
     if (!existing || existing.status !== "approved" || !existing.is_protected) return;
-    const action = cb.data.split(":")[1];
-    if (action !== "list") await clearCurrent();
+    await clearCurrent();
     const r = await handleExpiryCallback(cb.data, existing.employee_name);
-    await t.send(chatId, r.text, r.markup);
+    await t.send(chatId, r.text);
     return;
   }
 

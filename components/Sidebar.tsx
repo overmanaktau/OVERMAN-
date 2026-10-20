@@ -6,7 +6,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { useUnsavedChanges } from "@/components/UnsavedChangesContext";
-import { useSiteVersion } from "@/components/SiteVersion";
 import AccountMenu from "@/components/AccountMenu";
 import NotificationsBell from "@/components/NotificationsBell";
 import { supabase } from "@/lib/supabaseClient";
@@ -158,7 +157,6 @@ export default function Sidebar() {
   const canSeeRequests = isAdmin || permissions["requests"].canView || permissions["requests"].canEdit;
   const canSeeSales = isAdmin || permissions["marketing.statistics"].canView;
   const canSeeOverview = isAdmin || permissions["marketing.statistics"].canView;
-  const { mobileLayout } = useSiteVersion();
 
   // RLS on edit_requests already scopes this to "my own requests" or "every
   // pending request" depending on whether the viewer has requests.view/edit —

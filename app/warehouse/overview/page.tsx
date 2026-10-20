@@ -9,7 +9,7 @@ import { WAREHOUSES, FILTER_WAREHOUSES, warehousesForCities } from "@/lib/wareho
 import { useStockedWarehouses } from "@/lib/useStockedWarehouses";
 import PdfButton from "@/components/PdfButton";
 import SortHead, { type SortState } from "@/components/SortHead";
-import type { PdfDoc, PdfRowKind, PdfSection } from "@/lib/downloadPdf";
+import type { PdfDoc, PdfSection } from "@/lib/downloadPdf";
 
 // Склад → «Обзор»: за выбранный период и склады — остаток (по факту на последний день периода, как в МойСклад),
 // сколько продано, себестоимость, валовая прибыль и оборачиваемость (себестоимость продаж ÷ средний остаток) —

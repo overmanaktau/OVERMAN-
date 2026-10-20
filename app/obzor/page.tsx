@@ -286,7 +286,6 @@ export default function ObzorPage() {
   const turnoverCogsTotal = turnoverByBucket.reduce((acc, r) => acc + r.cogs, 0);
   const turnoverPct = turnoverStockValueTotal > 0 ? (turnoverCogsTotal / turnoverStockValueTotal) * 100 : null;
   const turnoverRevenueTotal = turnoverByBucket.reduce((acc, r) => acc + r.revenue, 0);
-  const turnoverStockSaleValueTotal = turnoverByBucket.reduce((acc, r) => acc + r.stockSaleValue, 0);
   // Остаток по факту (на конец периода, как в МойСклад) — его и показываем; оборачиваемость считается по среднему остатку.
   const stockEndTotal = turnoverByBucket.reduce((acc, r) => acc + r.stockValueEnd, 0);
   const stockSaleEndTotal = turnoverByBucket.reduce((acc, r) => acc + r.stockSaleValueEnd, 0);

@@ -390,7 +390,6 @@ function PlannedModal({
 
   const needSupplier = kind === "expense" && !!ref_.categories.find((c) => String(c.id) === categoryId)?.require_supplier;
   const cats = ref_.categories.filter((c) => c.kind === kind && ((c.active && !isAutoCategory(c, ref_.settings)) || String(c.id) === categoryId));
-  const tops = cats.filter((c) => c.parent_id === null);
 
   async function save() {
     const amt = Number(amount.replace(/\s/g, "").replace(",", "."));

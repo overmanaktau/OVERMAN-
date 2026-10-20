@@ -23,8 +23,6 @@ export type CompareWeek = { from: string; to: string; days: CompareDay[]; monthP
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 const WEEKDAY = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 export const MONTH = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
-export const MONTH_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-
 // Какая это неделя месяца: неделя (пн–вс) относится к месяцу своего четверга; номер — по числу четверга
 // (1–7 — первая неделя, 8–14 — вторая и т.д.). Так неделя 28.09–04.10 — 1-я неделя октября.
 export function weekOfMonth(mondayYmd: string): { n: number; month: number } {

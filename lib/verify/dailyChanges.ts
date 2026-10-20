@@ -2,7 +2,7 @@
 // сгорание бонусов, доступы и заявки сотрудников, таргет, подписчики бота клиентов, сбои и задержанные отчёты. Каждый раздел — только если было что показать.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml, packSections } from "@/lib/telegram";
-import { ENTITY_RU } from "@/lib/verify/msChanges";
+import { ENTITY_RU, FIELD_RU } from "@/lib/verify/msChanges";
 import { fetchEmployeeLogins } from "@/lib/moyskladAudit";
 import { shortPerson, shortenRequester } from "@/lib/personName";
 
@@ -19,21 +19,6 @@ function section(title: string, lines: string[], total?: number): string | null 
   const more = (total ?? lines.length) > MAX_LINES ? `${NL}…и ещё ${(total ?? lines.length) - MAX_LINES}` : "";
   return `<b>${title}</b>${NL}${lines.slice(0, MAX_LINES).join(NL)}${more}`;
 }
-
-const FIELD_RU: Record<string, string> = {
-  owner: "ответственный",
-  positions: "позиции",
-  cashSum: "оплата наличными",
-  noCashSum: "оплата безналом",
-  moment: "дата и время",
-  agent: "покупатель",
-  sum: "сумма",
-  applicable: "проведён",
-  deleted: "удалён",
-  retailStore: "касса",
-  store: "склад",
-  description: "комментарий",
-};
 
 async function safe<T>(label: string, errors: string[], fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
@@ -65,11 +50,11 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
         const owner = (r.diff as Record<string, { oldValue?: unknown; newValue?: unknown }> | null)?.owner;
         const fields = keys.filter((k) => k !== "owner").map((k) => FIELD_RU[k] ?? k);
         const parts2: string[] = [];
-        if (owner) parts2.push(`ответственный: был ${escapeHtml(person(owner.oldValue))}, стал ${escapeHtml(person(owner.newValue))}`);
+        if (owner) parts2.push(`ответственный ${escapeHtml(person(owner.oldValue))} → ${escapeHtml(person(owner.newValue))}`);
         if (fields.length) parts2.push(`изменено: ${fields.join(", ")}`);
         const what = r.event_type === "delete" ? "удалён" : r.event_type === "create" ? "создан" : parts2.length ? parts2.join("; ") : "изменён";
         const info = (r.info ?? "").replace(/^от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*/, "").slice(0, 60);
-        return `• ${kind} ${escapeHtml(r.doc_name)}${r.doc_date ? ` от ${ruDate(r.doc_date)}` : ""}${info ? ` · ${escapeHtml(info)}` : ""} — ${what}. Менял: ${escapeHtml(person(r.uid))}`;
+        return `• ${kind} ${escapeHtml(r.doc_name)}${r.doc_date ? ` от ${ruDate(r.doc_date)}` : ""}${info ? ` · ${escapeHtml(info)}` : ""} — ${what} (${escapeHtml(person(r.uid))})`;
       }),
       ms.length
     )

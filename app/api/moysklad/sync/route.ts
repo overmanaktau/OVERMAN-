@@ -16,9 +16,6 @@ export const maxDuration = 300;
 import {
   fetchRetailDemandsForDate,
   fetchRetailSalesReturnsForDate,
-  fetchDemandInfo,
-  fetchReturnedItemsBefore,
-  totalCostKopecks,
   fetchAllProducts,
   fetchStockAll,
   fetchAllVariants,
@@ -29,7 +26,7 @@ import {
   deriveArticle,
 } from "@/lib/moysklad";
 import { WAREHOUSE_STORE } from "@/lib/warehouses";
-import { REGISTER_STORE, SAYA_PARK_REGISTER_ID, SAYA_PARK_RETIRED_FROM, SAYA_PARK_WAREHOUSE_ID } from "@/lib/registers";
+import { REGISTER_STORE, SAYA_PARK_RETIRED_FROM, SAYA_PARK_WAREHOUSE_ID } from "@/lib/registers";
 import { snapshotStockForDate } from "@/lib/stockSnapshot";
 import { aggregateSales } from "@/lib/salesAggregate";
 

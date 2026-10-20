@@ -431,11 +431,7 @@ export async function weekSummary(emp: EmployeeRef, today: string): Promise<Week
   const shortfall = lastPlan === null ? 0 : Math.max(0, lastPlan - lastFactPlanned);
 
   const base = sumPlan(monday, thisTo);
-  const remainingInMonth = daysBetween(monday, monthEndOf(monday)) + 1;
-  const weekDaysInMonth = Math.min(7, remainingInMonth);
   // Недобор месяца: одинаковая добавка к плану каждого оставшегося дня (сегодня и дальше), на неделю приходится сумма по её оставшимся дням.
-  void weekDaysInMonth;
-  void remainingInMonth;
   let extra = 0;
   for (let d = monday; d <= thisTo; d = addDays(d, 1)) {
     if (planPerDay(d) !== null) extra += remainingAddOn(emp.store, d, lookup, (x) => monthFact.get(x) ?? 0, today);

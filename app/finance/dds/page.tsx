@@ -628,7 +628,6 @@ function OperationModal({
   const cats = ref_.categories.filter(
     (c) => c.kind === (kind === "income" ? "income" : "expense") && ((c.active && !isAutoCategory(c, ref_.settings)) || String(c.id) === categoryId)
   );
-  const tops = cats.filter((c) => c.parent_id === null);
 
   async function save(more = false) {
     setSavedMsg(null);

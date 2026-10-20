@@ -26,4 +26,3 @@ export function citiesOf(role: SmmRole): CityKey[] {
 }
 // Расход на рекламу и управление людьми — только маркетолог и администратор.
 export const seesSpend = (role: SmmRole) => role === "marketer" || role === "admin";
-export const isAdmin = (role: SmmRole) => role === "admin";
