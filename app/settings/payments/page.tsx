@@ -45,7 +45,6 @@ function Inner() {
   }, [load]);
 
   const today = todayYmd();
-  const storeName = (code: string | null) => (code ? stores.find((s) => s.code === code)?.name ?? code : "Все магазины");
 
   async function remove(item: Service) {
     if (!window.confirm(`Удалить «${item.name}» из списка оплат?`)) return;
@@ -54,64 +53,77 @@ function Inner() {
     else load();
   }
 
+  // По городам: сначала каждый магазин, в конце — общие для всех
+  const groups = [
+    ...stores.map((st) => ({ key: st.code, label: st.name, rows: items.filter((x) => x.store === st.code) })),
+    { key: "__all__", label: "Все магазины", rows: items.filter((x) => x.store === null) },
+  ].filter((g) => g.rows.length > 0);
+
   return (
     <>
-      <PageTitle title="Оплаты" subtitle="Услуги и лицензии, которые нужно оплачивать постоянно, и срок, до которого оплачено. Ближайшие сроки — сверху." />
+      <PageTitle
+        title="Оплаты"
+        subtitle="Услуги и лицензии, которые нужно оплачивать постоянно, и срок, до которого оплачено. Ближайшие сроки — сверху."
+        actions={canEdit ? <button className={btnPrimary} onClick={() => setEditing({ paid_until: today })}>+ Оплата</button> : undefined}
+      />
       <ErrorBox message={error} />
-      <Card
-        title="Что и куда оплачивать"
-        right={canEdit ? <button className={btnPrimary} onClick={() => setEditing({ paid_until: today })}>+ Оплата</button> : undefined}
-      >
-        {loading ? (
+      {loading ? (
+        <Card title="Что и куда оплачивать">
           <Empty>Загрузка…</Empty>
-        ) : items.length === 0 ? (
+        </Card>
+      ) : groups.length === 0 ? (
+        <Card title="Что и куда оплачивать">
           <Empty>Пока ничего не добавлено</Empty>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <th className={thCls}>Что оплачивать</th>
-                  <th className={thCls}>Куда платить</th>
-                  <th className={thCls}>Магазин</th>
-                  <th className={`${thCls} text-right`}>Сумма</th>
-                  <th className={thCls}>Оплачено до</th>
-                  <th className={thCls}>Осталось</th>
-                  <th className={thCls} />
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((i) => {
-                  const left = daysBetween(today, i.paid_until);
-                  return (
-                    <tr key={i.id}>
-                      <td className={`${tdCls} font-medium`}>
-                        {i.name}
-                        {i.comment && <div className="text-[12px] text-muted font-normal">{i.comment}</div>}
-                      </td>
-                      <td className={tdCls}>{i.pay_to || "—"}</td>
-                      <td className={tdCls}>{storeName(i.store)}</td>
-                      <td className={`${tdCls} text-right num`}>{i.amount === null ? "—" : fmtMoney(i.amount)}</td>
-                      <td className={`${tdCls} whitespace-nowrap`}>{fmtDate(i.paid_until)}</td>
-                      <td className={tdCls}>
-                        <Chip tone={left < 0 ? "bad" : left <= SOON_DAYS ? "warn" : "muted"}>{left < 0 ? `просрочено на ${-left} дн.` : left === 0 ? "сегодня" : `${left} дн.`}</Chip>
-                      </td>
-                      <td className={`${tdCls} whitespace-nowrap text-right`}>
-                        {canEdit && (
-                          <div className="flex gap-2 justify-end">
-                            <button className={btnGhost} onClick={() => setEditing(i)}>Изменить</button>
-                            <button className={btnDanger} onClick={() => remove(i)}>Удалить</button>
-                          </div>
-                        )}
-                      </td>
+        </Card>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {groups.map((g) => (
+            <Card key={g.key} title={g.label}>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr>
+                      <th className={thCls}>Что оплачивать</th>
+                      <th className={thCls}>Куда платить</th>
+                      <th className={`${thCls} text-right`}>Сумма</th>
+                      <th className={thCls}>Оплачено до</th>
+                      <th className={thCls}>Осталось</th>
+                      <th className={thCls} />
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+                  </thead>
+                  <tbody>
+                    {g.rows.map((i) => {
+                      const left = daysBetween(today, i.paid_until);
+                      return (
+                        <tr key={i.id}>
+                          <td className={`${tdCls} font-medium`}>
+                            {i.name}
+                            {i.comment && <div className="text-[12px] text-muted font-normal">{i.comment}</div>}
+                          </td>
+                          <td className={tdCls}>{i.pay_to || "—"}</td>
+                          <td className={`${tdCls} text-right num`}>{i.amount === null ? "—" : fmtMoney(i.amount)}</td>
+                          <td className={`${tdCls} whitespace-nowrap`}>{fmtDate(i.paid_until)}</td>
+                          <td className={tdCls}>
+                            <Chip tone={left < 0 ? "bad" : left <= SOON_DAYS ? "warn" : "muted"}>{left < 0 ? `просрочено на ${-left} дн.` : left === 0 ? "сегодня" : `${left} дн.`}</Chip>
+                          </td>
+                          <td className={`${tdCls} whitespace-nowrap text-right`}>
+                            {canEdit && (
+                              <div className="flex gap-2 justify-end">
+                                <button className={btnGhost} onClick={() => setEditing(i)}>Изменить</button>
+                                <button className={btnDanger} onClick={() => remove(i)}>Удалить</button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
       {editing && (
         <EditModal
           initial={editing}

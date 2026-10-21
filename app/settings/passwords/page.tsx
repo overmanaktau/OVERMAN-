@@ -76,7 +76,7 @@ export default function PasswordsPage() {
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
   const [revealedHistory, setRevealedHistory] = useState<Set<number>>(new Set());
-  const [openHistoryFor, setOpenHistoryFor] = useState<Set<number>>(new Set());
+  const [openHistoryFor, setOpenHistoryFor] = useState<Set<string>>(new Set());
   const [cityFilter, setCityFilter] = useState<string>(ALL_CITIES);
 
   const [newNetworkName, setNewNetworkName] = useState("");
@@ -153,11 +153,11 @@ export default function PasswordsPage() {
     });
   }
 
-  function toggleHistoryPanel(networkId: number) {
+  function toggleHistoryPanel(key: string) {
     setOpenHistoryFor((prev) => {
       const next = new Set(prev);
-      if (next.has(networkId)) next.delete(networkId);
-      else next.add(networkId);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -338,12 +338,21 @@ export default function PasswordsPage() {
   const filteredPasswords =
     cityFilter === ALL_CITIES ? passwords : passwords.filter((p) => p.store === cityFilter || p.store === null);
 
-  const byNetwork = new Map<number, StoredPassword[]>();
-  for (const p of filteredPasswords) {
-    const list = byNetwork.get(p.social_network_id) ?? [];
-    list.push(p);
-    byNetwork.set(p.social_network_id, list);
-  }
+  // Аккаунты по городам: сначала каждый город, в конце — общие (без города); внутри города — по соцсетям
+  const cityGroups = [
+    ...accessibleStores.map((s) => ({ key: s.code, label: s.name, rows: filteredPasswords.filter((p) => p.store === s.code) })),
+    { key: "__common__", label: "Общие (без города)", rows: filteredPasswords.filter((p) => p.store === null) },
+  ]
+    .filter((g) => g.rows.length > 0)
+    .map((g) => {
+      const byNetwork = new Map<number, StoredPassword[]>();
+      for (const p of g.rows) {
+        const list = byNetwork.get(p.social_network_id) ?? [];
+        list.push(p);
+        byNetwork.set(p.social_network_id, list);
+      }
+      return { ...g, byNetwork };
+    });
 
   const historyByNetwork = new Map<number, HistoryEntry[]>();
   for (const h of history) {
@@ -500,20 +509,25 @@ export default function PasswordsPage() {
                 {passwords.length === 0 ? "Список пуст — добавьте аккаунт формой ниже." : "Нет аккаунтов для этого города."}
               </div>
             ) : (
-              [...byNetwork.entries()].map(([netId, rows]) => {
-                const netHistory = historyByNetwork.get(netId) ?? [];
-                const historyOpen = openHistoryFor.has(netId);
+              cityGroups.map((g) => (
+              <div key={g.key} className="flex flex-col gap-4 pt-1">
+                <div className="text-[19px] font-bold font-serif border-b border-border pb-2">{g.label}</div>
+              {[...g.byNetwork.entries()].map(([netId, rows]) => {
+                const groupIds = new Set(g.rows.map((x) => x.id));
+                const netHistory = (historyByNetwork.get(netId) ?? []).filter((h) => groupIds.has(h.password_id));
+                const historyKey = `${g.key}:${netId}`;
+                const historyOpen = openHistoryFor.has(historyKey);
                 return (
                   <div key={netId} className="flex flex-col gap-2">
                     <div className="flex items-center gap-3">
-                      <div className="text-[11px] uppercase tracking-wide text-mutedLight">
+                      <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">
                         {networkName.get(netId) ?? "—"}
                       </div>
                       {netHistory.length > 0 && (
                         <button
                           type="button"
-                          onClick={() => toggleHistoryPanel(netId)}
-                          className="text-[11px] font-semibold text-muted underline"
+                          onClick={() => toggleHistoryPanel(historyKey)}
+                          className="text-[12px] font-semibold text-muted underline"
                         >
                           {historyOpen ? "Скрыть историю" : `История (${netHistory.length})`}
                         </button>
@@ -622,7 +636,7 @@ export default function PasswordsPage() {
                         return (
                           <div
                             key={p.id}
-                            className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 sm:gap-3 items-start sm:items-center py-2 border-b border-borderSoft text-[13px]"
+                            className="grid grid-cols-1 sm:grid-cols-[1.3fr_1fr_auto_auto_auto] gap-2 sm:gap-3 items-start sm:items-center py-3 border-b border-borderSoft text-[14px]"
                           >
                             <div className="font-semibold truncate">
                               {p.login}
@@ -636,7 +650,7 @@ export default function PasswordsPage() {
                               type="button"
                               onClick={() => toggleReveal(p.id)}
                               title={isRevealed ? "Скрыть пароль" : "Показать пароль"}
-                              className="w-7 h-7 rounded-md flex items-center justify-center text-muted hover:text-ink border border-border"
+                              className="w-9 h-9 rounded-md flex items-center justify-center text-muted hover:text-ink hover:bg-paper border border-border"
                             >
                               {isRevealed ? <IconEyeOff /> : <IconEye />}
                             </button>
@@ -645,14 +659,14 @@ export default function PasswordsPage() {
                                 <button
                                   type="button"
                                   onClick={() => startEdit(p)}
-                                  className="text-muted font-semibold text-left"
+                                  className="text-[13px] font-medium text-muted border border-border rounded-md px-3.5 py-2 hover:text-ink hover:bg-paper"
                                 >
                                   Изменить
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(p.id)}
-                                  className="text-[#A34B36] font-semibold text-left"
+                                  className="text-[13px] font-medium text-[#A34B36] border border-[#E4C9C0] rounded-md px-3.5 py-2 hover:bg-[#FBF2EF]"
                                 >
                                   Удалить
                                 </button>
@@ -669,7 +683,9 @@ export default function PasswordsPage() {
                     </div>
                   </div>
                 );
-              })
+              })}
+              </div>
+              ))
             )}
           </div>
 
