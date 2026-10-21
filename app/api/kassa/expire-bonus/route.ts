@@ -8,6 +8,7 @@ import { todayAlmaty } from "@/lib/kassa/sync";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { type ExpiryRequest } from "@/lib/kassa/expiryRequests";
 import { escapeHtml } from "@/lib/telegram";
+import { retry429 } from "@/lib/kassa/retry";
 
 export const maxDuration = 300;
 
@@ -21,21 +22,6 @@ export const maxDuration = 300;
 type Cand = { ms_id: string; name: string; phone: string; bonus_expired: number };
 const BUDGET_MS = 230_000;
 const fmt = (n: number) => Math.round(n).toLocaleString("ru-RU");
-
-// МойСклад отвечает 429 при слишком частых запросах — ждём и повторяем (до 3 раз), а не записываем клиента в ошибки.
-async function retry429<T>(fn: () => Promise<T>): Promise<T> {
-  for (let i = 0; ; i++) {
-    try {
-      return await fn();
-    } catch (e) {
-      if (i < 3 && /429/.test(getErrorMessage(e))) {
-        await new Promise((r) => setTimeout(r, 4000 * (i + 1)));
-        continue;
-      }
-      throw e;
-    }
-  }
-}
 
 async function loadCandidates(): Promise<Cand[]> {
   const { data, error } = await supabaseAdmin.from("kassa_clients").select("ms_id, name, phone, bonus_expired").gt("bonus_expired", 0).order("bonus_expired", { ascending: false });

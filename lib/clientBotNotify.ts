@@ -5,6 +5,7 @@ import { telegramClientTransport } from "@/lib/clientBot";
 import { getErrorMessage } from "@/lib/errors";
 import { fetchClientBonusTransactions, fetchClientDocs } from "@/lib/moysklad";
 import { computeBonus } from "@/lib/kassa/bonus";
+import { linkAccrualTx, loadAccrualState } from "@/lib/kassa/pending";
 import { todayAlmaty } from "@/lib/kassa/sync";
 import { activatedMessage, expiredMessage, expiringSoonMessage, purchaseMessage } from "@/lib/clientBotMessages";
 
@@ -59,6 +60,13 @@ export async function notifyAfterPurchase(clientMsId: string): Promise<void> {
     else row.spent += Number(t.value);
     byDoc.set(t.parent_id, row);
   }
+  // после перехода на начисление силами портала бонус за покупку берём из bonus_accruals (в МойСклад он появится только в день активации)
+  const { data: acc } = await supabaseAdmin.from("bonus_accruals").select("demand_id, amount, purchase_at").eq("client_ms_id", clientMsId).gte("purchase_at", since);
+  for (const r of (acc ?? []) as { demand_id: string; amount: number; purchase_at: string }[]) {
+    const row = byDoc.get(r.demand_id) ?? { earned: 0, spent: 0, moment: r.purchase_at };
+    row.earned = Number(r.amount);
+    byDoc.set(r.demand_id, row);
+  }
   for (const [docId, d] of byDoc) {
     if (d.earned <= 0 && d.spent <= 0) continue;
     const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(new Date(d.moment));
@@ -79,9 +87,10 @@ export async function runDailyClientMessages(): Promise<{ clients: number; sent:
     if (subs.length === 0) continue;
     const [tx, docs] = await Promise.all([fetchClientBonusTransactions(id), fetchClientDocs(id)]);
     const returnDemand = new Map(docs.returns.filter((r) => r.demandId).map((r) => [r.id, r.demandId as string]));
-    const b = computeBonus(tx.map((t) => ({ id: t.id, moment: t.moment, value: t.value, kind: t.kind, status: t.status, parentType: t.parentType, parentId: t.parentId })), returnDemand, today);
+    const acc = await loadAccrualState([id]);
+    const b = computeBonus(linkAccrualTx(tx.map((t) => ({ id: t.id, moment: t.moment, value: t.value, kind: t.kind, status: t.status, parentType: t.parentType, parentId: t.parentId })), acc.txDemand), returnDemand, today, acc.pending.get(id) ?? []);
     const sum = (f: (l: (typeof b.lots)[number]) => boolean) => b.lots.filter((l) => l.remaining > 0 && f(l)).reduce((a, l) => a + l.remaining, 0);
-    const activated = sum((l) => l.activatesOn === today);
+    const activated = sum((l) => l.activatesOn === today && !l.pending); // не зачисленные в МойСклад (сбой задания) — не «активированы»
     const soon = sum((l) => l.expiresOn === plusDays(today, 14));
     const burned = sum((l) => l.expiresOn === today);
     if (activated > 0 && (await sendOnce(id, subs, "activated", today, activatedMessage(b.available)))) sent++;

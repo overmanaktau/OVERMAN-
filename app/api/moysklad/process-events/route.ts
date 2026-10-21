@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getErrorMessage } from "@/lib/errors";
-import { fetchDocAgentId } from "@/lib/moysklad";
+import { fetchDocAgentId, fetchDemandIdOfReturn } from "@/lib/moysklad";
 import { syncOneClient } from "@/lib/kassa/clientSync";
 import { notifyAfterPurchase } from "@/lib/clientBotNotify";
+import { syncAccrual } from "@/lib/kassa/accrual";
 
 export const maxDuration = 60;
 
@@ -40,12 +41,37 @@ async function handle(request: Request) {
         errors.set(href, getErrorMessage(e));
       }
     }
+    // чеки, по которым пересчитывается бонус: сам чек или чек, к которому относится возврат (начисление считает портал, см. lib/kassa/accrual.ts)
+    const demandsByClient = new Map<string, Set<string>>();
+    for (const href of hrefs) {
+      const cid = clientByHref.get(href);
+      if (!cid) continue;
+      const docId = href.split("?")[0].split("/").pop() ?? "";
+      try {
+        const demandId = href.includes("/retailsalesreturn/") ? await fetchDemandIdOfReturn(docId) : href.includes("/retaildemand/") ? docId : null;
+        if (demandId) demandsByClient.set(cid, (demandsByClient.get(cid) ?? new Set<string>()).add(demandId));
+      } catch (e) {
+        errors.set(href, getErrorMessage(e));
+      }
+    }
     const clientIds = [...new Set([...clientByHref.values()].filter((v): v is string => !!v))];
     const results: Record<string, string> = {};
     for (const id of clientIds) {
       try {
-        const r = await syncOneClient(id);
+        let r = await syncOneClient(id);
         results[id] = r.status;
+        if (r.status === "updated") {
+          // пересчёт начисления по чекам клиента; если что-то записано — клиента пересчитываем ещё раз, чтобы «ожидает активации» уже учитывало новый бонус
+          let changed = false;
+          for (const demandId of demandsByClient.get(id) ?? []) {
+            try {
+              if ((await syncAccrual(demandId)) === "ok") changed = true;
+            } catch (e) {
+              console.error("accrual sync error:", getErrorMessage(e));
+            }
+          }
+          if (changed) r = await syncOneClient(id);
+        }
         // подписанному клиенту — сообщение о бонусах за покупку; сбой отправки не должен ломать обработку очереди
         if (r.status === "updated") await notifyAfterPurchase(id).catch((e) => console.error("client bot notify error:", getErrorMessage(e)));
       } catch (e) {

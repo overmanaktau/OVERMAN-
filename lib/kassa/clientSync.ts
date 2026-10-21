@@ -4,6 +4,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchClientBasic, fetchClientBonusTransactions, fetchClientDocs } from "@/lib/moysklad";
 import { computeBonus } from "@/lib/kassa/bonus";
+import { linkAccrualTx, loadAccrualState } from "@/lib/kassa/pending";
 import { CLIENT_TAG, todayAlmaty } from "@/lib/kassa/sync";
 
 export type OneClientResult = { status: "updated" | "skipped" | "removed"; reason?: string; name?: string };
@@ -29,10 +30,12 @@ export async function syncOneClient(clientId: string): Promise<OneClientResult> 
     if (error) throw error;
   }
   const returnDemand = new Map(docs.returns.filter((r) => r.demandId).map((r) => [r.id, r.demandId as string]));
+  const acc = await loadAccrualState([clientId]);
   const b = computeBonus(
-    tx.map((t) => ({ id: t.id, moment: t.moment, value: t.value, kind: t.kind, status: t.status, parentType: t.parentType, parentId: t.parentId })),
+    linkAccrualTx(tx.map((t) => ({ id: t.id, moment: t.moment, value: t.value, kind: t.kind, status: t.status, parentType: t.parentType, parentId: t.parentId })), acc.txDemand),
     returnDemand,
-    todayAlmaty()
+    todayAlmaty(),
+    acc.pending.get(clientId) ?? []
   );
   const moments = docs.demands.map((d) => d.moment).sort();
   const { error } = await supabaseAdmin.from("kassa_clients").upsert(

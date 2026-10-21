@@ -29,6 +29,7 @@ export type Lot = {
   state: "waiting" | "active" | "expired";
   activatesOn: string; // дата, с которой бонусы доступны
   expiresOn: string; // дата, с которой бонусы сгорают
+  pending?: boolean; // ещё не зачислена в МойСклад (портал зачислит её в день активации)
 };
 
 export type BonusSummary = {
@@ -60,7 +61,8 @@ function addMonthsYmd(date: string, n: number): string {
 }
 
 // returnDemand: id возврата → id чека, который вернули (чтобы списание по возврату попало в нужную партию).
-export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, today: string): BonusSummary {
+// pending — бонусы за недавние покупки, которые портал ещё не зачислил в МойСклад: показываются как «ждут активации».
+export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, today: string, pending: { date: string; amount: number; demandId?: string }[] = []): BonusSummary {
   const done = txs.filter((t) => t.status === "COMPLETED" && t.value > 0).sort((a, b) => a.moment.localeCompare(b.moment));
   const lots: Lot[] = done
     .filter((t) => t.kind === "earn")
@@ -100,6 +102,12 @@ export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, 
     if (left > 0) debt += left;
   }
 
+  // ожидающие зачисления партии добавляем после списаний: списывать из них ещё нечего, в МойСклад их пока нет
+  pending.forEach((p, i) => {
+    if (p.amount <= 0) return;
+    lots.push({ id: `pending-${i}`, parentId: p.demandId ?? "", date: p.date, earned: p.amount, remaining: p.amount, state: "waiting", activatesOn: addDaysYmd(p.date, ACTIVATION_DAYS), expiresOn: addMonthsYmd(p.date, EXPIRY_MONTHS), pending: true });
+  });
+
   let balance = 0;
   let available = 0;
   let waiting = 0;
@@ -107,7 +115,12 @@ export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, 
   let nextActivation: string | null = null;
   for (const lot of lots) {
     if (lot.remaining <= 0) continue;
-    if (today >= lot.expiresOn) {
+    if (lot.pending) {
+      lot.state = "waiting";
+      waiting += lot.remaining;
+      balance += lot.remaining;
+      if (!nextActivation || lot.activatesOn < nextActivation) nextActivation = lot.activatesOn;
+    } else if (today >= lot.expiresOn) {
       lot.state = "expired";
       expired += lot.remaining;
     } else if (today >= lot.activatesOn) {
