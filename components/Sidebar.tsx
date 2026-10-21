@@ -32,6 +32,7 @@ const FINANCE_SUBMENU: { label: string; href: string; section: SectionKey }[] = 
   { label: "ОПИУ", href: "/finance/opiu", section: "finance.opiu" },
   { label: "Долги", href: "/finance/debts", section: "finance.debts" },
   { label: "Плановые платежи", href: "/finance/planned", section: "finance.planned" },
+  { label: "Оплаты", href: "/finance/payments", section: "finance.payments" },
   { label: "Настройки", href: "/finance/settings", section: "finance.settings" },
 ];
 
