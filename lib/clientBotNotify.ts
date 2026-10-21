@@ -51,7 +51,7 @@ export async function notifyAfterPurchase(clientMsId: string): Promise<void> {
   const subs = await subscribersOf(clientMsId, String(c.phone_digits ?? ""));
   if (subs.length === 0) return;
   const since = new Date(Date.now() - 36 * 3600000).toISOString();
-  const { data: tx } = await supabaseAdmin.from("kassa_bonus_tx").select("kind, value, parent_id, moment").eq("client_ms_id", clientMsId).eq("parent_type", "retaildemand").eq("status", "COMPLETED").gte("moment", since);
+  const { data: tx } = await supabaseAdmin.from("kassa_bonus_tx").select("kind, value, parent_id, moment").eq("client_ms_id", clientMsId).eq("parent_type", "retaildemand").in("status", ["COMPLETED", "WAIT_PROCESSING"]).gte("moment", since); // «ожидает» — начисление, которое МойСклад зачислит через 14 дней
   const byDoc = new Map<string, { earned: number; spent: number; moment: string }>();
   for (const t of (tx ?? []) as { kind: string; value: number; parent_id: string; moment: string }[]) {
     const row = byDoc.get(t.parent_id) ?? { earned: 0, spent: 0, moment: t.moment };
@@ -81,10 +81,13 @@ export async function runDailyClientMessages(): Promise<{ clients: number; sent:
     const returnDemand = new Map(docs.returns.filter((r) => r.demandId).map((r) => [r.id, r.demandId as string]));
     const b = computeBonus(tx.map((t) => ({ id: t.id, moment: t.moment, value: t.value, kind: t.kind, status: t.status, parentType: t.parentType, parentId: t.parentId })), returnDemand, today);
     const sum = (f: (l: (typeof b.lots)[number]) => boolean) => b.lots.filter((l) => l.remaining > 0 && f(l)).reduce((a, l) => a + l.remaining, 0);
-    const activated = sum((l) => l.activatesOn === today);
+    // МойСклад переводит отложенное начисление в «проведено» в то же время суток, что и покупка, — это бывает позже 10:00, поэтому смотрим и сегодняшнюю, и вчерашнюю дату активации
+    const activatedOn = (date: string) => sum((l) => l.activatesOn === date && !l.pending);
     const soon = sum((l) => l.expiresOn === plusDays(today, 14));
     const burned = sum((l) => l.expiresOn === today);
-    if (activated > 0 && (await sendOnce(id, subs, "activated", today, activatedMessage(b.available)))) sent++;
+    for (const date of [plusDays(today, -1), today]) {
+      if (activatedOn(date) > 0 && (await sendOnce(id, subs, "activated", date, activatedMessage(b.available)))) sent++;
+    }
     if (soon > 0 && (await sendOnce(id, subs, "expiring", plusDays(today, 14), expiringSoonMessage(soon, ru(plusDays(today, 14)))))) sent++;
     if (burned > 0 && (await sendOnce(id, subs, "expired", today, expiredMessage(burned, b.available)))) sent++;
   }

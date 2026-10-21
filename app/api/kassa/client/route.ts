@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     const earnedBy = new Map<string, number>();
     const spentBy = new Map<string, number>();
     for (const t of tx) {
-      if (t.status !== "COMPLETED") continue;
+      if (t.status !== "COMPLETED" && !(t.kind === "earn" && t.status === "WAIT_PROCESSING")) continue;
       const m = t.kind === "earn" ? earnedBy : spentBy;
       m.set(t.parentId, (m.get(t.parentId) ?? 0) + t.value);
     }

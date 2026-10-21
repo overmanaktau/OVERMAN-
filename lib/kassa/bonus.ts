@@ -29,6 +29,7 @@ export type Lot = {
   state: "waiting" | "active" | "expired";
   activatesOn: string; // дата, с которой бонусы доступны
   expiresOn: string; // дата, с которой бонусы сгорают
+  pending?: boolean; // МойСклад ещё держит начисление (статус «ожидает», программа «Баллы начисляются через 14 дней») — на счёте клиента этих бонусов пока нет
 };
 
 export type BonusSummary = {
@@ -100,6 +101,12 @@ export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, 
     if (left > 0) debt += left;
   }
 
+  // начисления, которые МойСклад держит до срока (транзакция «ожидает»): считаются ждущими, списывать из них нечего
+  for (const t of txs.filter((x) => x.kind === "earn" && x.status === "WAIT_PROCESSING" && x.value > 0)) {
+    const date = almatyDate(t.moment);
+    lots.push({ id: t.id, parentId: t.parentId, date, earned: t.value, remaining: t.value, state: "waiting", activatesOn: addDaysYmd(date, ACTIVATION_DAYS), expiresOn: addMonthsYmd(date, EXPIRY_MONTHS), pending: true });
+  }
+
   let balance = 0;
   let available = 0;
   let waiting = 0;
@@ -107,7 +114,12 @@ export function computeBonus(txs: BonusTx[], returnDemand: Map<string, string>, 
   let nextActivation: string | null = null;
   for (const lot of lots) {
     if (lot.remaining <= 0) continue;
-    if (today >= lot.expiresOn) {
+    if (lot.pending) {
+      lot.state = "waiting";
+      waiting += lot.remaining;
+      balance += lot.remaining;
+      if (!nextActivation || lot.activatesOn < nextActivation) nextActivation = lot.activatesOn;
+    } else if (today >= lot.expiresOn) {
       lot.state = "expired";
       expired += lot.remaining;
     } else if (today >= lot.activatesOn) {
