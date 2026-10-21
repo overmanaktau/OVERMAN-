@@ -1187,9 +1187,7 @@ async function msJson(path: string, init?: { method?: string; body?: unknown }):
   return { status: res.status, json };
 }
 
-// Бонусная операция вручную: списание (SPENDING) или начисление (EARNING). externalCode делает повтор безопасным: операция с таким кодом создаётся один раз.
-// moment — «ГГГГ-ММ-ДД ЧЧ:ММ:СС» по времени МойСклад: для начисления за покупку ставим момент самой покупки, тогда срок сгорания считается от неё.
-async function createBonusTx(type: "SPENDING" | "EARNING", clientId: string, value: number, externalCode: string, description: string, moment?: string): Promise<{ created: boolean; id: string | null }> {
+export async function createBonusWriteOff(clientId: string, value: number, externalCode: string, description: string): Promise<{ created: boolean; id: string | null }> {
   const found = await msJson(`/entity/bonustransaction?limit=1&filter=${encodeURIComponent(`externalCode=${externalCode}`)}`);
   const row = (found.json as { rows?: { id: string }[] } | null)?.rows?.[0];
   if (row) return { created: false, id: row.id };
@@ -1203,57 +1201,13 @@ async function createBonusTx(type: "SPENDING" | "EARNING", clientId: string, val
       agent: { meta: { href: `${BASE_URL}/entity/counterparty/${clientId}`, type: "counterparty", mediaType: "application/json" } },
       bonusProgram: { meta: { href: `${BASE_URL}/entity/bonusprogram/${BONUS_PROGRAM_ID}`, type: "bonusprogram", mediaType: "application/json" } },
       bonusValue: value,
-      transactionType: type,
+      transactionType: "SPENDING",
       transactionStatus: "COMPLETED",
       categoryType: "REGULAR",
       externalCode,
       description,
-      ...(moment ? { moment } : {}),
     },
   });
   if (r.status !== 200 && r.status !== 201) throw new Error(`МойСклад ${r.status}: ${JSON.stringify(r.json).slice(0, 300)}`);
   return { created: true, id: (r.json as { id: string }).id };
-}
-
-export function createBonusWriteOff(clientId: string, value: number, externalCode: string, description: string) {
-  return createBonusTx("SPENDING", clientId, value, externalCode, description);
-}
-
-export function createBonusEarning(clientId: string, value: number, externalCode: string, description: string, moment?: string) {
-  return createBonusTx("EARNING", clientId, value, externalCode, description, moment);
-}
-
-// Чек для начисления бонуса: сумма (₸), момент, покупатель, проведён ли и не удалён ли.
-export type AccrualDemand = { id: string; name: string; momentIso: string; sum: number; agentId: string | null; active: boolean };
-export async function fetchDemandForAccrual(demandId: string): Promise<AccrualDemand | null> {
-  try {
-    const d = (await moyskladFetch(`/entity/retaildemand/${demandId}`)) as { id: string; name?: string; moment: string; sum?: number; applicable?: boolean; agent?: { meta?: { href?: string } } };
-    return { id: d.id, name: d.name ?? "", momentIso: msMomentToIso(d.moment), sum: (d.sum ?? 0) / 100, agentId: idOfHref(d.agent?.meta?.href) || null, active: d.applicable !== false };
-  } catch (e) {
-    if (e instanceof Error && e.message.includes(" 404")) return null;
-    throw e;
-  }
-}
-
-// Сумма возвратов по чеку (₸) — для начисления: бонус считается с суммы чека за вычетом возвратов.
-export async function fetchReturnedSumForDemand(demandId: string): Promise<number> {
-  let total = 0;
-  for (let offset = 0; ; offset += 100) {
-    const page = await moyskladFetch("/entity/retailsalesreturn", { filter: `demand=${BASE_URL}/entity/retaildemand/${demandId}`, limit: "100", offset: String(offset) });
-    const rows = (page.rows ?? []) as { sum?: number }[];
-    total += rows.reduce((a, r) => a + (r.sum ?? 0), 0);
-    if (rows.length < 100) break;
-  }
-  return total / 100;
-}
-
-// Чек, к которому относится возврат.
-export async function fetchDemandIdOfReturn(returnId: string): Promise<string | null> {
-  try {
-    const r = (await moyskladFetch(`/entity/retailsalesreturn/${returnId}`)) as { demand?: { meta?: { href?: string } } };
-    return idOfHref(r.demand?.meta?.href) || null;
-  } catch (e) {
-    if (e instanceof Error && e.message.includes(" 404")) return null;
-    throw e;
-  }
 }

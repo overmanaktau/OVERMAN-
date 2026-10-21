@@ -7,7 +7,6 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchAllCounterpartiesBasic, fetchBonusTransactionsPage, fetchClientStats, fetchReturnDemandMap, type MsBonusTx } from "@/lib/moysklad";
 import { computeBonus, type BonusTx } from "@/lib/kassa/bonus";
-import { linkAccrualTx, loadAccrualState } from "@/lib/kassa/pending";
 
 export const CLIENT_TAG = "клиенты";
 const TX_BUDGET_MS = 140_000;
@@ -92,13 +91,12 @@ export async function syncKassaClients(): Promise<{ clients: number; txLoaded: n
   const returnDemand = hasReturns && earliest ? await fetchReturnDemandMap(earliest) : new Map<string, string>();
 
   const today = todayAlmaty();
-  const acc = await loadAccrualState();
   let withBonus = 0;
   let expiredClients = 0;
   let expiredTotal = 0;
   const rows = clients.map((c) => {
     const s = stats.get(c.id);
-    const b = computeBonus(linkAccrualTx(byClient.get(c.id) ?? [], acc.txDemand), returnDemand, today, acc.pending.get(c.id) ?? []);
+    const b = computeBonus(byClient.get(c.id) ?? [], returnDemand, today);
     if (b.balance > 0 || b.expired > 0) withBonus += 1;
     if (b.expired > 0) {
       expiredClients += 1;

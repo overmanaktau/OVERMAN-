@@ -3,7 +3,6 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { requireKassa } from "@/lib/kassa/access";
 import { computeBonus, ACTIVATION_DAYS, almatyDate } from "@/lib/kassa/bonus";
-import { linkAccrualTx, loadAccrualState } from "@/lib/kassa/pending";
 import { fetchClientBasic, fetchClientBonusTransactions, fetchClientDocs } from "@/lib/moysklad";
 import { REGISTER_STORE } from "@/lib/registers";
 import { todayAlmaty } from "@/lib/kassa/sync";
@@ -25,12 +24,10 @@ export async function GET(request: Request) {
     if (!client) return NextResponse.json({ error: "Клиент не найден." }, { status: 404 });
     const today = todayAlmaty();
     const returnDemand = new Map(docs.returns.filter((r) => r.demandId).map((r) => [r.id, r.demandId as string]));
-    const acc = await loadAccrualState([id]);
     const bonus = computeBonus(
-      linkAccrualTx(tx.map((t) => ({ id: t.id, moment: t.moment, value: t.value, kind: t.kind, status: t.status, parentType: t.parentType, parentId: t.parentId })), acc.txDemand),
+      tx.map((t) => ({ id: t.id, moment: t.moment, value: t.value, kind: t.kind, status: t.status, parentType: t.parentType, parentId: t.parentId })),
       returnDemand,
-      today,
-      acc.pending.get(id) ?? []
+      today
     );
 
     const earnedBy = new Map<string, number>();
