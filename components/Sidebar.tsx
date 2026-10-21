@@ -32,13 +32,13 @@ const FINANCE_SUBMENU: { label: string; href: string; section: SectionKey }[] = 
   { label: "ОПИУ", href: "/finance/opiu", section: "finance.opiu" },
   { label: "Долги", href: "/finance/debts", section: "finance.debts" },
   { label: "Плановые платежи", href: "/finance/planned", section: "finance.planned" },
-  { label: "Оплаты", href: "/finance/payments", section: "finance.payments" },
   { label: "Настройки", href: "/finance/settings", section: "finance.settings" },
 ];
 
 const SETTINGS_SUBMENU: { label: string; href: string; section: SectionKey }[] = [
   { label: "Сотрудники и доступы", href: "/settings/employees", section: "settings.employees" },
   { label: "Пароли", href: "/settings/passwords", section: "settings.passwords" },
+  { label: "Оплаты", href: "/settings/payments", section: "settings.payments" },
   { label: "Помощник консультантов", href: "/settings/coach", section: "settings.coach" },
   { label: "История", href: "/history", section: "history" },
 ];

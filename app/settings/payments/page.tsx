@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
 import { daysBetween, fmtDate, fmtMoney, todayYmd } from "@/lib/finance";
-import { Card, Chip, Empty, ErrorBox, Field, FinanceGuard, Modal, PageTitle, btnDanger, btnGhost, btnPrimary, inputCls, selectCls, tdCls, thCls, useSection } from "@/components/finance/ui";
+import { Card, Chip, Empty, ErrorBox, Field, Modal, PageTitle, btnDanger, btnGhost, btnPrimary, inputCls, selectCls, tdCls, thCls, useSection } from "@/components/finance/ui";
 
 // «Оплаты»: постоянные расходы (услуги, лицензии) и срок, до которого оплачено. Ближайшие сроки сверху.
 type Service = { id: number; name: string; pay_to: string | null; amount: number | null; store: string | null; paid_until: string; comment: string | null };
@@ -12,16 +12,21 @@ type Service = { id: number; name: string; pay_to: string | null; amount: number
 const SOON_DAYS = 30; // за столько дней до конца срока оплата выделяется как «скоро»
 
 export default function PaymentsPage() {
-  return (
-    <FinanceGuard section="finance.payments">
-      <Inner />
-    </FinanceGuard>
-  );
+  const { ready, canView } = useSection("settings.payments");
+  if (!ready) return null;
+  if (!canView) {
+    return (
+      <div className="bg-surface border border-border rounded-card p-8 max-w-md">
+        <p className="text-sm text-muted">У вас нет доступа к разделу «Оплаты».</p>
+      </div>
+    );
+  }
+  return <Inner />;
 }
 
 function Inner() {
   const { stores } = useAuth();
-  const { canEdit } = useSection("finance.payments");
+  const { canEdit } = useSection("settings.payments");
   const [items, setItems] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +35,7 @@ function Inner() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error: err } = await supabase.from("fin_services").select("*").order("paid_until");
+    const { data, error: err } = await supabase.from("pay_services").select("*").order("paid_until");
     if (err) setError(err.message);
     else setItems(((data ?? []) as Service[]).map((x) => ({ ...x, amount: x.amount === null ? null : Number(x.amount) })));
     setLoading(false);
@@ -44,7 +49,7 @@ function Inner() {
 
   async function remove(item: Service) {
     if (!window.confirm(`Удалить «${item.name}» из списка оплат?`)) return;
-    const { error: err } = await supabase.from("fin_services").delete().eq("id", item.id);
+    const { error: err } = await supabase.from("pay_services").delete().eq("id", item.id);
     if (err) setError(err.message);
     else load();
   }
@@ -139,7 +144,7 @@ function EditModal({ initial, stores, onClose, onSaved }: { initial: Partial<Ser
     if (amt !== null && (!Number.isFinite(amt) || amt < 0)) return setError("Сумма указана неверно");
     setSaving(true);
     const payload = { name: name.trim(), pay_to: payTo.trim() || null, amount: amt, store: store || null, paid_until: paidUntil, comment: comment.trim() || null };
-    const res = initial.id ? await supabase.from("fin_services").update(payload).eq("id", initial.id) : await supabase.from("fin_services").insert(payload);
+    const res = initial.id ? await supabase.from("pay_services").update(payload).eq("id", initial.id) : await supabase.from("pay_services").insert(payload);
     setSaving(false);
     if (res.error) return setError(res.error.message);
     onSaved();

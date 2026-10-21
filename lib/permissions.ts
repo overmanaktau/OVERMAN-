@@ -42,11 +42,11 @@ export const SECTIONS = [
   { key: "finance.opiu", label: "Финансы: ОПИУ (прибыли и убытки, план)", group: "finance", hasEdit: true },
   { key: "finance.debts", label: "Финансы: Долги", group: "finance", hasEdit: true },
   { key: "finance.planned", label: "Финансы: Плановые платежи", group: "finance", hasEdit: true },
-  { key: "finance.payments", label: "Финансы: Оплаты (услуги, лицензии, сроки)", group: "finance", hasEdit: true },
   { key: "finance.settings", label: "Финансы: Настройки (статьи, счета, партнёры, поставщики)", group: "finance", hasEdit: true },
 
   { key: "settings.employees", label: "Сотрудники и доступы", group: "settings", hasEdit: true },
   { key: "settings.passwords", label: "Пароли", group: "settings", hasEdit: true },
+  { key: "settings.payments", label: "Оплаты (услуги, лицензии, сроки)", group: "settings", hasEdit: true },
   { key: "settings.coach", label: "Помощник консультантов (Telegram-бот)", group: "settings", hasEdit: true },
   { key: "history", label: "История", group: "settings", hasEdit: false },
 

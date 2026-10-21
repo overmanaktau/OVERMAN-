@@ -11,6 +11,7 @@ function RequireSettingsAccess({ children }: { children: React.ReactNode }) {
     !isAdmin &&
     !permissions["settings.employees"].canView &&
     !permissions["settings.passwords"].canView &&
+    !permissions["settings.payments"].canView &&
     !permissions["settings.coach"].canView
   ) {
     return (
