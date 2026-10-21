@@ -363,11 +363,6 @@ export default function PasswordsPage() {
     historyByNetwork.set(netId, list);
   }
 
-  function storeName(code: string | null) {
-    if (code === null) return null;
-    return stores.find((s) => s.code === code)?.name ?? code;
-  }
-
   const cityOptions = (
     <>
       <option value={ALL_CITIES}>Все города</option>
@@ -564,7 +559,6 @@ export default function PasswordsPage() {
                     <div className="flex flex-col">
                       {rows.map((p) => {
                         const isRevealed = revealed.has(p.id);
-                        const city = storeName(p.store);
                         const isEditing = editingId === p.id;
 
                         if (isEditing) {
@@ -641,7 +635,6 @@ export default function PasswordsPage() {
                             <div className="font-semibold truncate">
                               {p.login}
                               {p.label ? <span className="text-muted font-normal"> · {p.label}</span> : null}
-                              {city ? <span className="text-mutedLight font-normal"> · {city}</span> : null}
                             </div>
                             <div className="num text-muted truncate">
                               {isRevealed ? p.password : "•".repeat(Math.min(p.password.length, 12))}
