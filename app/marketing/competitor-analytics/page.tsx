@@ -407,7 +407,7 @@ export default function CompetitorAnalyticsPage() {
               <div className="flex flex-col gap-0.5">
                 <div className="text-[15px] font-bold">Автосинхронизация контента конкурентов</div>
                 <div className="text-xs text-muted max-w-md">
-                  Ежедневная выгрузка постов через Apify. Выключение остановит только новые загрузки —
+                  Ежедневная выгрузка постов через Meta. Выключение остановит только новые загрузки —
                   уже собранные данные останутся. Отдельного конкурента можно исключить галочкой ниже.
                 </div>
               </div>
@@ -453,14 +453,6 @@ export default function CompetitorAnalyticsPage() {
                     {savingSettings ? "Сохраняем…" : justSavedSettings ? "Сохранено" : "Сохранить"}
                   </button>
                 )}
-                <a
-                  href="https://console.apify.com/billing"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[13px] font-bold rounded-lg px-4 py-2.5 border border-border text-muted hover:text-ink"
-                >
-                  Оплатить Apify
-                </a>
               </div>
             </div>
             {settingsError && <div className="text-sm text-[#A34B36]">{settingsError}</div>}
@@ -760,8 +752,7 @@ export default function CompetitorAnalyticsPage() {
               <div className="text-sm text-muted py-4">Загрузка…</div>
             ) : displayedTopContent.length === 0 ? (
               <div className="text-sm text-muted py-4">
-                Нет данных за этот период — контент отслеживаемых конкурентов ещё не синхронизирован
-                (нужен источник данных, например Apify).
+                Нет данных за этот период — контент отслеживаемых конкурентов ещё не синхронизирован.
               </div>
             ) : (
               <div className="flex flex-col">

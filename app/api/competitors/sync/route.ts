@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
-import { fetchInstagramPosts } from "@/lib/apify";
+import { fetchCompetitorPosts } from "@/lib/competitorPosts";
 import { getErrorMessage } from "@/lib/errors";
 
-// Cost is per post scraped (~$0.0023 each on the Starter plan) — roughly
-// $0.0023 * results_per_competitor * competitor count * 30 days/month.
-// results_per_competitor is editable on the Аналитика конкурентов page;
-// this is only the fallback if that setting is somehow missing.
+// Публикации конкурентов берутся у Meta (lib/competitorPosts.ts) — бесплатно, по одному запросу на аккаунт.
+// results_per_competitor редактируется на странице «Аналитика конкурентов»; это значение только на случай, если настройки нет.
 const DEFAULT_RESULTS_PER_COMPETITOR = 6;
 
 async function runSync() {
@@ -31,46 +29,43 @@ async function runSync() {
     return { competitors: 0, posts: 0, upserted: 0 };
   }
 
-  const byHandle = new Map(competitors.map((c) => [c.handle.toLowerCase(), c.id]));
-  const posts = await fetchInstagramPosts(competitors.map((c) => c.handle), resultsPerCompetitor);
-
+  let posts = 0;
   let upserted = 0;
-  const skippedHandles = new Set<string>();
-  for (const p of posts) {
-    const owner = (p.ownerUsername ?? "").toLowerCase();
-    const competitorId = byHandle.get(owner);
-    if (!competitorId || !p.url) {
-      if (owner) skippedHandles.add(owner);
-      continue;
+  const failedHandles: string[] = [];
+  for (const c of competitors) {
+    try {
+      const list = await fetchCompetitorPosts(c.handle, resultsPerCompetitor);
+      posts += list.length;
+      for (const p of list) {
+        const { error: upsertError } = await supabaseAdmin.from("competitor_content").upsert(
+          {
+            competitor_id: c.id,
+            platform: "instagram",
+            post_url: p.url,
+            posted_at: p.timestamp,
+            caption: p.caption,
+            media_type: p.type,
+            thumbnail_url: p.thumbnail,
+            likes: p.likes,
+            comments: p.comments,
+            shares: 0, // Instagram не отдаёт число репостов
+            views: p.views, // 0 у фото и каруселей — у Instagram для них просмотров нет
+            synced_at: new Date().toISOString(),
+          },
+          { onConflict: "platform,post_url" }
+        );
+        if (upsertError) throw upsertError;
+        upserted++;
+      }
+    } catch (e) {
+      failedHandles.push(`${c.handle}: ${getErrorMessage(e).slice(0, 120)}`); // один недоступный аккаунт не должен останавливать остальных
     }
-
-    const { error: upsertError } = await supabaseAdmin.from("competitor_content").upsert(
-      {
-        competitor_id: competitorId,
-        platform: "instagram",
-        post_url: p.url,
-        posted_at: p.timestamp,
-        caption: p.caption ?? null,
-        media_type: p.type ?? null,
-        thumbnail_url: p.displayUrl ?? null,
-        likes: p.likesCount ?? 0,
-        comments: p.commentsCount ?? 0,
-        shares: 0, // Instagram never exposes a repost/share count publicly
-        views: p.videoPlayCount ?? 0, // 0 for photo posts — IG has no view count for those at all
-        synced_at: new Date().toISOString(),
-      },
-      { onConflict: "platform,post_url" }
-    );
-    if (upsertError) throw upsertError;
-    upserted++;
+    await new Promise((r) => setTimeout(r, 250));
   }
 
-  return {
-    competitors: competitors.length,
-    posts: posts.length,
-    upserted,
-    skippedHandles: [...skippedHandles],
-  };
+  // если не получилось ни у кого — это сбой, а не «недоступные аккаунты»
+  if (failedHandles.length === competitors.length) throw new Error(`Meta не отдала данные ни по одному аккаунту. ${failedHandles[0]}`);
+  return { competitors: competitors.length, posts, upserted, failedHandles };
 }
 
 async function handle(request: Request) {
