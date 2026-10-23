@@ -14,6 +14,7 @@ import { REGISTER_STORE, SAYA_PARK_REGISTER_ID, SAYA_PARK_RETIRED_FROM } from "@
 import { fetchTrafficUntilHour } from "@/lib/trafficCounters";
 import { certificateSummary, type CertSummary } from "@/lib/reports/certificates";
 import { shortPerson } from "@/lib/personName";
+import { bonusPaidOnDemands } from "@/lib/reports/bonusPaid";
 
 // compact: укороченный формат — без валового, Instagram, публикаций, рекламы и
 // топа товаров, зато с количеством товара в итогах дня. У Актау и Актобе
@@ -257,30 +258,35 @@ async function paymentBlock(dayRows: SalesRow[], from: string, to: string, scope
   const payments = await fetchPaymentSummariesForRange(from, to);
   let total = 0;
   let cash = 0;
+  const saleIds: string[] = [];
   for (const p of payments) {
     if (!registerIds.has(p.retailStoreId)) continue;
     const sign = p.kind === "sale" ? 1 : -1;
     total += sign * p.sum;
     cash += sign * p.cash;
+    if (p.kind === "sale" && p.id) saleIds.push(p.id);
   }
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
+  // оплаченное бонусами МойСклад записывает внутри «безнал» — показываем отдельно и из безнала вычитаем: нал + безнал + бонусы = выручка
+  const bonus = await bonusPaidOnDemands(saleIds).catch(() => 0);
   const cashT = cash / 100;
-  const nonT = (total - cash) / 100;
+  const nonT = (total - cash) / 100 - bonus;
   const lines = [line("Наличные", money(cashT)), line("Безнал", money(nonT))];
+  if (bonus > 0) lines.push(line("Оплата бонусами", money(bonus)));
 
   // Сертификаты (учёт в боте): продажи, возвраты и оплата чеков сертификатами; сбой чтения не ломает отчёт
   const cert: CertSummary | null = scope ? await certificateSummary(scope.cityCodes, from, to).catch(() => null) : null;
   if (cert?.hasActivity) {
     const l2 = (label: string, value: string) => `${label.padEnd(19)}${value.padStart(13)}`;
-    if (cert.soldCash > 0) lines.push(l2("Серт. продано нал", money(cert.soldCash)));
-    if (cert.soldNoncash > 0) lines.push(l2("Серт. продано безнал", money(cert.soldNoncash)));
+    if (cert.soldCash > 0) lines.push(l2("Серт. продан нал", money(cert.soldCash)));
+    if (cert.soldNoncash > 0) lines.push(l2("Серт. продан безнал", money(cert.soldNoncash)));
     const returned = cert.returnedCash + cert.returnedNoncash;
     if (returned > 0) lines.push(l2("Серт. возвраты", `-${money(returned)}`));
     const inChecks = cert.deductCash + cert.deductNoncash;
-    if (inChecks > 0) lines.push(l2("Серт. в чеках", `-${money(inChecks)}`));
+    if (inChecks > 0) lines.push(l2("Серт. использован", `-${money(inChecks)}`));
     const inCash = cashT - cert.deductCash + cert.soldCash - cert.returnedCash;
     const inNon = nonT - cert.deductNoncash + cert.soldNoncash - cert.returnedNoncash;
-    lines.push("─".repeat(32), l2("Поступило нал", money(inCash)), l2("Поступило безнал", money(inNon)), l2("Поступило всего", money(inCash + inNon)));
+    lines.push("─".repeat(32), l2("Поступило нал", money(inCash)), l2("Поступило безнал", money(inNon)));
   }
   return pre(lines.join("\n"));
 }
@@ -749,7 +755,9 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
   // способ оплаты по документам тех же касс
   const liveRegister = (id: string | undefined) => !!id && inScope(REGISTER_STORE[id]) && !(id === SAYA_PARK_REGISTER_ID && date >= SAYA_PARK_RETIRED_FROM);
   let cash = 0, total = 0, retCash = 0, retTotal = 0;
-  for (const d of demands) if (liveRegister(d.retailStore?.id)) { total += d.sum ?? 0; cash += d.cashSum ?? 0; }
+  const liveDemandIds: string[] = [];
+  for (const d of demands) if (liveRegister(d.retailStore?.id)) { total += d.sum ?? 0; cash += d.cashSum ?? 0; if (d.id) liveDemandIds.push(d.id); }
+  const bonusPaid = await bonusPaidOnDemands(liveDemandIds).catch(() => 0);
   for (const r of returns) if (liveRegister(r.retailStore?.id)) { retTotal += r.sum ?? 0; retCash += r.cashSum ?? 0; }
 
   const visitors = traffic ? scope.cityCodes.reduce((a, c) => a + (traffic.get(c)?.fact ?? 0), 0) : 0;
@@ -766,7 +774,9 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
       line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
     ].join("\n")
   );
-  const payments = pre([line("Наличные", money((cash - retCash) / 100)), line("Безнал", money((total - cash - (retTotal - retCash)) / 100))].join("\n"));
+  const paymentLines = [line("Наличные", money((cash - retCash) / 100)), line("Безнал", money((total - cash - (retTotal - retCash)) / 100 - bonusPaid))];
+  if (bonusPaid > 0) paymentLines.push(line("Оплата бонусами", money(bonusPaid)));
+  const payments = pre(paymentLines.join("\n"));
 
   // сотрудники: смена = были продажи; трафик смены — весь трафик города за сегодня до 17:00
   const byPerson = new Map<string, { name: string; revenue: number; receipts: number; items: number; retAmount: number; retItems: number; retReceipts: number }>();

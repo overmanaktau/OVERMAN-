@@ -226,7 +226,7 @@ export async function fetchLtvChecksForRange(fromDate: string, toDate: string): 
 // Способы оплаты по документам дня: чек (sale) или возврат (return), его сумма
 // и сколько из неё наличными (cashSum) — всё остальное (карта, QR) безнал.
 // Лёгкая выгрузка без expand и позиций, как у fetchRetailDemandSummariesForDate.
-export type PaymentSummary = { kind: "sale" | "return"; retailStoreId: string; sum: number; cash: number };
+export type PaymentSummary = { id: string; kind: "sale" | "return"; retailStoreId: string; sum: number; cash: number };
 
 // То же за несколько дней подряд (недельный и месячный отчёты): окно от начала
 // первого дня до 02:00 после последнего, как у dayWindow.
@@ -245,10 +245,10 @@ export async function fetchPaymentSummariesForRange(fromDate: string, toDate: st
     let offset = 0;
     for (;;) {
       const page = await moyskladFetch(path, { filter, limit: String(limit), offset: String(offset) });
-      type Raw = { sum?: number; cashSum?: number; retailStore?: { meta?: { href?: string } } | null };
+      type Raw = { id?: string; sum?: number; cashSum?: number; retailStore?: { meta?: { href?: string } } | null };
       const rows: Raw[] = page.rows ?? [];
       for (const r of rows) {
-        all.push({ kind, retailStoreId: idOf(r.retailStore), sum: r.sum ?? 0, cash: r.cashSum ?? 0 });
+        all.push({ id: r.id ?? "", kind, retailStoreId: idOf(r.retailStore), sum: r.sum ?? 0, cash: r.cashSum ?? 0 });
       }
       if (rows.length < limit) break;
       offset += limit;
