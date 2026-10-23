@@ -282,8 +282,12 @@ async function paymentBlock(dayRows: SalesRow[], from: string, to: string, scope
     if (cert.soldNoncash > 0) lines.push(l2("Серт. продан безнал", money(cert.soldNoncash)));
     const returned = cert.returnedCash + cert.returnedNoncash;
     if (returned > 0) lines.push(l2("Серт. возвраты", `-${money(returned)}`));
-    const inChecks = cert.deductCash + cert.deductNoncash;
-    if (inChecks > 0) lines.push(l2("Серт. использован", `-${money(inChecks)}`));
+    // «Серт. использован» — отдельно, чем оплачен сертификат (нал / безнал), как и продажа
+    if (cert.deductCash + cert.deductNoncash > 0) {
+      lines.push("Серт. использован");
+      if (cert.deductCash > 0) lines.push(l2("  нал", `-${money(cert.deductCash)}`));
+      if (cert.deductNoncash > 0) lines.push(l2("  безнал", `-${money(cert.deductNoncash)}`));
+    }
     const inCash = cashT - cert.deductCash + cert.soldCash - cert.returnedCash;
     const inNon = nonT - cert.deductNoncash + cert.soldNoncash - cert.returnedNoncash;
     lines.push("─".repeat(32), l2("Поступило нал", money(inCash)), l2("Поступило безнал", money(inNon)));
