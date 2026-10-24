@@ -911,9 +911,10 @@ export async function handleCertOwnerCallback(
 // ───────── списки для администраторов и владельцев ─────────
 
 type Kind = "s" | "u" | "n" | "e";
-type Per = "pm" | "pw" | "tw" | "tm" | "all";
+type Per = "t" | "y" | "tw" | "pw" | "tm" | "pm" | "all";
 const KIND_LABEL: Record<Kind, string> = { s: "Проданные", u: "Использованные", n: "Не использованные", e: "Просроченные" };
-const PER_LABEL: Record<Per, string> = { pm: "Прошлый месяц", pw: "Прошлая неделя", tw: "Эта неделя", tm: "Этот месяц", all: "За всё время" };
+const PER_LABEL: Record<Per, string> = { t: "Сегодня", y: "Вчера", tw: "Эта неделя", pw: "Прошлая неделя", tm: "Этот месяц", pm: "Прошлый месяц", all: "За всё время" };
+const PER_ORDER: Per[] = ["t", "y", "tw", "pw", "tm", "pm", "all"];
 
 export async function sendCertAdminMenu(t: Transport, chatId: number) {
   await t.send(chatId, "🎟 <b>Сертификаты</b>\nКакой список показать?", {
@@ -924,6 +925,8 @@ export async function sendCertAdminMenu(t: Transport, chatId: number) {
 function periodRange(per: Per): { from: string; to: string } | null {
   const today = todayInAlmaty();
   if (per === "all") return null;
+  if (per === "t") return { from: today, to: today };
+  if (per === "y") return { from: addDays(today, -1), to: addDays(today, -1) };
   if (per === "tm") return { from: monthStartOf(today), to: today };
   if (per === "tw") return { from: mondayOf(today), to: today };
   if (per === "pw") {
@@ -1006,7 +1009,7 @@ export async function handleCertAdminCallback(data: string, t: Transport, chatId
   await dropCurrent();
   const periodMenu = async (store: string, back: string) => {
     await t.send(chatId, `🎟 <b>${KIND_LABEL[k]}${store === "all" ? "" : ` · ${cityName(store)}`}</b>\nЗа какой период?`, {
-      inline_keyboard: [...(["pm", "pw", "tw", "tm", "all"] as Per[]).map((p) => [{ text: PER_LABEL[p], callback_data: `ca:p:${k}:${store}:${p}` }]), [{ text: "← Назад", callback_data: back }]],
+      inline_keyboard: [...PER_ORDER.map((p) => [{ text: PER_LABEL[p], callback_data: `ca:p:${k}:${store}:${p}` }]), [{ text: "← Назад", callback_data: back }]],
     });
   };
   if (action === "k") {

@@ -122,7 +122,7 @@ export async function handlePlanCallback(
   if (action === "r" && (a === "t" || a === "m" || a === "w" || a === "r") && (b === "o" || b === "l")) {
     await dropCurrent();
     try {
-      await t.send(chatId, await buildPlanMessage(emp, a, b), { inline_keyboard: [[{ text: "← Другой план", callback_data: "pl:m" }]] });
+      await t.send(chatId, await buildPlanMessage(emp, a, b)); // без кнопок: план остаётся в чате, другой выбирают заново через меню
     } catch (e) {
       await t.send(chatId, `Не удалось собрать план: ${e instanceof Error ? e.message : String(e)}`);
     }

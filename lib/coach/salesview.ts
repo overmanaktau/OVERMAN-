@@ -1,17 +1,21 @@
 // Раздел «Продажи» для администратора бота: продажи стилистов-консультантов по
-// выбранному городу за вчера / последние 7 дней / месяц. Администратор видит
+// выбранному городу за сегодня, вчера, эту и прошлую неделю, этот и прошлый месяц или свой период. Администратор видит
 // только свои города (admin_scope: 'city' — свой, 'all' — все).
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
-import { SCOPES, buildCashReport, money, num, pre, shortName } from "@/lib/reports/sales";
+import { SCOPES, buildCashReport, buildIntradayReport, money, num, pre, shortName } from "@/lib/reports/sales";
+import { fetchRetailDemandsForDate, fetchRetailSalesReturnsForDate } from "@/lib/moysklad";
+import { aggregateSales } from "@/lib/salesAggregate";
 import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { addDays, daysBetween, employeeDayPlans, loadEmployeeDays, monthEndOf, monthStartOf, mondayOf, shortDate, todayInAlmaty } from "@/lib/coach/metrics";
 import { loadPeriod } from "@/lib/reports/weeklyCompare";
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 const HIDDEN_NAME = /саяпарк|saya/i;
-type Period = "y" | "w" | "m" | "c" | "t" | "cw"; // c — свой период (даты вводятся текстом); t, cw — только для «Продажи и план»
-const PERIOD_LABEL: Record<Period, string> = { y: "Вчера", w: "Последние 7 дней", m: "Месяц", c: "Свой период", t: "Сегодня", cw: "Эта неделя" };
+// Периоды одинаковые во всех режимах: сегодня, вчера, эта и прошлая неделя, этот и прошлый месяц; c — свой период (даты вводятся текстом).
+type Period = "t" | "y" | "cw" | "pw" | "m" | "pm" | "c";
+const PERIOD_LABEL: Record<Period, string> = { t: "Сегодня", y: "Вчера", cw: "Эта неделя", pw: "Прошлая неделя", m: "Этот месяц", pm: "Прошлый месяц", c: "Свой период" };
+const PERIOD_ORDER: Period[] = ["t", "y", "cw", "pw", "m", "pm"];
 type Range = { from: string; to: string };
 const MAX_CUSTOM_DAYS = 366;
 const MAX_PLAN_DAYS = 62; // «Продажи и план»: по дням, слишком длинную таблицу не читать
@@ -52,10 +56,10 @@ async function sendCityMenu(t: Transport, chatId: number | string, mode: Mode, s
 }
 
 async function sendPeriodMenu(t: Transport, chatId: number | string, mode: Mode, store: string, canGoBack: boolean) {
-  const list: Period[] = mode === "p" || mode === "q" ? ["t", "y", "cw", "m"] : ["y", "w", "m"];
-  const rows: { text: string; callback_data: string }[][] = list.map((p) => [
-    { text: PERIOD_LABEL[p], callback_data: `adm:s:p:${mode}:${store}:${p}` },
-  ]);
+  const rows: { text: string; callback_data: string }[][] = [];
+  for (let i = 0; i < PERIOD_ORDER.length; i += 2) {
+    rows.push(PERIOD_ORDER.slice(i, i + 2).map((p) => ({ text: PERIOD_LABEL[p], callback_data: `adm:s:p:${mode}:${store}:${p}` })));
+  }
   rows.push([{ text: "✏️ Свой период", callback_data: `adm:s:x:${mode}:${store}` }]);
   // Назад: к выбору города (если городов несколько) или к выбору «по сотрудникам / по городу».
   rows.push([{ text: "← Назад", callback_data: canGoBack ? `adm:s:m:${mode}` : "adm:s" }]);
@@ -69,21 +73,19 @@ async function sendPeriodMenu(t: Transport, chatId: number | string, mode: Mode,
 function rangeFor(period: Period, custom?: Range, plan = false): Range {
   const today = todayInAlmaty();
   const yesterday = addDays(today, -1);
-  if (plan) {
-    // «Продажи и план»: план есть и на сегодня, и на будущие дни — ничего не обрезаем
-    if (period === "c" && custom) return custom;
-    if (period === "t") return { from: today, to: today };
-    if (period === "y") return { from: yesterday, to: yesterday };
-    if (period === "cw") return { from: mondayOf(today), to: addDays(mondayOf(today), 6) };
-    return { from: monthStartOf(today), to: monthEndOf(today) };
-  }
+  const monday = mondayOf(today);
+  const prevMonthEnd = addDays(monthStartOf(today), -1);
   if (period === "c" && custom) {
-    // Данные есть по вчера: будущие даты обрезаем.
-    return { from: custom.from, to: custom.to > yesterday ? yesterday : custom.to };
+    // «Продажи и план»: план есть и на будущие дни — ничего не обрезаем; в остальных режимах данные есть по вчера: будущие даты обрезаем.
+    return plan ? custom : { from: custom.from, to: custom.to > yesterday ? yesterday : custom.to };
   }
+  if (period === "t") return { from: today, to: today };
   if (period === "y") return { from: yesterday, to: yesterday };
-  if (period === "w") return { from: addDays(yesterday, -6), to: yesterday };
-  return { from: monthStartOf(today), to: yesterday };
+  if (period === "pw") return { from: addDays(monday, -7), to: addDays(monday, -1) };
+  if (period === "pm") return { from: monthStartOf(prevMonthEnd), to: prevMonthEnd };
+  // «Продажи и план» — неделя и месяц целиком (план есть и на будущие дни); остальное — по вчера, на понедельник «эта неделя» ещё пуста
+  if (period === "cw") return plan ? { from: monday, to: addDays(monday, 6) } : { from: monday, to: yesterday };
+  return plan ? { from: monthStartOf(today), to: monthEndOf(today) } : { from: monthStartOf(today), to: yesterday };
 }
 
 // ---- Ввод своего периода ----
@@ -163,6 +165,14 @@ export async function handleCustomPeriodInput(
 
 // Общая касса города за период (для «Все города» — касса каждого города и общий итог).
 async function buildCashMessages(store: string, period: Period, custom?: Range): Promise<string[]> {
+  if (period === "t") {
+    // сегодня — живые данные: тот же отчёт, что приходит в группы днём, но за весь день до этой минуты
+    const today = todayInAlmaty();
+    const todayScopes = store === "all" ? [SCOPES.point_1, SCOPES.point_3, SCOPES.all] : [SCOPES[store]];
+    const out: string[] = [];
+    for (const scope of todayScopes) out.push(...(await buildIntradayReport(scope, today, 24)));
+    return out;
+  }
   const { from, to } = rangeFor(period, custom);
   if (from > to) return ["📊 <b>Касса</b>\n\nЗа этот период данных ещё нет."];
   const scopes = store === "all" ? [SCOPES.point_1, SCOPES.point_3, SCOPES.all] : [SCOPES[store]];
@@ -207,7 +217,6 @@ function splitLong(text: string, limit = 3800): string[] {
 }
 
 async function sendReport(t: Transport, chatId: number | string, mode: Mode, store: string, period: Period, custom?: Range) {
-  const back: ReplyMarkup = { inline_keyboard: [[{ text: "← Другой период", callback_data: `adm:s:c:${mode}:${store}` }]] };
   let messages: string[];
   try {
     messages = mode === "k" ? await buildCashMessages(store, period, custom) : mode === "p" ? [await buildPlanReport(store, period, custom)] : mode === "q" ? [await buildEmployeePlanReport(store, period, custom)] : [await buildReport(store, period, custom)];
@@ -215,10 +224,8 @@ async function sendReport(t: Transport, chatId: number | string, mode: Mode, sto
     messages = [`Не удалось собрать продажи: ${escapeHtml(e instanceof Error ? e.message : String(e))}`];
   }
   messages = messages.flatMap((m) => splitLong(m));
-  // Кнопка возврата — только под последним сообщением отчёта.
-  for (let i = 0; i < messages.length; i++) {
-    await t.send(chatId, messages[i], i === messages.length - 1 ? back : undefined);
-  }
+  // Без кнопок под отчётом: он остаётся в чате, другой период выбирают заново через меню.
+  for (const message of messages) await t.send(chatId, message);
 }
 
 // Всё, что показываем по сотруднику (и по городу в итоге): выручка, чеки, товары,
@@ -269,11 +276,26 @@ async function loadSales(store: string, from: string, to: string): Promise<Sales
   }
 }
 
+// Сегодняшний день ещё не загружен в базу (она обновляется ночью) — берём чеки сегодняшнего дня прямо из МойСклад, как в дневном отчёте.
+async function liveTodayList(store: string): Promise<Agg[]> {
+  const today = todayInAlmaty();
+  const [demands, returns] = await Promise.all([fetchRetailDemandsForDate(today), fetchRetailSalesReturnsForDate(today)]);
+  const agg = await aggregateSales(today, demands, returns);
+  const list: Agg[] = [];
+  for (const [key, e] of agg.byEmployee) {
+    if (e.store !== store || HIDDEN_NAME.test(e.name)) continue;
+    const shifts = e.receipts > 0 || e.revenue > 0 ? 1 : 0;
+    list.push({ id: key.slice(0, key.lastIndexOf("|")), name: e.name, revenue: e.revenue, receipts: e.receipts, items: e.items, retAmount: e.returnedAmount, retReceipts: e.returnedReceipts, retItems: e.returnedItems, shifts });
+  }
+  return list.sort((a, b) => b.revenue - a.revenue);
+}
+
 async function cityData(store: string, period: Period, custom?: Range): Promise<{ list: Agg[]; planOf: Map<string, number> }> {
+  if (period === "t") return { list: await liveTodayList(store), planOf: new Map() };
   const { from, to } = rangeFor(period, custom);
   const [salesRows, plans] = await Promise.all([
     loadSales(store, from, to),
-    period === "m"
+    period === "m" || period === "pm"
       ? supabaseAdmin.from("sales_plan_monthly").select("employee_ms_id, sales_plan").eq("store", store).eq("plan_month", monthStartOf(to))
       : Promise.resolve({ data: [] as { employee_ms_id: string; sales_plan: number | null }[], error: null }),
   ]);
@@ -350,7 +372,7 @@ function cityLines(list: Agg[], planOf: Map<string, number>, period: Period): st
   for (const a of list) {
     lines.push(`${shortName(a.name).slice(0, 13).padEnd(13)}${money(a.revenue).padStart(13)}`, ...detailLines(a));
     const plan = planOf.get(a.id);
-    if (period === "m" && plan !== undefined && plan > 0) {
+    if ((period === "m" || period === "pm") && plan !== undefined && plan > 0) {
       lines.push(`  план ${money(plan)} · ${((a.revenue / plan) * 100).toFixed(1)}%`);
     }
   }
@@ -364,7 +386,7 @@ async function buildReport(store: string, period: Period, custom?: Range): Promi
   const label = store === "all" ? "Все города" : (CITY[store] ?? store);
   // Для своего периода показываем даты с годом, если он не текущий.
   const fmt = (d: string) => (d.slice(0, 4) === todayInAlmaty().slice(0, 4) ? shortDate(d) : `${shortDate(d)}.${d.slice(0, 4)}`);
-  const title = `📊 <b>Продажи · ${label}</b>\n${PERIOD_LABEL[period]}: ${from === to ? fmt(from) : `${fmt(from)}–${fmt(to)}`} (по вчера)`;
+  const title = `📊 <b>Продажи · ${label}</b>\n${PERIOD_LABEL[period]}: ${from === to ? fmt(from) : `${fmt(from)}–${fmt(to)}`} ${period === "t" ? "(сейчас)" : "(по вчера)"}`;
   if (from > to) return `${title}\n\nЗа этот период данных ещё нет.`;
 
   const cities = store === "all" ? ALL_STORES : [store];
@@ -571,7 +593,6 @@ export async function handleSalesCallback(parts: string[], t: Transport, chatId:
   }
   const period = parts[5] as Period;
   if (kind !== "p" || !(period in PERIOD_LABEL) || period === "c") return;
-  if (mode !== "p" && mode !== "q" && (period === "t" || period === "cw")) return;
   await sendReport(t, chatId, mode, store, period);
 }
 
