@@ -12,7 +12,7 @@ import {
 import { aggregateSales } from "@/lib/salesAggregate";
 import { REGISTER_STORE, SAYA_PARK_REGISTER_ID, SAYA_PARK_RETIRED_FROM } from "@/lib/registers";
 import { fetchTrafficUntilHour } from "@/lib/trafficCounters";
-import { certificateSummary, type CertSummary } from "@/lib/reports/certificates";
+import { certificateSummary, type ByMethod, type CertSummary } from "@/lib/reports/certificates";
 import { shortPerson } from "@/lib/personName";
 import { bonusPaidOnDemands } from "@/lib/reports/bonusPaid";
 
@@ -278,21 +278,20 @@ async function paymentBlock(dayRows: SalesRow[], from: string, to: string, scope
   const cert: CertSummary | null = scope ? await certificateSummary(scope.cityCodes, from, to).catch(() => null) : null;
   if (cert?.hasActivity) {
     const l2 = (label: string, value: string) => `${label.padEnd(19)}${value.padStart(13)}`;
-    if (cert.soldCash > 0) lines.push(l2("Серт. продан нал", money(cert.soldCash)));
-    if (cert.soldNoncash > 0) lines.push(l2("Серт. продан безнал", money(cert.soldNoncash)));
-    const returned = cert.returnedCash + cert.returnedNoncash;
-    if (returned > 0) lines.push(l2("Серт. возвраты", `-${money(returned)}`));
-    // «Серт. использован» — отдельно, чем оплачен сертификат (нал / безнал), как и продажа
-    if (cert.deductCash + cert.deductNoncash > 0) {
-      lines.push("Серт. использован");
-      if (cert.deductCash > 0) lines.push(l2("  нал", `-${money(cert.deductCash)}`));
-      if (cert.deductNoncash > 0) lines.push(l2("  безнал", `-${money(cert.deductNoncash)}`));
-    }
+    // Продан / использован / возврат: сколько штук и на какую сумму — отдельно по способу оплаты сертификата (нал, безнал)
+    lines.push(...certMethodLines("Серт. продан", cert.soldBy, ""), ...certMethodLines("Серт. использован", cert.usedInChecksBy, "-"), ...certMethodLines("Серт. возврат", cert.returnedBy, "-"));
     const inCash = cashT - cert.deductCash + cert.soldCash - cert.returnedCash;
     const inNon = nonT - cert.deductNoncash + cert.soldNoncash - cert.returnedNoncash;
     lines.push("─".repeat(32), l2("Поступило нал", money(inCash)), l2("Поступило безнал", money(inNon)));
   }
   return pre(lines.join("\n"));
+}
+
+// Строки «Серт. …» с разбивкой по способу оплаты: заголовок и под ним нал / безнал (смешанная — отдельно), у каждой штуки и сумма.
+function certMethodLines(title: string, by: ByMethod, sign: "" | "-"): string[] {
+  const rows = ([["нал", by.cash], ["безнал", by.noncash], ["смеш.", by.mixed]] as const).filter(([, s]) => s.count > 0);
+  if (rows.length === 0) return [];
+  return [title, ...rows.map(([label, s]) => `  ${label.padEnd(8)}${`${num(s.count)} шт`.padStart(7)}${`${sign}${money(s.amount)}`.padStart(17)}`)];
 }
 
 // Раздел «СЕРТИФИКАТЫ» недельного и месячного отчёта: сколько продано, использовано, возвращено, что осталось.
@@ -302,10 +301,16 @@ async function certificatesBlock(scope: ReportScope, from: string, to: string): 
   if (c.soldCount + c.usedCount + c.returnedCount + c.unusedCount + c.expiredCount === 0) return null;
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
   const cnt = (n: number, amount: number) => `${num(n)} шт · ${money(amount)}`;
+  // под «Продано / Использовано / Возвращено» — по способу оплаты сертификата: сколько штук и на какую сумму
+  const sub = (by: ByMethod) =>
+    ([["нал", by.cash], ["безнал", by.noncash], ["смеш.", by.mixed]] as const).filter(([, s]) => s.count > 0).map(([label, s]) => line(`  ${label}`, cnt(s.count, s.amount)));
   const lines = [
     line("Продано", cnt(c.soldCount, c.soldCash + c.soldNoncash)),
+    ...sub(c.soldBy),
     line("Использовано", cnt(c.usedCount, c.usedAmount)),
+    ...sub(c.usedBy),
     line("Возвращено", cnt(c.returnedCount, c.returnedCash + c.returnedNoncash)),
+    ...sub(c.returnedBy),
   ];
   if (c.burned > 0) lines.push(line("Сгорело при исп.", money(c.burned)));
   lines.push(line("Не использовано", cnt(c.unusedCount, c.unusedAmount)));

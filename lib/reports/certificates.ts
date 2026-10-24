@@ -23,7 +23,25 @@ type CertRow = {
   use_demand_sum: number | null;
 };
 
+// Сертификаты по способу оплаты: сколько штук и на какую сумму. Смешанная оплата (часть нал, часть безнал) — отдельной строкой.
+export type MethodStat = { count: number; amount: number };
+export type ByMethod = { cash: MethodStat; noncash: MethodStat; mixed: MethodStat };
+
+function byMethod(list: CertRow[], amountOf: (c: CertRow) => number): ByMethod {
+  const out: ByMethod = { cash: { count: 0, amount: 0 }, noncash: { count: 0, amount: 0 }, mixed: { count: 0, amount: 0 } };
+  for (const c of list) {
+    const bucket = Number(c.pay_cash) > 0 && Number(c.pay_noncash) > 0 ? out.mixed : Number(c.pay_cash) > 0 ? out.cash : out.noncash;
+    bucket.count += 1;
+    bucket.amount += amountOf(c);
+  }
+  return out;
+}
+
 export type CertSummary = {
+  soldBy: ByMethod; // продано в периоде — по способу оплаты
+  returnedBy: ByMethod;
+  usedBy: ByMethod; // использовано в периоде (по дате использования), номинал
+  usedInChecksBy: ByMethod; // оплатили чеки периода: сумма — сколько вычтено из оплаты чека
   soldCount: number;
   soldCash: number;
   soldNoncash: number;
@@ -75,6 +93,7 @@ export async function certificateSummary(cityCodes: string[], from: string, to: 
   let deductCash = 0;
   let deductNoncash = 0;
   let burned = 0;
+  const checkShare = new Map<number, number>(); // сертификат → сколько его номинала вычтено из чека
   for (const list of byCheck.values()) {
     const nominal = sum(list, (c) => Number(c.amount));
     const checkSum = list[0].use_demand_sum != null ? Number(list[0].use_demand_sum) : nominal;
@@ -82,6 +101,7 @@ export async function certificateSummary(cityCodes: string[], from: string, to: 
     burned += nominal - deducted;
     const k = nominal > 0 ? deducted / nominal : 0;
     for (const c of list) {
+      checkShare.set(c.id, Number(c.amount) * k);
       deductCash += Number(c.pay_cash) * k;
       deductNoncash += Number(c.pay_noncash) * k;
     }
@@ -92,6 +112,10 @@ export async function certificateSummary(cityCodes: string[], from: string, to: 
   const unused = rows(open).filter((c) => !isExpired(c));
   const expired = rows(open).filter(isExpired);
   const s: CertSummary = {
+    soldBy: byMethod(rows(sold), (c) => Number(c.amount)),
+    returnedBy: byMethod(rows(returned), (c) => Number(c.amount)),
+    usedBy: byMethod(rows(usedByDate), (c) => Number(c.amount)),
+    usedInChecksBy: byMethod(rows(usedByCheck), (c) => checkShare.get(c.id) ?? 0),
     soldCount: rows(sold).length,
     soldCash: sum(rows(sold), (c) => Number(c.pay_cash)),
     soldNoncash: sum(rows(sold), (c) => Number(c.pay_noncash)),
