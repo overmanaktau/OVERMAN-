@@ -8,7 +8,7 @@ export const maxDuration = 60;
 // Вебхук бота-помощника продавцов. Telegram шлёт сюда каждое сообщение и
 // нажатие кнопки, подписывая запрос секретом (webhookSecret). Для проверки без
 // токена бота есть режим ?mock=1 — только с CRON_SECRET, ответы бота не
-// отправляются, а возвращаются в ответе.
+// отправляются, а возвращаются в ответе (?files=1 — вместе с содержимым PDF).
 export async function POST(request: Request) {
   const url = new URL(request.url);
 
@@ -20,6 +20,8 @@ export async function POST(request: Request) {
     const sent: { chat: number | string; html: string; markup?: ReplyMarkup }[] = [];
     const deleted: { chat: number | string; messageId: number }[] = [];
     const cleared: { chat: number | string; messageId: number }[] = [];
+    const edited: { chat: number | string; messageId: number; markup: ReplyMarkup }[] = [];
+    const documents: { chat: number | string; fileName: string; bytes: number; caption?: string; base64?: string }[] = [];
     const mock: Transport = {
       async send(chat, html, markup) {
         sent.push({ chat, html, markup });
@@ -31,12 +33,18 @@ export async function POST(request: Request) {
       async clearButtons(chat, messageId) {
         cleared.push({ chat, messageId });
       },
+      async editButtons(chat, messageId, markup) {
+        edited.push({ chat, messageId, markup });
+      },
+      async sendDocument(chat, fileName, bytes, caption) {
+        documents.push({ chat, fileName, bytes: bytes.length, caption, ...(url.searchParams.get("files") === "1" ? { base64: Buffer.from(bytes).toString("base64") } : {}) });
+      },
     };
     try {
       await handleUpdate((await request.json()) as TgUpdate, mock);
-      return NextResponse.json({ ok: true, sent, deleted, cleared });
+      return NextResponse.json({ ok: true, sent, documents, edited, deleted, cleared });
     } catch (e) {
-      return NextResponse.json({ error: getErrorMessage(e), sent, deleted, cleared }, { status: 500 });
+      return NextResponse.json({ error: getErrorMessage(e), sent, documents, edited, deleted, cleared }, { status: 500 });
     }
   }
 

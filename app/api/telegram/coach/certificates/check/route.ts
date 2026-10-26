@@ -31,6 +31,8 @@ async function handle(request: Request) {
     async answerCallback() {},
     async deleteMessage() {},
     async clearButtons() {},
+    async editButtons() {},
+    async sendDocument() {},
   };
   try {
     const returns = await fetchRetailSalesReturnsForDate(date);

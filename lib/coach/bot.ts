@@ -48,6 +48,10 @@ export type Transport = {
   deleteMessage(chatId: number | string, messageId: number): Promise<void>;
   // Убрать кнопки под сообщением, оставив само сообщение в истории чата.
   clearButtons(chatId: number | string, messageId: number): Promise<void>;
+  // Заменить кнопки под сообщением (галочки у списка).
+  editButtons(chatId: number | string, messageId: number, markup: ReplyMarkup): Promise<void>;
+  // Отправить файл (PDF) с короткой подписью.
+  sendDocument(chatId: number | string, fileName: string, bytes: Uint8Array, caption?: string): Promise<void>;
 };
 
 export const telegramTransport: Transport = {
@@ -70,6 +74,19 @@ export const telegramTransport: Transport = {
   async clearButtons(chatId, messageId) {
     await coachApi("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
   },
+  async editButtons(chatId, messageId, markup) {
+    await coachApi("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: markup });
+  },
+  async sendDocument(chatId, fileName, bytes, caption) {
+    await sendCoachDocument(chatId, fileName, bytes, caption);
+  },
+};
+
+// Закупщик: три отчёта (город → период → при необходимости поставщики → PDF).
+export const BUYER_MENU_MARKUP: ReplyMarkup = {
+  keyboard: [[{ text: "Отчёт" }, { text: "ABC/XYZ" }], [{ text: "Проданные товары" }]],
+  resize_keyboard: true,
+  is_persistent: true,
 };
 
 // Постоянная клавиатура с разделами для подтверждённых продавцов.
@@ -142,7 +159,7 @@ export function roleLabel(u: { is_admin?: boolean | null; admin_scope?: string |
 
 export function menuFor(u: MenuUser): ReplyMarkup {
   if (u.is_test) return u.test_role === "manager" ? MANAGER_DEMO_MENU_MARKUP : MENU_MARKUP;
-  if (u.is_buyer) return REMOVE_KEYBOARD; // закупщику меню не нужно: бот только присылает ему отчёт
+  if (u.is_buyer) return BUYER_MENU_MARKUP;
   if (!u.is_admin) return CONSULTANT_MENU_MARKUP;
   if (!isOwner(u)) return CITY_ADMIN_MENU_MARKUP;
   return u.is_protected ? MAIN_OWNER_MENU_MARKUP : ADMIN_MENU_MARKUP;

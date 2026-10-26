@@ -1,7 +1,6 @@
 // АВС/XYZ за период для PDF: тот же расчёт, что на странице «Склад → АВС/XYZ» (артикулы с оборотом за период; A — верхние 80 % оборота,
-// B — следующие 15 %, C — остальные 5 %; X — продажи более чем в 60 % дней периода, Y — от 20 %, Z — реже). Склады — все склады города.
+// B — следующие 15 %, C — остальные 5 %; X — продажи более чем в 60 % дней периода, Y — от 20 %, Z — реже). Склады и поставщики (null — все) задаёт вызывающий.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { warehousesForCities } from "@/lib/warehouses";
 import type { PdfSection } from "@/lib/exportPdf";
 
 type AbcKey = "A" | "B" | "C";
@@ -30,12 +29,11 @@ const XYZ_LABELS: { key: XyzKey; label: string }[] = [
 const money = (n: number) => `${Math.round(n).toLocaleString("ru-RU").replace(/[\u00a0\u202f]/g, " ")} ₸`;
 const int = (n: number) => Number(n).toLocaleString("ru-RU").replace(/[\u00a0\u202f]/g, " ");
 
-export async function loadAbcXyz(city: string, from: string, to: string): Promise<AbcData> {
-  const stores = warehousesForCities([city]);
+export async function loadAbcXyz(stores: string[], from: string, to: string, suppliers: string[] | null = null): Promise<AbcData> {
   type Raw = { article: string; category: string | null; revenue: number; quantity: number; cost: number; days_with_sales: number };
   const raw: Raw[] = [];
   for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await supabaseAdmin.rpc("product_sales_summary_by_article", { p_from: from, p_to: to, p_stores: stores }).range(offset, offset + 999);
+    const { data, error } = await supabaseAdmin.rpc("product_sales_summary_by_article_sup", { p_from: from, p_to: to, p_stores: stores, p_suppliers: suppliers }).range(offset, offset + 999);
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as Raw[];
     raw.push(...rows);

@@ -26,6 +26,7 @@ import {
 import { type EmployeeRef } from "@/lib/coach/metrics";
 import { shortPerson } from "@/lib/personName";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
+import { handleBuyerCallback, handleBuyerText } from "@/lib/coach/buyerview";
 
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
 export type TgUpdate = {
@@ -256,7 +257,7 @@ const SECTION_BY_TEXT: Record<string, string> = {
 };
 
 const BUYER_TEXT = (name: string) =>
-  `Здравствуйте, ${escapeHtml(name)}! Вы подключены как закупщик. Каждый понедельник в 7:00 я присылаю PDF «Склад — обзор» за прошлую неделю, а 1-го числа каждого месяца — за прошлый месяц, с разницей от предыдущего периода: отдельным файлом по Актау и по Актобе. Других разделов для вас нет.`;
+  `Здравствуйте, ${escapeHtml(name)}! Вы подключены как закупщик. Каждый понедельник в 7:00 я присылаю PDF «Склад — обзор» за прошлую неделю, а 1-го числа каждого месяца — за прошлый месяц, с разницей от предыдущего периода: отдельным файлом по Актау и по Актобе. Свои отчёты за любой период — кнопками внизу: «Отчёт», «ABC/XYZ», «Проданные товары». Других разделов для вас нет.`;
 
 // Приглашение закупщика: человека нет в МойСклад, поэтому он подключается по коду из ссылки (coach_invites), без заявки.
 async function claimInvite(t: Transport, from: TgUser, chatId: number, existing: CoachUser | null, code: string): Promise<void> {
@@ -290,7 +291,7 @@ async function claimInvite(t: Transport, from: TgUser, chatId: number, existing:
   const { error: saveError } = existing ? await supabaseAdmin.from("coach_users").update(row).eq("id", existing.id) : await supabaseAdmin.from("coach_users").insert(row);
   if (saveError) throw saveError;
   await supabaseAdmin.from("coach_invites").update({ used_at: now, used_by: from.id }).eq("code", invite.code);
-  await t.send(chatId, BUYER_TEXT(invite.employee_name), REMOVE_KEYBOARD);
+  await t.send(chatId, BUYER_TEXT(invite.employee_name), menuFor({ is_buyer: true }));
   await notifyOwner(`✅ <b>${escapeHtml(invite.employee_name)}</b> подключился к боту как закупщик (по вашей ссылке-приглашению). PDF «Склад — обзор» будет приходить по понедельникам в 7:00.`);
 }
 
@@ -317,9 +318,9 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
       await supabaseAdmin.from("coach_users").update({ telegram_chat_id: chatId }).eq("id", user.id);
       user.telegram_chat_id = chatId;
     }
-    // Закупщик: меню и разделов у него нет, бот только присылает PDF «Склад — обзор» по понедельникам.
+    // Закупщик: свои кнопки «Отчёт», «ABC/XYZ», «Проданные товары» (город → период → поставщики → PDF).
     if (user.is_buyer) {
-      await t.send(chatId, BUYER_TEXT(user.employee_name), REMOVE_KEYBOARD);
+      await handleBuyerText(t, user, text);
       return;
     }
     if (text === "/start") {
@@ -509,6 +510,13 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     if (!existing || existing.status !== "approved" || !existing.is_admin || existing.is_test) return;
     await dropCurrent();
     await handleCompareCallback(cb.data, t, chatId, adminStores(existing), existing.id);
+    return;
+  }
+
+  if (cb.data.startsWith("by:")) {
+    // Кнопки закупщика; от остальных нажатия молча игнорируем.
+    if (!existing || existing.status !== "approved" || !existing.is_buyer) return;
+    await handleBuyerCallback(cb.data, t, existing, messageId, dropCurrent);
     return;
   }
 

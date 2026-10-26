@@ -2,12 +2,12 @@
 // остаток, продано, себестоимость, валовая прибыль, валовый %, оборачиваемость) и блоки «сравнение периодов». Каждый понедельник уходит закупщику
 // отдельным файлом по каждому городу (app/api/telegram/coach/warehouse-overview-weekly). Расчёт — как на странице с настройками по умолчанию:
 // склады города, на которых есть товар, без заморозки, без категорий «Бесплатный» и «Без категории».
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
+import { WAREHOUSES } from "@/lib/warehouses";
 import { addDays, mondayOf, monthStartOf } from "@/lib/coach/metrics";
-import { buildPdf, type PdfDoc, type PdfFonts, type PdfSection } from "@/lib/exportPdf";
+import { buildPdf, type PdfDoc, type PdfSection } from "@/lib/exportPdf";
+import { loadPdfFonts } from "@/lib/reports/pdfFonts";
+import { BUYER_CITY_TITLE, BUYER_STORES } from "@/lib/reports/buyerStores";
 import { ruPeriod } from "@/lib/fileNames";
 import { abcXyzSections, loadAbcXyz, type AbcData } from "@/lib/reports/abcXyz";
 
@@ -52,19 +52,12 @@ export function lastTwoMonths(today: string): [{ from: string; to: string }, { f
   ];
 }
 
-export type OverviewKind = "week" | "month";
+export type OverviewKind = "week" | "month" | "custom";
 const WORDS: Record<OverviewKind, { cur: string; prev: string; prevDat: string; curAdj: string; noun: string }> = {
   week: { cur: "Прошлая неделя", prev: "позапрошлая неделя", prevDat: "позапрошлой неделе", curAdj: "прошлая", noun: "неделя" },
   month: { cur: "Прошлый месяц", prev: "позапрошлый месяц", prevDat: "позапрошлому месяцу", curAdj: "прошлый", noun: "месяц" },
+  custom: { cur: "Период", prev: "предыдущий период", prevDat: "предыдущему периоду", curAdj: "выбранный", noun: "период" },
 };
-
-// Склады города, на которых сейчас есть товар (как фильтр на странице).
-export async function stockedWarehousesOf(city: string): Promise<string[]> {
-  const { data, error } = await supabaseAdmin.rpc("stock_warehouses");
-  if (error) throw error;
-  const stocked = new Set(((data ?? []) as { store: string }[]).map((r) => r.store));
-  return warehousesForCities([city]).filter((c) => stocked.has(c));
-}
 
 async function fetchAllRows<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
   const pageSize = 1000;
@@ -115,9 +108,11 @@ export async function loadOverviewSet(stores: string[], from: string, to: string
   };
 }
 
+// Данные периода по городу (point_1, point_3) или по обоим городам (all): только два основных склада (BUYER_STORES).
 export async function loadWarehouseWeek(city: string, from: string, to: string, withAbc = false): Promise<WarehouseWeek> {
-  const stores = await stockedWarehousesOf(city);
-  const [data, abc] = await Promise.all([stores.length > 0 ? loadOverviewSet(stores, from, to) : Promise.resolve({ cat: [], sup: [], sto: [] }), withAbc ? loadAbcXyz(city, from, to) : Promise.resolve(undefined)]);
+  const stores = BUYER_STORES[city];
+  if (!stores) throw new Error(`Неизвестный город: ${city}`);
+  const [data, abc] = await Promise.all([loadOverviewSet(stores, from, to), withAbc ? loadAbcXyz(stores, from, to) : Promise.resolve(undefined)]);
   return { from, to, stores, data, abc };
 }
 
@@ -139,28 +134,14 @@ const deltaPct = (cur: number | null, prev: number | null | undefined): number |
 const deltaText = (v: number | null): string => (v === null ? "—" : `${sign(v)}${sp(Math.abs(v).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}%`);
 const fmtRuDate = (iso: string) => iso.split("-").reverse().join(".");
 
-async function loadFonts(): Promise<PdfFonts> {
-  const get = async (name: string) => {
-    try {
-      return (await readFile(path.join(process.cwd(), "public", "fonts", "pdf", name))).toString("base64");
-    } catch {
-      const res = await fetch(`https://www.overman.kz/fonts/pdf/${name}`);
-      if (!res.ok) throw new Error(`Шрифт ${name} недоступен.`);
-      return Buffer.from(await res.arrayBuffer()).toString("base64");
-    }
-  };
-  const [regular, bold, serif] = await Promise.all([get("NotoSans-Regular.ttf"), get("NotoSans-Bold.ttf"), get("NotoSerif-Bold.ttf")]);
-  return { regular, bold, serif };
-}
-
 export function warehouseFileName(city: string, week: { from: string; to: string }): string {
   return `Склад обзор ${city} ${ruPeriod(week.from, week.to)}.pdf`;
 }
 
-export async function buildWarehouseOverviewPdf(storeCode: string, prev: WarehouseWeek, cur: WarehouseWeek, kind: OverviewKind = "week"): Promise<Uint8Array> {
-  const w = WORDS[kind];
-  const city = WAREHOUSE_CITY[storeCode] ?? storeCode;
-  const storeLabels = cur.stores.filter((c) => c !== "saya_park").map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c);
+export async function buildWarehouseOverviewPdf(storeCode: string, prev: WarehouseWeek, cur: WarehouseWeek, kind: OverviewKind = "week", curTitle?: string): Promise<Uint8Array> {
+  const w = { ...WORDS[kind], ...(curTitle ? { cur: curTitle } : {}) };
+  const city = BUYER_CITY_TITLE[storeCode] ?? storeCode;
+  const storeLabels = cur.stores.map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c);
   const rangeLabel = (w: { from: string; to: string }) => `${fmtRuDate(w.from)} — ${fmtRuDate(w.to)}`;
 
   const blocks: { title: string; nameHeader: string; rows: OverviewRow[]; prevRows: OverviewRow[] }[] = [
@@ -265,5 +246,5 @@ export async function buildWarehouseOverviewPdf(storeCode: string, prev: Warehou
     ],
     sections: [...mainSections, ...compareSections, ...(cur.abc ? abcXyzSections(cur.abc) : [])],
   };
-  return new Uint8Array(buildPdf(doc, await loadFonts()).output("arraybuffer"));
+  return new Uint8Array(buildPdf(doc, await loadPdfFonts()).output("arraybuffer"));
 }
