@@ -6,12 +6,13 @@ import { stable } from "@/lib/reports/stable";
 import { activeHoldFor } from "@/lib/verify/holds";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { todayInAlmaty } from "@/lib/coach/metrics";
-import { WAREHOUSE_CITY, buildWarehouseOverviewPdf, lastTwoWeeks, loadWarehouseWeek, warehouseFileName } from "@/lib/reports/warehouseOverview";
+import { WAREHOUSE_CITY, buildWarehouseOverviewPdf, lastTwoMonths, lastTwoWeeks, loadWarehouseWeek, warehouseFileName, type OverviewKind } from "@/lib/reports/warehouseOverview";
 
 export const maxDuration = 120;
 
-// PDF «Склад — обзор» за прошлую неделю с разницей от позапрошлой — закупщику бота-помощника, по каждому городу отдельным файлом.
+// PDF «Склад — обзор» за прошлую неделю (?period=month — за прошлый месяц) с разницей от позапрошлой — закупщику бота-помощника, по каждому городу отдельным файлом.
 // Только с CRON_SECRET. По понедельникам в 7:00 (pg_cron warehouse-overview-weekly-pdf) с ?send=1.
+// По понедельникам в 7:00 — неделя, 1-го числа в 7:00 — месяц (pg_cron warehouse-overview-monthly-pdf, ?period=month).
 // ?abc=1 — добавить в файл раздел АВС/XYZ; ?store=point_1|point_3 — только этот город; ?from=YYYY-MM-DD — понедельник более ранней из двух недель;
 // без ?send=1 файл города (?store обязателен) отдаётся в ответ, никому не отправляется.
 async function handle(request: Request) {
@@ -23,12 +24,13 @@ async function handle(request: Request) {
   const storeParam = url.searchParams.get("store");
   const from = url.searchParams.get("from") ?? undefined;
   const send = url.searchParams.get("send") === "1";
+  const kind: OverviewKind = url.searchParams.get("period") === "month" ? "month" : "week";
   const withAbc = url.searchParams.get("abc") === "1"; // добавить в файл АВС/XYZ за прошлую неделю
   if ((storeParam && !WAREHOUSE_CITY[storeParam]) || (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (!send && !storeParam)) {
     return NextResponse.json({ error: "Неверные параметры." }, { status: 400 });
   }
   const stores = storeParam ? [storeParam] : Object.keys(WAREHOUSE_CITY);
-  const [weekA, weekB] = lastTwoWeeks(todayInAlmaty(), from);
+  const [weekA, weekB] = kind === "month" ? lastTwoMonths(todayInAlmaty()) : lastTwoWeeks(todayInAlmaty(), from);
 
   try {
     const files: { store: string; name: string; caption: string; pdf: Uint8Array }[] = [];
@@ -52,7 +54,7 @@ async function handle(request: Request) {
         store,
         name: warehouseFileName(city, weekB),
         caption: `Склад — обзор · ${city}: ${dm(weekB.from)}–${dm(weekB.to)} к ${dm(weekA.from)}–${dm(weekA.to)}`,
-        pdf: await buildWarehouseOverviewPdf(store, prev, cur),
+        pdf: await buildWarehouseOverviewPdf(store, prev, cur, kind),
       });
     }
 
@@ -63,7 +65,7 @@ async function handle(request: Request) {
     }
 
     if (problems.length > 0) {
-      await notifyOwner(`⏸ <b>PDF «Склад — обзор» закупщику не отправлен по городам</b>\n${problems.join("\n")}\nДанным верить нельзя — после исправления отправьте вручную или дождитесь следующего понедельника.`);
+      await notifyOwner(`⏸ <b>PDF «Склад — обзор» закупщику не отправлен по городам</b>\n${problems.join("\n")}\nДанным верить нельзя — после исправления отправьте вручную или дождитесь следующей рассылки.`);
     }
     const { data: buyers, error } = await supabaseAdmin.from("coach_users").select("telegram_chat_id, employee_name").eq("status", "approved").eq("is_buyer", true);
     if (error) throw error;

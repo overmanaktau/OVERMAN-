@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
-import { addDays, mondayOf } from "@/lib/coach/metrics";
+import { addDays, mondayOf, monthStartOf } from "@/lib/coach/metrics";
 import { buildPdf, type PdfDoc, type PdfFonts, type PdfSection } from "@/lib/exportPdf";
 import { ruPeriod } from "@/lib/fileNames";
 import { abcXyzSections, loadAbcXyz, type AbcData } from "@/lib/reports/abcXyz";
@@ -40,6 +40,23 @@ export function lastTwoWeeks(today: string, mondayOfFirst?: string): [{ from: st
     { from: addDays(firstMonday, 7), to: addDays(firstMonday, 13) },
   ];
 }
+
+// Два последних полных месяца: позапрошлый (первым) и только что закончившийся прошлый.
+export function lastTwoMonths(today: string): [{ from: string; to: string }, { from: string; to: string }] {
+  const curTo = addDays(monthStartOf(today), -1);
+  const curFrom = monthStartOf(curTo);
+  const prevTo = addDays(curFrom, -1);
+  return [
+    { from: monthStartOf(prevTo), to: prevTo },
+    { from: curFrom, to: curTo },
+  ];
+}
+
+export type OverviewKind = "week" | "month";
+const WORDS: Record<OverviewKind, { cur: string; prev: string; prevDat: string; curAdj: string; noun: string }> = {
+  week: { cur: "Прошлая неделя", prev: "позапрошлая неделя", prevDat: "позапрошлой неделе", curAdj: "прошлая", noun: "неделя" },
+  month: { cur: "Прошлый месяц", prev: "позапрошлый месяц", prevDat: "позапрошлому месяцу", curAdj: "прошлый", noun: "месяц" },
+};
 
 // Склады города, на которых сейчас есть товар (как фильтр на странице).
 export async function stockedWarehousesOf(city: string): Promise<string[]> {
@@ -140,7 +157,8 @@ export function warehouseFileName(city: string, week: { from: string; to: string
   return `Склад обзор ${city} ${ruPeriod(week.from, week.to)}.pdf`;
 }
 
-export async function buildWarehouseOverviewPdf(storeCode: string, prev: WarehouseWeek, cur: WarehouseWeek): Promise<Uint8Array> {
+export async function buildWarehouseOverviewPdf(storeCode: string, prev: WarehouseWeek, cur: WarehouseWeek, kind: OverviewKind = "week"): Promise<Uint8Array> {
+  const w = WORDS[kind];
   const city = WAREHOUSE_CITY[storeCode] ?? storeCode;
   const storeLabels = cur.stores.filter((c) => c !== "saya_park").map((c) => WAREHOUSES.find((w) => w.code === c)?.label ?? c);
   const rangeLabel = (w: { from: string; to: string }) => `${fmtRuDate(w.from)} — ${fmtRuDate(w.to)}`;
@@ -212,7 +230,7 @@ export async function buildWarehouseOverviewPdf(storeCode: string, prev: Warehou
     rows.push(["Итого", ...cells(total(b.rows), prevTotal)]);
     return {
       title: `${b.title} — сравнение периодов`,
-      note: `Слева — позапрошлая неделя (${rangeLabel(prev)}), справа — прошлая (${rangeLabel(cur)}). Разница — прошлая минус позапрошлая; у оборачиваемости — в процентных пунктах и в %.`,
+      note: `Слева — ${w.prev} (${rangeLabel(prev)}), справа — ${w.curAdj} (${rangeLabel(cur)}). Разница — ${w.curAdj} минус ${w.prev}; у оборачиваемости — в процентных пунктах и в %.`,
       headers: [b.nameHeader, ...groups.flatMap((g) => subs.map((s) => `${g.split(",")[0]} · ${s.replace("\n", " ")}`))],
       headGroups: [{ label: b.nameHeader, span: 1 }, ...groups.map((g) => ({ label: g, span: 3, subs }))],
       rows,
@@ -227,13 +245,13 @@ export async function buildWarehouseOverviewPdf(storeCode: string, prev: Warehou
 
   const kpiNote = (c: number | null, p: number | null) => {
     const d = deltaPct(c, p);
-    return d === null ? undefined : `${deltaText(d)} к позапрошлой неделе`;
+    return d === null ? undefined : `${deltaText(d)} к ${w.prevDat}`;
   };
   const doc: PdfDoc = {
     fileName: `Склад обзор ${city} ${ruPeriod(cur.from, cur.to)}`,
     orientation: "landscape",
     title: `Склад — обзор · ${city}`,
-    subtitle: `Прошлая неделя (${rangeLabel(cur)}) · склады: ${storeLabels.join(", ")}`,
+    subtitle: `${w.cur} (${rangeLabel(cur)}) · склады: ${storeLabels.join(", ")}`,
     meta: [
       "Остаток — по факту на последний день периода, как в МойСклад",
       "Оборачиваемость — себестоимость продаж ÷ средний остаток за период",
