@@ -126,6 +126,7 @@ export type MenuUser = {
   is_protected?: boolean | null;
   is_test?: boolean | null;
   test_role?: string | null;
+  is_buyer?: boolean | null;
 };
 
 // Владелец — администратор с доступом ко всем городам.
@@ -141,6 +142,7 @@ export function roleLabel(u: { is_admin?: boolean | null; admin_scope?: string |
 
 export function menuFor(u: MenuUser): ReplyMarkup {
   if (u.is_test) return u.test_role === "manager" ? MANAGER_DEMO_MENU_MARKUP : MENU_MARKUP;
+  if (u.is_buyer) return REMOVE_KEYBOARD; // закупщику меню не нужно: бот только присылает ему отчёт
   if (!u.is_admin) return CONSULTANT_MENU_MARKUP;
   if (!isOwner(u)) return CITY_ADMIN_MENU_MARKUP;
   return u.is_protected ? MAIN_OWNER_MENU_MARKUP : ADMIN_MENU_MARKUP;

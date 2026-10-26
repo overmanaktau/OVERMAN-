@@ -33,6 +33,7 @@ type Row = {
   telegram_name: string | null;
   telegram_username: string | null;
   is_admin: boolean;
+  is_buyer: boolean;
 };
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
@@ -61,7 +62,7 @@ const ORDER: Record<Row["status"], number> = { pending: 0, approved: 1, disabled
 async function loadRows(): Promise<Row[]> {
   const { data, error } = await supabaseAdmin
     .from("coach_users")
-    .select("id, employee_ms_id, admin_scope, is_protected, is_test, employee_name, store, status, telegram_name, telegram_username, is_admin");
+    .select("id, employee_ms_id, admin_scope, is_protected, is_test, employee_name, store, status, telegram_name, telegram_username, is_admin, is_buyer");
   if (error) throw error;
   return ((data ?? []) as Row[]).sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.employee_name.localeCompare(b.employee_name, "ru"));
 }
@@ -149,7 +150,7 @@ async function sendCard(t: Transport, chatId: number | string, id: number, store
   }
   await t.send(
     chatId,
-    `<b>${escapeHtml(shortPerson(r.employee_name))}</b> · ${CITY[r.store] ?? r.store}${r.is_admin ? ` · ${roleLabel(r)}` : ""}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}\nTelegram: ${escapeHtml(tgLabel(r))}${month}`,
+    `<b>${escapeHtml(shortPerson(r.employee_name))}</b> · ${CITY[r.store] ?? r.store}${r.is_admin ? ` · ${roleLabel(r)}` : r.is_buyer ? " · закупщик" : ""}\nСтатус: ${STATUS_ICON[r.status]} ${STATUS_TEXT[r.status]}\nTelegram: ${escapeHtml(tgLabel(r))}${month}`,
     markup
   );
 }

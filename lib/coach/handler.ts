@@ -25,6 +25,7 @@ import {
 } from "@/lib/coach/messages";
 import { type EmployeeRef } from "@/lib/coach/metrics";
 import { shortPerson } from "@/lib/personName";
+import { notifyOwner } from "@/lib/verify/notifyOwner";
 
 export type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
 export type TgUpdate = {
@@ -45,6 +46,7 @@ export type CoachUser = {
   admin_scope: "city" | "all";
   is_protected: boolean;
   is_test: boolean;
+  is_buyer: boolean;
   test_role: "consultant" | "manager" | null;
   test_expires_at: string | null;
   awaiting: string | null;
@@ -253,6 +255,45 @@ const SECTION_BY_TEXT: Record<string, string> = {
   "/help": "help",
 };
 
+const BUYER_TEXT = (name: string) =>
+  `Здравствуйте, ${escapeHtml(name)}! Вы подключены как закупщик. Каждый понедельник в 7:00 я присылаю PDF «Обзор» за прошлую неделю с разницей от позапрошлой — отдельным файлом по Актау и по Актобе. Других разделов для вас нет.`;
+
+// Приглашение закупщика: человека нет в МойСклад, поэтому он подключается по коду из ссылки (coach_invites), без заявки.
+async function claimInvite(t: Transport, from: TgUser, chatId: number, existing: CoachUser | null, code: string): Promise<void> {
+  const { data: invite, error } = await supabaseAdmin.from("coach_invites").select("code, employee_name, store, used_at").eq("code", code).maybeSingle();
+  if (error) throw error;
+  if (!invite || invite.used_at) {
+    await t.send(chatId, "Ссылка-приглашение недействительна или уже использована. Попросите руководителя прислать новую.");
+    return;
+  }
+  const now = new Date().toISOString();
+  const row = {
+    telegram_user_id: from.id,
+    telegram_chat_id: chatId,
+    telegram_username: from.username ?? null,
+    telegram_name: [from.first_name, from.last_name].filter(Boolean).join(" ") || null,
+    store: invite.store,
+    employee_ms_id: `buyer:${invite.code}`,
+    employee_name: invite.employee_name,
+    status: "approved",
+    requested_at: now,
+    decided_at: now,
+    decided_by: "приглашение владельца",
+    left_at: null,
+    rejoined: false,
+    is_admin: false,
+    admin_scope: "city",
+    is_test: false,
+    is_buyer: true,
+    awaiting: null,
+  };
+  const { error: saveError } = existing ? await supabaseAdmin.from("coach_users").update(row).eq("id", existing.id) : await supabaseAdmin.from("coach_users").insert(row);
+  if (saveError) throw saveError;
+  await supabaseAdmin.from("coach_invites").update({ used_at: now, used_by: from.id }).eq("code", invite.code);
+  await t.send(chatId, BUYER_TEXT(invite.employee_name), REMOVE_KEYBOARD);
+  await notifyOwner(`✅ <b>${escapeHtml(invite.employee_name)}</b> подключился к боту как закупщик (по вашей ссылке-приглашению). PDF «Обзор» будет приходить по понедельникам в 7:00.`);
+}
+
 export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void> {
   if (update.callback_query) {
     await handleCallback(update.callback_query, t);
@@ -275,6 +316,11 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
     if (user.telegram_chat_id !== chatId) {
       await supabaseAdmin.from("coach_users").update({ telegram_chat_id: chatId }).eq("id", user.id);
       user.telegram_chat_id = chatId;
+    }
+    // Закупщик: меню и разделов у него нет, бот только присылает PDF «Обзор» по понедельникам.
+    if (user.is_buyer) {
+      await t.send(chatId, BUYER_TEXT(user.employee_name), REMOVE_KEYBOARD);
+      return;
     }
     if (text === "/start") {
       await t.send(chatId, `Здравствуйте, ${escapeHtml(user.employee_name)}!${user.is_admin && !user.is_test ? ` Ваша роль: ${roleLabel(user)}.` : ""} ${
@@ -306,6 +352,13 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
     } else {
       await t.send(chatId, user.is_test && user.test_role === "manager" ? "Выберите раздел кнопкой внизу или нажмите «Помощь»." : noSuchSection(user), menuFor(user));
     }
+    return;
+  }
+
+  // Ссылка-приглашение от владельца (закупщик): подключаем сразу подтверждённым.
+  const invite = /^\/start(?:@\w+)?\s+([A-Za-z0-9]{8,})$/.exec(text);
+  if (invite && (!user || user.status === "left" || user.status === "rejected")) {
+    await claimInvite(t, msg.from, chatId, user, invite[1]);
     return;
   }
 

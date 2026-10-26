@@ -37,7 +37,7 @@ async function handle(request: Request) {
   try {
     // Имена в сообщениях — как сейчас в МойСклад (сбой не мешает рассылке).
     await syncCoachNames().catch(() => null);
-    let query = supabaseAdmin.from("coach_users").select("*").eq("status", "approved").eq("is_test", false).eq("is_admin", false);
+    let query = supabaseAdmin.from("coach_users").select("*").eq("status", "approved").eq("is_test", false).eq("is_admin", false).eq("is_buyer", false);
     if (onlyUser) query = query.eq("id", Number(onlyUser));
     const { data, error } = await query;
     if (error) throw error;
