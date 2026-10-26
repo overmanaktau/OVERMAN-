@@ -256,7 +256,7 @@ const SECTION_BY_TEXT: Record<string, string> = {
 };
 
 const BUYER_TEXT = (name: string) =>
-  `Здравствуйте, ${escapeHtml(name)}! Вы подключены как закупщик. Каждый понедельник в 7:00 я присылаю PDF «Обзор» за прошлую неделю с разницей от позапрошлой — отдельным файлом по Актау и по Актобе. Других разделов для вас нет.`;
+  `Здравствуйте, ${escapeHtml(name)}! Вы подключены как закупщик. Каждый понедельник в 7:00 я присылаю PDF «Склад — обзор» за прошлую неделю с разницей от позапрошлой — отдельным файлом по Актау и по Актобе. Других разделов для вас нет.`;
 
 // Приглашение закупщика: человека нет в МойСклад, поэтому он подключается по коду из ссылки (coach_invites), без заявки.
 async function claimInvite(t: Transport, from: TgUser, chatId: number, existing: CoachUser | null, code: string): Promise<void> {
@@ -291,7 +291,7 @@ async function claimInvite(t: Transport, from: TgUser, chatId: number, existing:
   if (saveError) throw saveError;
   await supabaseAdmin.from("coach_invites").update({ used_at: now, used_by: from.id }).eq("code", invite.code);
   await t.send(chatId, BUYER_TEXT(invite.employee_name), REMOVE_KEYBOARD);
-  await notifyOwner(`✅ <b>${escapeHtml(invite.employee_name)}</b> подключился к боту как закупщик (по вашей ссылке-приглашению). PDF «Обзор» будет приходить по понедельникам в 7:00.`);
+  await notifyOwner(`✅ <b>${escapeHtml(invite.employee_name)}</b> подключился к боту как закупщик (по вашей ссылке-приглашению). PDF «Склад — обзор» будет приходить по понедельникам в 7:00.`);
 }
 
 export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void> {
@@ -317,7 +317,7 @@ export async function handleUpdate(update: TgUpdate, t: Transport): Promise<void
       await supabaseAdmin.from("coach_users").update({ telegram_chat_id: chatId }).eq("id", user.id);
       user.telegram_chat_id = chatId;
     }
-    // Закупщик: меню и разделов у него нет, бот только присылает PDF «Обзор» по понедельникам.
+    // Закупщик: меню и разделов у него нет, бот только присылает PDF «Склад — обзор» по понедельникам.
     if (user.is_buyer) {
       await t.send(chatId, BUYER_TEXT(user.employee_name), REMOVE_KEYBOARD);
       return;
