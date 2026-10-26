@@ -632,7 +632,7 @@ export default function SalesPage() {
   const overallConversionPct = totalTraffic > 0 ? (totalReceipts / totalTraffic) * 100 : null;
 
   function conversionLabel(receipts: number, traffic: number): string {
-    return traffic > 0 ? `${((receipts / traffic) * 100).toFixed(1)}%` : "—";
+    return traffic > 0 ? `${((receipts / traffic) * 100).toFixed(2)}%` : "—";
   }
 
   // "0" when nothing was returned; otherwise a compact "sum · N чек · N тов."
@@ -997,7 +997,7 @@ export default function SalesPage() {
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: avg(totalRevenue, totalReceipts) },
                 ...(ltvValue !== null ? [{ label: "Годовой LTV", value: ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), note: "продаж на клиента за 365 дней" }] : []),
-                { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(1)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
+                { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(2)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
               ],
               sections,
             };
@@ -1011,7 +1011,7 @@ export default function SalesPage() {
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-1.5 w-fit">
         <div className="text-xs text-muted">Конверсия (чек / посетитель)</div>
         <div className="font-serif text-[26px] font-semibold num">
-          {loading ? "…" : overallConversionPct !== null ? `${overallConversionPct.toFixed(1)}%` : "—"}
+          {loading ? "…" : overallConversionPct !== null ? `${overallConversionPct.toFixed(2)}%` : "—"}
         </div>
         <div className="text-xs text-mutedLight">
           {loading

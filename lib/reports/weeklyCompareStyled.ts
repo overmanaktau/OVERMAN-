@@ -76,7 +76,7 @@ export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], c
   const body: Cell[][] = [];
   const cells = (lbl: string, wd: string, t: ReturnType<typeof sumDays>): string[] => {
     const q = ratios(t);
-    return [lbl, wd, t.planRevenue > 0 ? int(t.planRevenue) : "—", t.planTraffic > 0 ? int(t.planTraffic) : "—", int(t.revenue), int(t.visitors), int(t.receipts), int(t.items), int(q.atv), q.revPct === null ? "—" : pct(q.revPct, 1), q.trafPct === null ? "—" : pct(q.trafPct, 1), pct(q.cr, 1), dec(q.depth, 2)];
+    return [lbl, wd, t.planRevenue > 0 ? int(t.planRevenue) : "—", t.planTraffic > 0 ? int(t.planTraffic) : "—", int(t.revenue), int(t.visitors), int(t.receipts), int(t.items), int(q.atv), q.revPct === null ? "—" : pct(q.revPct, 1), q.trafPct === null ? "—" : pct(q.trafPct, 1), pct(q.cr, 2), dec(q.depth, 2)];
   };
   weeks.forEach((w, i) => {
     body.push([{ content: custom ? label(i) : `${label(i)}   ·   ${span(w)}`, colSpan: 13 }]);

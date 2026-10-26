@@ -476,7 +476,7 @@ export default function StatisticsPage() {
         traffic?.traffic_plan ?? 0,
         fact,
         sales ? receipts : "",
-        sales && fact > 0 ? Number(((receipts / fact) * 100).toFixed(1)) : "",
+        sales && fact > 0 ? Number(((receipts / fact) * 100).toFixed(2)) : "",
         sales && receipts > 0 ? Math.round(sales.revenue / receipts) : "",
         ...CHANNEL_DEFS.map((c) => Math.round(traffic?.[c.key] ?? 0)),
         Math.round(dayChannelTotal),
@@ -487,7 +487,7 @@ export default function StatisticsPage() {
       totals.plan,
       totals.fact,
       salesTotals.receipts,
-      conversionPct !== null ? Number(conversionPct.toFixed(1)) : "",
+      conversionPct !== null ? Number(conversionPct.toFixed(2)) : "",
       avgCheck !== null ? Math.round(avgCheck) : "",
       ...CHANNEL_DEFS.map((c) => Math.round(totals[c.key])),
       Math.round(channelTotal),
@@ -514,7 +514,7 @@ export default function StatisticsPage() {
       kpis: [
         { label: "Трафик, факт", value: Math.round(totals.fact).toLocaleString("ru-RU"), note: `план ${Math.round(totals.plan).toLocaleString("ru-RU")}` },
         { label: "Чеков", value: salesTotals.receipts.toLocaleString("ru-RU") },
-        { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(1)}%` : "—" },
+        { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—" },
         { label: "Средний чек", value: avgCheck !== null ? `${Math.round(avgCheck).toLocaleString("ru-RU")} ₸` : "—" },
       ],
       sections: [
@@ -534,14 +534,14 @@ export default function StatisticsPage() {
   // «Сравнение периодов» для PDF: по каждому показателю предыдущий период, выбранный и разница (цифра и %). Появляется в окне «Что скачать» отдельной галочкой, по умолчанию выключена.
   function comparisonSection(ru: (d: Date) => string): NonNullable<PdfDoc["sections"]> {
     if (!range || !range.hasPrev) return [];
-    type Kind = "int" | "money" | "pct";
+    type Kind = "int" | "money" | "pct" | "conv";
     const prevConversion = prevTotals.fact > 0 ? (prevSalesTotals.receipts / prevTotals.fact) * 100 : null;
     const items: { label: string; cur: number | null; prev: number | null; kind: Kind }[] = [
       { label: "Трафик план", cur: totals.plan, prev: prevTotals.plan, kind: "int" },
       { label: "Трафик факт", cur: totals.fact, prev: prevTotals.fact, kind: "int" },
       { label: "Выполнение плана", cur: planCompletionPct, prev: prevPlanCompletionPct, kind: "pct" },
       { label: "Количество чеков", cur: salesTotals.receipts, prev: prevSalesTotals.receipts, kind: "int" },
-      { label: "Конверсия", cur: conversionPct, prev: prevConversion, kind: "pct" },
+      { label: "Конверсия", cur: conversionPct, prev: prevConversion, kind: "conv" },
       { label: "Средний чек", cur: avgCheck, prev: prevAvgCheck, kind: "money" },
       ...CHANNEL_DEFS.map((c) => ({ label: c.label, cur: totals[c.key], prev: prevTotals[c.key], kind: "money" as Kind })),
       { label: "Итого по каналам", cur: channelTotal, prev: prevChannelTotal, kind: "money" },
@@ -551,7 +551,7 @@ export default function StatisticsPage() {
       { label: "Цена одного покупателя", cur: costPerBuyer, prev: prevCostPerBuyer, kind: "money" },
     ];
     const num = (n: number, digits: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" ? `${num(n, 1)}%` : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
+    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" ? `${num(n, 1)}%` : kind === "conv" ? `${num(n, 2)}%` : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
     const signed = (n: number, digits: number) => {
       const r = Number(n.toFixed(digits));
       return `${r > 0 ? "+" : r < 0 ? "−" : ""}${num(Math.abs(r), digits)}`;
@@ -560,7 +560,7 @@ export default function StatisticsPage() {
       if (it.cur === null || it.prev === null) return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), "—", "—"];
       const abs = it.cur - it.prev;
       const pc = pctChange(it.cur, it.prev);
-      const absText = it.kind === "pct" ? `${signed(abs, 1)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
+      const absText = it.kind === "conv" ? `${signed(abs, 2)} п.п.` : it.kind === "pct" ? `${signed(abs, 1)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
       return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), absText, pc === null ? "—" : `${signed(pc, 1)}%`];
     });
     const prevLabel = `${ru(range.prevStart)}${range.prevStart.getTime() === range.prevEnd.getTime() ? "" : ` — ${ru(range.prevEnd)}`}`;
@@ -739,7 +739,7 @@ export default function StatisticsPage() {
         <KpiCard
           label="Цена одного покупателя"
           value={costPerBuyer !== null ? money(costPerBuyer) : "—"}
-          valueSuffix={conversionPct !== null ? `(${conversionPct.toFixed(1)}%)` : undefined}
+          valueSuffix={conversionPct !== null ? `(${conversionPct.toFixed(2)}%)` : undefined}
           note={
             costPerBuyerChange !== null
               ? `${costPerBuyerChange >= 0 ? "▲" : "▼"} ${Math.abs(costPerBuyerChange).toFixed(0)}% к пред. периоду`

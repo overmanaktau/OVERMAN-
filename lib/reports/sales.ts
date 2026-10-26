@@ -160,7 +160,7 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
   const line = (label: string, value: string) => `${label.padEnd(15)}${value.padStart(17)}`;
   const conversion = line(
     "Конверсия",
-    visitors > 0 ? `${Math.round((receipts / visitors) * 100)}% (${receipts}/${num(visitors)})` : "нет трафика"
+    visitors > 0 ? `${pct2((receipts / visitors) * 100)} (${receipts}/${num(visitors)})` : "нет трафика"
   );
   const lines = compact
     ? [
