@@ -12,7 +12,7 @@ export const maxDuration = 120;
 
 // PDF «Склад — обзор» за прошлую неделю с разницей от позапрошлой — закупщику бота-помощника, по каждому городу отдельным файлом.
 // Только с CRON_SECRET. По понедельникам в 7:00 (pg_cron warehouse-overview-weekly-pdf) с ?send=1.
-// ?store=point_1|point_3 — только этот город; ?from=YYYY-MM-DD — понедельник более ранней из двух недель;
+// ?abc=1 — добавить в файл раздел АВС/XYZ; ?store=point_1|point_3 — только этот город; ?from=YYYY-MM-DD — понедельник более ранней из двух недель;
 // без ?send=1 файл города (?store обязателен) отдаётся в ответ, никому не отправляется.
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -23,6 +23,7 @@ async function handle(request: Request) {
   const storeParam = url.searchParams.get("store");
   const from = url.searchParams.get("from") ?? undefined;
   const send = url.searchParams.get("send") === "1";
+  const withAbc = url.searchParams.get("abc") === "1"; // добавить в файл АВС/XYZ за прошлую неделю
   if ((storeParam && !WAREHOUSE_CITY[storeParam]) || (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (!send && !storeParam)) {
     return NextResponse.json({ error: "Неверные параметры." }, { status: 400 });
   }
@@ -35,7 +36,7 @@ async function handle(request: Request) {
     for (const store of stores) {
       const city = WAREHOUSE_CITY[store];
       // Контрольный пересчёт, как у остальных отчётов: два совпадающих подсчёта, иначе не отправляем.
-      const checked = await stable(async () => ({ prev: await loadWarehouseWeek(store, weekA.from, weekA.to), cur: await loadWarehouseWeek(store, weekB.from, weekB.to) }), (v) => JSON.stringify(v));
+      const checked = await stable(async () => ({ prev: await loadWarehouseWeek(store, weekA.from, weekA.to), cur: await loadWarehouseWeek(store, weekB.from, weekB.to, withAbc) }), (v) => JSON.stringify(v));
       if (!checked.ok) {
         problems.push(`${city}: контрольный пересчёт — ${checked.reason}`);
         continue;

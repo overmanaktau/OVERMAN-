@@ -9,6 +9,7 @@ import { WAREHOUSES, warehousesForCities } from "@/lib/warehouses";
 import { addDays, mondayOf } from "@/lib/coach/metrics";
 import { buildPdf, type PdfDoc, type PdfFonts, type PdfSection } from "@/lib/exportPdf";
 import { ruPeriod } from "@/lib/fileNames";
+import { abcXyzSections, loadAbcXyz, type AbcData } from "@/lib/reports/abcXyz";
 
 export const WAREHOUSE_CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 
@@ -29,7 +30,7 @@ export type OverviewRow = {
   cogs: number;
 };
 export type OverviewSet = { cat: OverviewRow[]; sup: OverviewRow[]; sto: OverviewRow[] };
-export type WarehouseWeek = { from: string; to: string; stores: string[]; data: OverviewSet };
+export type WarehouseWeek = { from: string; to: string; stores: string[]; data: OverviewSet; abc?: AbcData }; // abc — только у недели, по которой считается АВС/XYZ
 
 // Две последние полные недели (пн–вс): более ранняя (позапрошлая) и та, что только что закончилась (прошлая).
 export function lastTwoWeeks(today: string, mondayOfFirst?: string): [{ from: string; to: string }, { from: string; to: string }] {
@@ -97,9 +98,10 @@ export async function loadOverviewSet(stores: string[], from: string, to: string
   };
 }
 
-export async function loadWarehouseWeek(city: string, from: string, to: string): Promise<WarehouseWeek> {
+export async function loadWarehouseWeek(city: string, from: string, to: string, withAbc = false): Promise<WarehouseWeek> {
   const stores = await stockedWarehousesOf(city);
-  return { from, to, stores, data: stores.length > 0 ? await loadOverviewSet(stores, from, to) : { cat: [], sup: [], sto: [] } };
+  const [data, abc] = await Promise.all([stores.length > 0 ? loadOverviewSet(stores, from, to) : Promise.resolve({ cat: [], sup: [], sto: [] }), withAbc ? loadAbcXyz(city, from, to) : Promise.resolve(undefined)]);
+  return { from, to, stores, data, abc };
 }
 
 type Metrics = { profit: number; margin: number | null; turnover: number | null };
@@ -243,7 +245,7 @@ export async function buildWarehouseOverviewPdf(storeCode: string, prev: Warehou
       { label: "Валовая прибыль", value: money(sumM.profit), note: kpiNote(sumM.profit, prevSumM.profit) },
       { label: "Оборачиваемость", value: pctText(sumM.turnover), note: kpiNote(sumM.turnover, prevSumM.turnover) },
     ],
-    sections: [...mainSections, ...compareSections],
+    sections: [...mainSections, ...compareSections, ...(cur.abc ? abcXyzSections(cur.abc) : [])],
   };
   return new Uint8Array(buildPdf(doc, await loadFonts()).output("arraybuffer"));
 }
