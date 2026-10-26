@@ -13,8 +13,13 @@ const money = (n: number) => `${int(n)} ₸`;
 const ruDate = (iso: string) => iso.split("-").reverse().join(".");
 
 function periodLine(title: string, from: string, to: string, suppliers: string[] | null, allSuppliers: number): string {
-  const sup = suppliers === null || suppliers.length === allSuppliers ? "все поставщики" : `поставщики (${suppliers.length} из ${allSuppliers}): ${suppliers.join(", ")}`;
+  const sup = suppliers === null ? "все поставщики" : `поставщиков: ${suppliers.length} из ${allSuppliers}`;
   return `${title}: ${ruDate(from)} — ${ruDate(to)} · ${sup}`;
+}
+
+// Какие поставщики выбраны — отдельной строкой под заголовком (когда выбраны не все).
+function supplierMeta(suppliers: string[] | null): string[] {
+  return suppliers === null ? [] : [`Поставщики: ${suppliers.join(", ")}`];
 }
 
 export function buyerFileName(kind: "abc" | "sold", city: string, from: string, to: string): string {
@@ -29,7 +34,7 @@ export async function buildAbcPdfFor(city: string, from: string, to: string, sup
     fileName: `АВС-XYZ ${BUYER_CITY_TITLE[city]} ${ruPeriod(from, to)}`,
     title: `АВС/XYZ анализ · ${BUYER_CITY_TITLE[city]}`,
     subtitle: periodLine(periodTitle, from, to, suppliers, allSuppliers),
-    meta: ["АВС — доля в обороте: A — верхние 80 %, B — 15 %, C — 5 %", "XYZ — ровность спроса по дням с продажами"],
+    meta: [...supplierMeta(suppliers), "АВС — доля в обороте: A — верхние 80 %, B — 15 %, C — 5 %", "XYZ — ровность спроса по дням с продажами"],
     orientation: "landscape",
     kpis: [
       { label: "Позиций", value: int(data.rows.length) },
@@ -61,6 +66,7 @@ export async function buildSoldPdfFor(city: string, from: string, to: string, su
     title: `Проданные товары · ${BUYER_CITY_TITLE[city]}`,
     subtitle: periodLine(periodTitle, from, to, suppliers, allSuppliers),
     meta: [
+      ...supplierMeta(suppliers),
       "Оборот по себестоимости — себестоимость проданного; по продажной цене — выручка за период",
       "Остаток — штук на последний день периода (по артикулу, все размеры); за прошедшие периоды восстановлен по документам, возможна небольшая погрешность из-за списаний",
     ],
