@@ -27,7 +27,7 @@ import {
 } from "@/lib/moysklad";
 import { WAREHOUSE_STORE } from "@/lib/warehouses";
 import { REGISTER_STORE, SAYA_PARK_RETIRED_FROM, SAYA_PARK_WAREHOUSE_ID } from "@/lib/registers";
-import { snapshotStockForDate } from "@/lib/stockSnapshot";
+import { snapshotProductStockForDate, snapshotStockForDate } from "@/lib/stockSnapshot";
 import { aggregateSales } from "@/lib/salesAggregate";
 
 // (карта касс REGISTER_STORE и константы Saya Park теперь в lib/registers.ts — общие для синхронизации и сверки)
@@ -414,10 +414,13 @@ async function handle(request: Request) {
   const snapshotParam = url.searchParams.get("snapshot");
   const snapshotDate = snapshotParam === "yesterday" ? yesterdayInAlmaty() : snapshotParam;
 
+  // ?snapshotProducts=YYYY-MM-DD — только остатки по товарам на конец дня (два основных склада), для восстановления истории.
+  const snapshotProductsDate = url.searchParams.get("snapshotProducts");
+
   // Ночная синхронизация и её повторы — один «цикл»: упала — через час повтор (pg_cron sync-retry, ?retry=1), и так
   // до трёх неудач подряд; только после третьей владельцу уходит сообщение. Запуски с датой, снимком и т.п. в цикл не входят.
   const retry = url.searchParams.get("retry") === "1";
-  const inCycle = retry || (!url.searchParams.get("date") && !skipCatalog && !productsOnly && !snapshotDate);
+  const inCycle = retry || (!url.searchParams.get("date") && !skipCatalog && !productsOnly && !snapshotDate && !snapshotProductsDate);
   const MAX_FAILS = 3;
   if (retry) {
     if (!isCron) return NextResponse.json({ error: "Нет доступа." }, { status: 403 });
@@ -430,6 +433,10 @@ async function handle(request: Request) {
   }
 
   try {
+    if (snapshotProductsDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotProductsDate)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
+      return NextResponse.json({ ok: true, snapshotProducts: snapshotProductsDate, rows: await snapshotProductStockForDate(snapshotProductsDate) });
+    }
     if (snapshotDate) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate)) return NextResponse.json({ error: "Неверная дата." }, { status: 400 });
       try {

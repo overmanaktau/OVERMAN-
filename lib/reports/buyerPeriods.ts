@@ -1,10 +1,10 @@
-// Периоды отчётов закупщика — те же, что в «Продажах» у администратора: сегодня, вчера, эта и прошлая неделя, этот и прошлый месяц, свой период.
-// Данные по товарам загружаются ночью (за вчера), поэтому «сегодня» в товарных отчётах недоступно.
+// Периоды отчётов закупщика — как в «Продажах» у администратора: вчера, эта и прошлая неделя, этот и прошлый месяц, свой период.
+// Данные по товарам загружаются ночью (за вчера), поэтому «Сегодня» у закупщика нет, а период, по которому данных ещё нет, в меню не показывается.
 import { addDays, daysBetween, mondayOf, monthEndOf, monthStartOf } from "@/lib/coach/metrics";
 
-export type BuyerPeriod = "t" | "y" | "cw" | "pw" | "m" | "pm" | "c";
-export const BUYER_PERIOD_LABEL: Record<BuyerPeriod, string> = { t: "Сегодня", y: "Вчера", cw: "Эта неделя", pw: "Прошлая неделя", m: "Этот месяц", pm: "Прошлый месяц", c: "Свой период" };
-export const BUYER_PERIOD_ORDER: BuyerPeriod[] = ["t", "y", "cw", "pw", "m", "pm"];
+export type BuyerPeriod = "y" | "cw" | "pw" | "m" | "pm" | "c";
+export const BUYER_PERIOD_LABEL: Record<BuyerPeriod, string> = { y: "Вчера", cw: "Эта неделя", pw: "Прошлая неделя", m: "Этот месяц", pm: "Прошлый месяц", c: "Свой период" };
+export const BUYER_PERIOD_ORDER: BuyerPeriod[] = ["y", "cw", "pw", "m", "pm"];
 
 export type DateRange = { from: string; to: string };
 
@@ -12,8 +12,6 @@ export function resolvePeriod(key: BuyerPeriod, today: string, custom?: DateRang
   const monday = mondayOf(today);
   const prevMonthEnd = addDays(monthStartOf(today), -1);
   switch (key) {
-    case "t":
-      return { from: today, to: today };
     case "y":
       return { from: addDays(today, -1), to: addDays(today, -1) };
     case "cw":

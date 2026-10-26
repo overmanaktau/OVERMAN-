@@ -1,6 +1,6 @@
 // Бот-помощник для закупщика: кнопки «Отчёт», «ABC/XYZ», «Проданные товары». Шаги: город (Актау / Актобе / Все города) → период (как в «Продажах»
 // у администратора, плюс свой период) → для ABC/XYZ и «Проданных товаров» ещё поставщики галочками (по умолчанию все) → один PDF-файл.
-// Только два основных склада (lib/reports/buyerStores.ts). Данные по товарам загружаются ночью, поэтому за «Сегодня» отчёта нет.
+// Только два основных склада (lib/reports/buyerStores.ts). Данные по товарам загружаются ночью, поэтому «Сегодня» нет, а период без данных в меню не показывается.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { getErrorMessage } from "@/lib/errors";
@@ -47,9 +47,12 @@ async function sendCityMenu(t: Transport, chatId: number, k: Kind) {
 }
 
 async function sendPeriodMenu(t: Transport, chatId: number, k: Kind, c: string, note?: string) {
+  // Только периоды, по которым уже есть данные (в понедельник нет «Эта неделя», 1-го числа — «Этот месяц»).
+  const today = todayInAlmaty();
+  const periods = BUYER_PERIOD_ORDER.filter((p) => resolvePeriod(p, today).from <= addDays(today, -1));
   const rows: { text: string; callback_data: string }[][] = [];
-  for (let i = 0; i < BUYER_PERIOD_ORDER.length; i += 2) {
-    rows.push(BUYER_PERIOD_ORDER.slice(i, i + 2).map((p) => ({ text: BUYER_PERIOD_LABEL[p], callback_data: `by:p:${k}:${c}:${p}` })));
+  for (let i = 0; i < periods.length; i += 2) {
+    rows.push(periods.slice(i, i + 2).map((p) => ({ text: BUYER_PERIOD_LABEL[p], callback_data: `by:p:${k}:${c}:${p}` })));
   }
   rows.push([{ text: "✏️ Свой период", callback_data: `by:p:${k}:${c}:c` }]);
   rows.push([{ text: "← Назад", callback_data: `by:k:${k}` }]);
@@ -98,10 +101,6 @@ async function sendSupplierMenu(t: Transport, chatId: number, s: State) {
 async function proceed(t: Transport, user: { id: number; telegram_chat_id: number }, k: Kind, c: string, perKey: BuyerPeriod, custom?: DateRange) {
   const chatId = user.telegram_chat_id;
   const today = todayInAlmaty();
-  if (perKey === "t") {
-    await sendPeriodMenu(t, chatId, k, c, "Товарные данные загружаются ночью, поэтому за сегодня отчёта нет. Выберите «Вчера» или другой период.");
-    return;
-  }
   const range = resolvePeriod(perKey, today, custom);
   if (range.from > addDays(today, -1)) {
     await sendPeriodMenu(t, chatId, k, c, "За этот период данных ещё нет — они появятся утром следующего дня. Выберите другой период.");
