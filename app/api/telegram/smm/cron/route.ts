@@ -11,7 +11,7 @@ import type { SmmUser } from "@/lib/smm/users";
 export const maxDuration = 300;
 
 // Расписание бота СММ (pg_cron): ?job=ads — слежение за таргетом (каждые 10 минут), ?job=stories — сбор историй (каждый час),
-// ?job=morning — утренняя рассылка (9:10 по Алматы; повтор в 9:40 досылает недоставленное).
+// ?job=morning — утренняя рассылка (7:10 по Алматы; повтор в 7:40 досылает недоставленное).
 // Для проверок: ?mock=1 — ничего не отправлять, а вернуть тексты; ?to=<id Telegram> — только этому сотруднику; ?force=1 — игнорировать журнал отправок.
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;

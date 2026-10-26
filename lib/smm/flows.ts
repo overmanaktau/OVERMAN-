@@ -1,4 +1,4 @@
-// Общие «блоки» бота СММ: их используют и кнопки меню, и утренняя рассылка в 9:10.
+// Общие «блоки» бота СММ: их используют и кнопки меню, и утренняя рассылка в 7:10.
 import { type CityKey } from "@/lib/smm/config";
 import { codeFromPeriod, type Period } from "@/lib/smm/periods";
 import { categoryMessage, categorySales, onlineSales, type SalesSource } from "@/lib/smm/sales";
