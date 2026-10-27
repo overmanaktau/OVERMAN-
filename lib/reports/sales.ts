@@ -740,7 +740,7 @@ export async function buildSalesReport(scope: ReportScope, date: string): Promis
 
 
 // Дневной отчёт «сегодня до 17:00»: живые данные из МойСклад (за сегодня ночная синхронизация ещё не
-// прошла) и трафик со счётчиков за часы с 10:00 до 17:00. Время в МойСклад — на 2 часа раньше Алматы.
+// прошла) и трафик со счётчиков за рабочее время до 17:00 (по фильтру GSM). Время в МойСклад — на 2 часа раньше Алматы.
 // Те же правила, что у обычного отчёта: возврат вычитается, чек аннулируется, когда вернули всё.
 export async function buildIntradayReport(scope: ReportScope, date: string, untilHour = 17): Promise<string[]> {
   const cutoff = `${date} ${String(untilHour - 2).padStart(2, "0")}:00:00`;
