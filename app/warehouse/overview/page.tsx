@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2Ru } from "@/lib/numFormat";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { supabase } from "@/lib/supabaseClient";
@@ -29,13 +30,13 @@ const TOP_CATEGORIES: { key: string; label: string }[] = [
 ];
 
 function money(n: number) {
-  return `${n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
+  return `${trim2Ru(n)} ₸`;
 }
-function pctText(v: number | null, digits = 1) {
-  return v === null ? "—" : `${v.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
+function pctText(v: number | null) {
+  return v === null ? "—" : `${trim2Ru(v)}%`;
 }
 // Валовый % ниже 50 — лёгкое красное выделение (на экране и в PDF)
-const lowMargin = (v: number | null) => v !== null && Math.round(v * 10) / 10 < 50; // по показанному значению: 49,96 выводится как 50,0% и не красится
+const lowMargin = (v: number | null) => v !== null && Math.round(v * 100) / 100 < 50; // по показанному значению: 49,96 выводится как 50,0% и не красится
 const LOW_MARGIN_CLS = "rounded px-1.5 py-0.5 bg-[#F6DAD2] text-[#A34B36]";
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -120,7 +121,7 @@ function deltaPct(cur: number | null, prev: number | null | undefined): number |
 }
 function deltaText(v: number | null): string {
   if (v === null) return "—";
-  const t = Math.abs(v).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const t = trim2Ru(Math.abs(v));
   return `${v > 0 ? "+" : v < 0 ? "−" : ""}${t}%`;
 }
 function Delta({ v }: { v: number | null }) {
@@ -444,13 +445,13 @@ export default function WarehouseOverviewPage() {
     return [money(r.stockEnd), money(r.revenue), money(r.cogs), money(m.profit), pctText(m.margin), pctText(m.turnover)];
   };
   const tableRow = (r: Row): (string | number)[] => [r.name, ...metricCells(r)];
-  const plain2 = (n: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const plain2 = (n: number) => trim2Ru(n);
   const sign = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "");
   const excelRow = (r: Row, pr?: Row | null): (string | number)[] => {
     const m = metrics(r);
     const base: (string | number)[] = [r.name, Math.round(r.stockEnd * 100) / 100, Math.round(r.revenue * 100) / 100, Math.round(r.cogs * 100) / 100, Math.round(m.profit * 100) / 100, m.margin === null ? "" : Math.round(m.margin * 10) / 10, m.turnover === null ? "" : Math.round(m.turnover * 10) / 10];
     if (!diffOn) return base;
-    return [...base, ...deltasOf(r, pr).map((v) => (v === null ? "" : Math.round(v * 10) / 10))];
+    return [...base, ...deltasOf(r, pr).map((v) => (v === null ? "" : Math.round(v * 100) / 100))];
   };
   type PrevSet = { cat: Row[]; sup: Row[]; sto: Row[] };
   const blockPrev = (b: { nameHeader: string }, d: PrevSet | null = prevData) => (d ? (b.nameHeader === "Категория" ? d.cat : b.nameHeader === "Поставщик" ? d.sup : d.sto) : null);
@@ -505,8 +506,8 @@ export default function WarehouseOverviewPage() {
         if (c !== null && o !== null) {
           const abs = c - o;
           // знак — по округлённому значению, чтобы «+0,0» не появлялось
-          const rounded = isPct ? Math.round(abs * 10) / 10 : Math.round(abs * 100) / 100;
-          const absText = isPct ? `${sign(rounded)}${Math.abs(rounded).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} п.п.` : `${sign(rounded)}${plain2(Math.abs(rounded))}`;
+          const rounded = Math.round(abs * 100) / 100;
+          const absText = isPct ? `${sign(rounded)}${trim2Ru(Math.abs(rounded))} п.п.` : `${sign(rounded)}${plain2(Math.abs(rounded))}`;
           diff = `${absText}
 ${deltaText(deltaPct(c, o))}`;
         }

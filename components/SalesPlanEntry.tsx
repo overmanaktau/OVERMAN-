@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2Ru } from "@/lib/numFormat";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
@@ -97,7 +98,7 @@ function parseAmountText(text: string): number | "" {
 }
 function formatGrouped(n: number | ""): string {
   if (n === "") return "";
-  return n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+  return trim2Ru(n);
 }
 function amountKeyDown(currentText: string) {
   return (e: React.KeyboardEvent<HTMLInputElement>) => {

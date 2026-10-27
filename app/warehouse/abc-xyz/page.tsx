@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2 } from "@/lib/numFormat";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
@@ -859,7 +860,7 @@ export default function AbcXyzPage() {
                       money(r.revenue),
                       r.quantity.toLocaleString("ru-RU"),
                       r.daysWithSales,
-                      `${(r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0).toFixed(0)}%`,
+                      `${trim2((r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0))}%`,
                       DECISIONS[`${r.abc}${r.xyz}`] ?? "",
                     ]),
                   },
@@ -904,7 +905,7 @@ export default function AbcXyzPage() {
                           money(r.revenue),
                           r.quantity.toLocaleString("ru-RU"),
                           r.daysWithSales,
-                          `${(r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0).toFixed(0)}%`,
+                          `${trim2((r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0))}%`,
                           DECISIONS[`${r.abc}${r.xyz}`] ?? "",
                         ]);
                         kinds.push("group");
@@ -963,7 +964,7 @@ export default function AbcXyzPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-muted">Валовый %</span>
-                        <span className="num">{marginPct.toFixed(0)}%</span>
+                        <span className="num">{trim2(marginPct)}%</span>
                       </div>
                       <div className="text-mutedLight text-[12.5px] mt-1">{DECISIONS[`${r.abc}${r.xyz}`]}</div>
                       {isOpen && (
@@ -1009,7 +1010,7 @@ export default function AbcXyzPage() {
                         <div className="num">{money(r.revenue)}</div>
                         <div className="num">{r.quantity.toLocaleString("ru-RU")}</div>
                         <div className="num">{r.daysWithSales}</div>
-                        <div className="num">{marginPct.toFixed(0)}%</div>
+                        <div className="num">{trim2(marginPct)}%</div>
                         <div className="text-muted text-[12.5px]">{DECISIONS[`${r.abc}${r.xyz}`]}</div>
                       </div>
                       {isOpen && <SizeBreakdown loading={skuLoading.has(r.id)} rows={skuCache[r.id]} openLightbox={setLightbox} />}

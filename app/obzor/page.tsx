@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2, trim2Ru } from "@/lib/numFormat";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
@@ -55,17 +56,14 @@ function parseYmd(s: string): Date {
   return new Date(y, m - 1, day);
 }
 
-// Посетители: целое число — без дробной части («4 028»), иначе два знака после запятой («282,15»)
-const trafficText = (n: number) => {
-  const r = Math.round(n * 100) / 100;
-  return Number.isInteger(r) ? r.toLocaleString("ru-RU") : r.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+// Посетители и остальные числа статистики: целое — без дробной части, иначе два знака после запятой (lib/numFormat.ts)
+const trafficText = trim2Ru;
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
 // Остатки и себестоимость — с копейками, как в МойСклад.
 function money2(n: number) {
-  return `${n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
+  return `${trim2Ru(n)} ₸`;
 }
 function friendlyError(e: unknown): string {
   const message = getErrorMessage(e);
@@ -552,7 +550,7 @@ export default function ObzorPage() {
                       r.items,
                       r.receipts > 0 ? money(r.revenue / r.receipts) : "—",
                       trafficByDate.has(r.date) ? trafficText(trafficByDate.get(r.date) as number) : "—",
-                      (trafficByDate.get(r.date) ?? 0) > 0 ? `${((r.receipts / (trafficByDate.get(r.date) as number)) * 100).toFixed(2)}%` : "—",
+                      (trafficByDate.get(r.date) ?? 0) > 0 ? `${trim2(((r.receipts / (trafficByDate.get(r.date) as number)) * 100))}%` : "—",
                       r.cost !== null ? money(r.cost) : "—",
                       r.cost !== null ? money(r.revenue - r.cost) : "—",
                     ];
@@ -565,7 +563,7 @@ export default function ObzorPage() {
                       totalItems,
                       totalReceipts > 0 ? money(avgCheck) : "—",
                       totalTraffic > 0 ? trafficText(totalTraffic) : "—",
-                      conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—",
+                      conversionPct !== null ? `${trim2(conversionPct)}%` : "—",
                       totalCost !== null ? money(totalCost) : "—",
                       margin !== null ? money(margin) : "—",
                     ],
@@ -579,9 +577,9 @@ export default function ObzorPage() {
                 money2(r.cogs),
                 money2(r.stockValueEnd),
                 money2(r.stockValue),
-                r.stockValue > 0 ? `${((r.cogs / r.stockValue) * 100).toFixed(0)}%` : "—",
+                r.stockValue > 0 ? `${trim2(((r.cogs / r.stockValue) * 100))}%` : "—",
               ]);
-              body.push(["Итого", money2(turnoverCogsTotal), money2(stockEndTotal), money2(turnoverStockValueTotal), turnoverPct !== null ? `${turnoverPct.toFixed(0)}%` : "—"]);
+              body.push(["Итого", money2(turnoverCogsTotal), money2(stockEndTotal), money2(turnoverStockValueTotal), turnoverPct !== null ? `${trim2(turnoverPct)}%` : "—"]);
               sections.push({
                 title: "Оборачиваемость по категориям",
                 group: "cost",
@@ -600,10 +598,10 @@ export default function ObzorPage() {
                 { label: "Оборот", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: totalReceipts > 0 ? money(avgCheck) : "—" },
-                { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—", note: totalTraffic > 0 ? `${trafficText(totalTraffic)} посетителей` : undefined },
-                { label: "Глубина чека", value: totalReceipts > 0 ? `${itemsPerReceipt.toFixed(1)} шт` : "—" },
-                { label: "Валовая прибыль", group: "cost" as const, value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от оборота` : undefined },
-                { label: "Оборачиваемость склада", group: "cost" as const, value: turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—" },
+                { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${trim2(conversionPct)}%` : "—", note: totalTraffic > 0 ? `${trafficText(totalTraffic)} посетителей` : undefined },
+                { label: "Глубина чека", value: totalReceipts > 0 ? `${trim2(itemsPerReceipt)} шт` : "—" },
+                { label: "Валовая прибыль", group: "cost" as const, value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${trim2(marginPct)}% от оборота` : undefined },
+                { label: "Оборачиваемость склада", group: "cost" as const, value: turnoverPct !== null ? `${trim2(turnoverPct)}%` : "—" },
               ],
               sections,
             };
@@ -621,10 +619,10 @@ export default function ObzorPage() {
             <Kpi label="Оборот" value={money(totalRevenue)} />
             <Kpi label="Чеков" value={totalReceipts.toLocaleString("ru-RU")} />
             <Kpi label="Средний чек" value={money(avgCheck)} />
-            <Kpi label="Глубина чека" value={itemsPerReceipt.toFixed(2)} />
+            <Kpi label="Глубина чека" value={trim2(itemsPerReceipt)} />
             <Kpi
               label="Конверсия (чек / посетитель)"
-              value={conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—"}
+              value={conversionPct !== null ? `${trim2(conversionPct)}%` : "—"}
               suffix={
                 <span className="text-[11px] text-mutedLight">
                   {totalTraffic > 0 ? `${totalReceipts.toLocaleString("ru-RU")} чеков из ${trafficText(totalTraffic)} посетителей` : "нет данных по трафику за период"}
@@ -637,14 +635,14 @@ export default function ObzorPage() {
               suffix={
                 marginPct !== null && (
                   <span className="self-start text-[11px] font-bold text-accent bg-[#DDEBD9] rounded-full px-2 py-0.5">
-                    {marginPct >= 0 ? "↑" : "↓"} {Math.abs(marginPct).toFixed(0)}%
+                    {marginPct >= 0 ? "↑" : "↓"} {trim2(Math.abs(marginPct))}%
                   </span>
                 )
               }
             />
             <Kpi
               label="Оборачиваемость склада"
-              value={turnoverLoading ? "…" : turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}
+              value={turnoverLoading ? "…" : turnoverPct !== null ? `${trim2(turnoverPct)}%` : "—"}
               suffix={<span className="text-[11px] text-mutedLight">себест. продаж / себест. остатка</span>}
             />
           </div>
@@ -687,7 +685,7 @@ export default function ObzorPage() {
                       <div key={r.label} className="rounded-lg border border-borderSoft p-3 flex flex-col gap-1.5">
                         <div className="flex items-center justify-between">
                           <div className="font-semibold text-[13px]">{r.label}</div>
-                          <div className="font-bold num text-[13px]">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
+                          <div className="font-bold num text-[13px]">{pct !== null ? `${trim2(pct)}%` : "—"}</div>
                         </div>
                         <div className="flex items-center justify-between text-[12px] text-muted">
                           <span>Продано (себест.)</span>
@@ -715,7 +713,7 @@ export default function ObzorPage() {
                   <div className="rounded-lg border border-border p-3 flex flex-col gap-1.5">
                     <div className="flex items-center justify-between text-[13px] font-bold">
                       <span>Итого</span>
-                      <span className="num">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</span>
+                      <span className="num">{turnoverPct !== null ? `${trim2(turnoverPct)}%` : "—"}</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
                       <span>Продано (себест.)</span>
@@ -770,7 +768,7 @@ export default function ObzorPage() {
                         className="grid grid-cols-[1fr_80px_150px_150px_150px] gap-3 text-[13px] py-2 border-b border-borderSoft last:border-b-0"
                       >
                         <div className="font-semibold truncate self-center">{r.label}</div>
-                        <div className="text-right num self-center">{pct !== null ? `${pct.toFixed(1)}%` : "—"}</div>
+                        <div className="text-right num self-center">{pct !== null ? `${trim2(pct)}%` : "—"}</div>
                         <div className="text-right">
                           <div className="num text-muted">{money2(r.cogs)}</div>
                           <div className="num text-[11px] text-mutedLight">{money2(r.revenue)}</div>
@@ -787,7 +785,7 @@ export default function ObzorPage() {
                   })}
                   <div className="grid grid-cols-[1fr_80px_150px_150px_150px] gap-3 text-[13px] font-bold pt-2.5 mt-1 border-t border-border">
                     <div className="self-center">Итого</div>
-                    <div className="text-right num self-center">{turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—"}</div>
+                    <div className="text-right num self-center">{turnoverPct !== null ? `${trim2(turnoverPct)}%` : "—"}</div>
                     <div className="text-right">
                       <div className="num">{money2(turnoverCogsTotal)}</div>
                       <div className="num text-[11px] font-normal text-mutedLight">{money2(turnoverRevenueTotal)}</div>

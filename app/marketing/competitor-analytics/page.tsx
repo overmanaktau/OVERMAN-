@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2 } from "@/lib/numFormat";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
@@ -766,8 +767,8 @@ export default function CompetitorAnalyticsPage() {
                       </div>
                       {rate !== null && (
                         <div className="text-mutedLight text-[11px] num">
-                          Вовлечённость: {rate.toFixed(1)}%
-                          {likeConversion !== null && ` · лайки/просмотры: ${likeConversion.toFixed(1)}%`}
+                          Вовлечённость: {trim2(rate)}%
+                          {likeConversion !== null && ` · лайки/просмотры: ${trim2(likeConversion)}%`}
                         </div>
                       )}
                     </>

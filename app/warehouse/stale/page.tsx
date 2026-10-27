@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2Ru } from "@/lib/numFormat";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
@@ -26,7 +27,7 @@ const STALE_DAYS = 45;
 const STALE_DAYS_QUERY = STALE_DAYS - 1;
 
 function money(n: number) {
-  return `${n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
+  return `${trim2Ru(n)} ₸`;
 }
 function friendlyError(e: unknown): string {
   const message = getErrorMessage(e);

@@ -2,6 +2,7 @@
 // Период: на сегодня, на завтра, эта неделя (пн–вс), до конца недели (с сегодняшним днём).
 // План — личный (по плану самого сотрудника) или общий (план оборота города). Расчёт дня — по долям дней недели (lib/dayPlan),
 // тот же, что на портале и в других сообщениях бота.
+import { trim2 } from "@/lib/numFormat";
 import { type ReplyMarkup, type Transport } from "@/lib/coach/bot";
 import { addDays, employeeDayPlans, loadEmployeeDays, mondayOf, shortDate, todayInAlmaty, type EmployeeRef } from "@/lib/coach/metrics";
 import { loadPeriod } from "@/lib/reports/weeklyCompare";
@@ -58,7 +59,7 @@ async function loadRows(emp: EmployeeRef, kind: Kind, from: string, to: string, 
   return w.days.map((d) => ({ date: d.date, plan: d.planRevenue, addOn: d.addOn ?? 0, fact: d.date < today ? d.revenue : null }));
 }
 
-const pctText = (fact: number, plan: number) => (plan > 0 ? `${Math.round((fact / plan) * 100)}%` : "—");
+const pctText = (fact: number, plan: number) => (plan > 0 ? `${trim2((fact / plan) * 100)}%` : "—");
 // «+ недобор» (месяц отстаёт) или «− опережение» (месяц идёт с запасом) — одной строкой для итогов.
 const addOnLine = (label: string, v: number) => (v > 0 ? `+ недобор ${label}${money(v)}` : v < 0 ? `− опережение ${label}${money(-v)}` : "");
 

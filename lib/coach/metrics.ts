@@ -2,6 +2,7 @@
 // цель на неделю. Всё считается по данным портала: план продавца на месяц из
 // «Внесения плана продаж по сотрудникам» (sales_plan_monthly, периоды —
 // sales_plan_periods), факт — из moysklad_employee_sales_daily.
+import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { dayPlanForDate, remainingAddOn, type PlanLookup } from "@/lib/dayPlan";
 
@@ -294,13 +295,13 @@ export function buildAdvice(s: MonthStatus): Advice {
     lagging,
     laggingRatio: weakest ? weakest.ratio : null,
     rows: [
-      { label: "Чеков за смену", now: p.receipts.toFixed(1), recent: r ? r.receipts.toFixed(1) : null },
+      { label: "Чеков за смену", now: trim2(p.receipts), recent: r ? trim2(r.receipts) : null },
       {
         label: "Средний чек",
         now: `${Math.round(p.avgCheck).toLocaleString("ru-RU")} ₸`,
         recent: r ? `${Math.round(r.avgCheck).toLocaleString("ru-RU")} ₸` : null,
       },
-      { label: "Глубина чека", now: p.depth.toFixed(2), recent: r ? r.depth.toFixed(2) : null },
+      { label: "Глубина чека", now: trim2(p.depth), recent: r ? trim2(r.depth) : null },
     ],
   };
 }

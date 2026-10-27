@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2 } from "@/lib/numFormat";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
@@ -225,7 +226,7 @@ function PeriodPlanWindow({ stores, refreshKey = 0, range }: { stores: string[];
             </div>
             <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">Выполнение</div>
-              <div className="font-serif text-[22px] font-semibold num">{pct !== null ? `${pct.toFixed(2)}%` : "—"}</div>
+              <div className="font-serif text-[22px] font-semibold num">{pct !== null ? `${trim2(pct)}%` : "—"}</div>
             </div>
             {hasFuture && (
               <div className="flex flex-col gap-1.5">
@@ -430,7 +431,7 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
             </div>
             <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">Выполнение</div>
-              <div className="font-serif text-[22px] font-semibold num">{pct !== null ? `${pct.toFixed(2)}%` : "—"}</div>
+              <div className="font-serif text-[22px] font-semibold num">{pct !== null ? `${trim2(pct)}%` : "—"}</div>
             </div>
             <div className="flex flex-col gap-1.5">
               <div className="text-xs text-muted">Нужно в день до конца месяца</div>
@@ -463,7 +464,7 @@ function MonthPlanWindow({ stores, refreshKey = 0 }: { stores: string[]; refresh
                 <div className="flex flex-col gap-1.5">
                   <div className="text-xs text-muted">Выполнение периода</div>
                   <div className="font-serif text-[22px] font-semibold num">
-                    {periodPct !== null ? `${periodPct.toFixed(2)}%` : "—"}
+                    {periodPct !== null ? `${trim2(periodPct)}%` : "—"}
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5">

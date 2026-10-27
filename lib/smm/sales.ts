@@ -1,4 +1,5 @@
 // Продажи по категориям для бота СММ: общие продажи города (из таблицы продаж по товарам) и онлайн-продажи (чеки Болат Наргизы из МойСклад).
+import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchRetailDemandsForOwner } from "@/lib/moysklad";
 import { CITIES, ONLINE_SELLER, type CityKey } from "@/lib/smm/config";
@@ -80,7 +81,7 @@ export async function onlineProducts(p: Period, categories: string[]): Promise<P
 // ---- оформление ----
 
 export const fmt = (n: number) => Math.round(n).toLocaleString("ru-RU");
-const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : trim2(n));
 const pct = (part: number, total: number) => (total > 0 ? Math.round((part / total) * 100) : 0);
 
 // 5 категорий с наибольшими продажами; остальные — одной строкой «Прочее». all=true — все категории подряд.

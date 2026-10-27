@@ -1,5 +1,6 @@
 // АВС/XYZ за период для PDF: тот же расчёт, что на странице «Склад → АВС/XYZ» (артикулы с оборотом за период; A — верхние 80 % оборота,
 // B — следующие 15 %, C — остальные 5 %; X — продажи более чем в 60 % дней периода, Y — от 20 %, Z — реже). Склады и поставщики (null — все) задаёт вызывающий.
+import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import type { PdfSection } from "@/lib/exportPdf";
 
@@ -83,7 +84,7 @@ export function abcXyzSections(data: AbcData): PdfSection[] {
       headers: ["Артикул", "Категория", "ABC", "XYZ", "Оборот", "Штук", "Дней", "Валовый %", "Решение"],
       align: ["left", "left", "center", "center", "right", "right", "right", "right", "left"],
       widths: [2.6, 1.5, 0.5, 0.5, 1.4, 0.8, 0.6, 0.9, 3.2],
-      rows: data.rows.map((r) => [r.name, r.category, r.abc, r.xyz, money(r.revenue), int(r.quantity), r.daysWithSales, `${(r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0).toFixed(0)}%`, DECISIONS[`${r.abc}${r.xyz}`] ?? ""]),
+      rows: data.rows.map((r) => [r.name, r.category, r.abc, r.xyz, money(r.revenue), int(r.quantity), r.daysWithSales, `${trim2((r.revenue !== 0 ? ((r.revenue - r.cost) / r.revenue) * 100 : 0))}%`, DECISIONS[`${r.abc}${r.xyz}`] ?? ""]),
     },
   ];
 }

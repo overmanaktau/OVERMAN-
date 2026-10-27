@@ -2,6 +2,7 @@
 // остаток, продано, себестоимость, валовая прибыль, валовый %, оборачиваемость) и блоки «сравнение периодов». Каждый понедельник уходит закупщику
 // отдельным файлом по каждому городу (app/api/telegram/coach/warehouse-overview-weekly). Расчёт — как на странице с настройками по умолчанию:
 // склады города, на которых есть товар, без заморозки, без категорий «Бесплатный» и «Без категории».
+import { trim2Ru } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { WAREHOUSES } from "@/lib/warehouses";
 import { addDays, mondayOf, monthStartOf } from "@/lib/coach/metrics";
@@ -125,13 +126,13 @@ const total = (rows: OverviewRow[]): OverviewRow =>
   rows.reduce((a, r) => ({ name: "Итого", stockEnd: a.stockEnd + r.stockEnd, stockAvg: a.stockAvg + r.stockAvg, revenue: a.revenue + r.revenue, cogs: a.cogs + r.cogs }), { name: "Итого", stockEnd: 0, stockAvg: 0, revenue: 0, cogs: 0 });
 
 const sp = (s: string) => s.replace(/[  ]/g, " ");
-const plain2 = (n: number) => sp(n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const plain2 = (n: number) => sp(trim2Ru(n));
 const money = (n: number) => `${plain2(n)} ₸`;
-const pctText = (v: number | null, digits = 1) => (v === null ? "—" : `${sp(v.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits }))}%`);
-const lowMargin = (v: number | null) => v !== null && Math.round(v * 10) / 10 < 50; // валовый % ниже 50 — лёгкое красное выделение
+const pctText = (v: number | null) => (v === null ? "—" : `${sp(trim2Ru(v))}%`);
+const lowMargin = (v: number | null) => v !== null && Math.round(v * 100) / 100 < 50; // валовый % ниже 50 — лёгкое красное выделение
 const sign = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "");
 const deltaPct = (cur: number | null, prev: number | null | undefined): number | null => (cur === null || prev === null || prev === undefined || prev === 0 ? null : ((cur - prev) / Math.abs(prev)) * 100);
-const deltaText = (v: number | null): string => (v === null ? "—" : `${sign(v)}${sp(Math.abs(v).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}%`);
+const deltaText = (v: number | null): string => (v === null ? "—" : `${sign(v)}${sp(trim2Ru(Math.abs(v)))}%`);
 const fmtRuDate = (iso: string) => iso.split("-").reverse().join(".");
 
 export function warehouseFileName(city: string, week: { from: string; to: string }): string {
@@ -179,8 +180,8 @@ export async function buildWarehouseOverviewPdf(storeCode: string, prev: Warehou
       let diff = "—";
       if (c !== null && o !== null) {
         const abs = c - o;
-        const rounded = isPct ? Math.round(abs * 10) / 10 : Math.round(abs * 100) / 100; // знак — по округлённому значению
-        const absText = isPct ? `${sign(rounded)}${sp(Math.abs(rounded).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }))} п.п.` : `${sign(rounded)}${plain2(Math.abs(rounded))}`;
+        const rounded = Math.round(abs * 100) / 100; // знак — по округлённому значению
+        const absText = isPct ? `${sign(rounded)}${sp(trim2Ru(Math.abs(rounded)))} п.п.` : `${sign(rounded)}${plain2(Math.abs(rounded))}`;
         diff = `${absText}\n${deltaText(deltaPct(c, o))}`;
       }
       out.push(fmt(o), fmt(c), diff);

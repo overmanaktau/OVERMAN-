@@ -1,17 +1,18 @@
 // Тексты отчётов бота СММ: аналитика постов за период, расход на рекламу, список таргета.
+import { trim2, trim2Ru } from "@/lib/numFormat";
 import { CITIES, CITY_KEYS, type CityKey } from "@/lib/smm/config";
 import { accountTotals, adInsightsByAd, adSpend, emptyAdStats, listPosts, listTargetPosts, type AdStats, type Post } from "@/lib/smm/meta";
 import { daysIn, periodLabel, type Period } from "@/lib/smm/periods";
 import { escapeHtml, packSections } from "@/lib/telegram";
 
 const n = (v: number) => Math.round(v).toLocaleString("ru-RU");
-const usd = (v: number) => `$${v.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const usd = (v: number) => `$${trim2Ru(v)}`;
 const alm = (iso: string) => {
   const d = new Date(new Date(iso).getTime() + 5 * 3600000).toISOString();
   return `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 };
 
-const pct1 = (v: number) => `${v.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+const pct1 = (v: number) => `${trim2Ru(v)}%`;
 // ER по охвату: (лайки + комментарии + репосты + сохранения) ÷ охват × 100
 const postEr = (x: Post) => (x.reach > 0 ? ((x.likes + x.comments + x.shares + x.saved) * 100) / x.reach : 0);
 
@@ -99,7 +100,7 @@ export async function targetReport(city: CityKey, p: Period): Promise<string[]> 
 
   const statLines = (s: AdStats): string[] => {
     const l: string[] = [`💵 ${usd(s.spend)} · 👁 ${n(s.impressions)} · 🎯 охват ${n(s.reach)}`];
-    l.push(`🖱 Клики ${n(s.clicks)} · цена клика ${usd(div(s.spend, s.clicks))} · CTR ${div(s.clicks * 100, s.impressions).toFixed(2)}%`);
+    l.push(`🖱 Клики ${n(s.clicks)} · цена клика ${usd(div(s.spend, s.clicks))} · CTR ${trim2(div(s.clicks * 100, s.impressions))}%`);
     if (s.linkClicks > 0) l.push(`🔗 По ссылке ${n(s.linkClicks)} · цена ${usd(div(s.spend, s.linkClicks))}`);
     l.push(`❤️ ${n(s.reactions)} · 💬 ${n(s.comments)} · ↗️ ${n(s.shares)} · 🔖 ${n(s.saves)}${s.videoViews > 0 ? ` · ▶️ ${n(s.videoViews)}` : ""}`);
     l.push(`📈 ER по охвату: ${pct1(div((s.reactions + s.comments + s.shares + s.saves) * 100, s.reach))}`);

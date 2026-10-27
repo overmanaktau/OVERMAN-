@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2Ru, trim2 } from "@/lib/numFormat";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { supabase } from "@/lib/supabaseClient";
@@ -19,13 +20,13 @@ const STALE_DAYS = 45;
 const STALE_DAYS_QUERY = STALE_DAYS - 1; // SQL сравнивает строго «>»
 
 function money(n: number) {
-  return `${n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₸`;
+  return `${trim2Ru(n)} ₸`;
 }
 function num(n: number) {
   return Math.round(n).toLocaleString("ru-RU");
 }
 function pct(part: number, total: number) {
-  return total > 0 ? `${((part / total) * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%` : "—";
+  return total > 0 ? `${trim2Ru(((part / total) * 100))}%` : "—";
 }
 
 async function fetchAllRows<T>(
@@ -105,7 +106,7 @@ function turnoverRange(period: TurnoverPeriod, custom: { from: string; to: strin
 }
 
 function turnText(v: number | null): string {
-  return v === null ? "—" : `${v.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  return v === null ? "—" : `${trim2Ru(v)}%`;
 }
 
 // Заголовок колонки с двумя стрелками: ▼ — от большего к меньшему, ▲ — от меньшего к большему.
@@ -291,7 +292,7 @@ function aggregateCells(ls: ReceiptLine[]): (string | number)[] {
   const all = sumLines(ls);
   const movedIn = ls.filter((l) => l.docType === "move_in").reduce((a, l) => a + l.quantity, 0);
   const movedNet = Math.round(all.moved - movedIn);
-  const pctSold = all.qty > 0 ? `${Math.round((all.sold / all.qty) * 100)}%` : "—";
+  const pctSold = all.qty > 0 ? `${trim2((all.sold / all.qty) * 100)}%` : "—";
   return [num(qty), money(cost), num(all.sold), movedNet < 0 ? `−${num(-movedNet)}` : num(movedNet), num(all.remaining), pctSold];
 }
 
@@ -309,7 +310,7 @@ const RECEIPT_ALIGN: ("left" | "right")[] = ["left", "left", "left", "right", "r
 const RECEIPT_WIDTHS = [3.4, 1.1, 1.5, 1, 1.5, 0.9, 1, 0.9, 1, 0.8, 1];
 
 function receiptStats(t: { qty: number; sold: number; moved: number; remaining: number; cost: number }, days: number): (string | number)[] {
-  return [num(t.qty), money(t.cost), num(t.sold), num(t.moved), num(t.remaining), t.qty > 0 ? `${Math.round((t.sold / t.qty) * 100)}%` : "—", t.sold > 0 ? (t.sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0", `${days} дн.`];
+  return [num(t.qty), money(t.cost), num(t.sold), num(t.moved), num(t.remaining), t.qty > 0 ? `${trim2((t.sold / t.qty) * 100)}%` : "—", t.sold > 0 ? trim2Ru(t.sold / Math.max(1, days)) : "0", `${days} дн.`];
 }
 
 // накладная и её товары; baseIndent — уровень накладной (0 у приёмок одного поставщика, 1 под поставщиком)
@@ -391,9 +392,9 @@ function ReceiptsPanel({ supplier, stores, productIds, title }: { supplier: stri
           <div className="w-14 h-1.5 bg-paper rounded-full overflow-hidden flex-none">
             <div className="h-full bg-accent rounded-full" style={{ width: `${qty > 0 ? Math.min(100, (sold / qty) * 100) : 0}%` }} />
           </div>
-          <span className="num w-10 text-right">{qty > 0 ? `${Math.round((sold / qty) * 100)}%` : "—"}</span>
+          <span className="num w-10 text-right">{qty > 0 ? `${trim2((sold / qty) * 100)}%` : "—"}</span>
         </div>
-        <div className="num text-right text-muted">{sold > 0 ? (sold / Math.max(1, days)).toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0"}</div>
+        <div className="num text-right text-muted">{sold > 0 ? trim2Ru(sold / Math.max(1, days)) : "0"}</div>
         <div className="num text-right text-muted">{days} дн.</div>
       </>
     );
@@ -971,7 +972,7 @@ export default function SuppliersPage() {
       downloadExcel(
         "Остатки_по_поставщикам",
         ["Поставщик", "Артикулов", "Штук", "Себестоимость", "Доля склада, %", "По цене продажи", `Оборачиваемость, % (${turnoverInfo.label})`],
-        rows.map((r) => [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((r.money / warehouseTotal) * 1000) / 10 : 0, Math.round(r.saleValue), r.turnover === null ? "" : Math.round(r.turnover * 10) / 10])
+        rows.map((r) => [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((r.money / warehouseTotal) * 10000) / 100 : 0, Math.round(r.saleValue), r.turnover === null ? "" : Math.round(r.turnover * 100) / 100])
       );
     } else {
       downloadExcel(
@@ -979,7 +980,7 @@ export default function SuppliersPage() {
         ["Поставщик", "Артикулов", "Штук", "Себестоимость зависшего", "Доля склада, %", "Зависло от остатков поставщика, %", "Дней без продаж (макс.)", `Оборачиваемость, % (${turnoverInfo.label})`],
         rows.map((r) => {
           const total = stockTotalsForStale.get(r.supplier) ?? 0;
-          return [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((total / warehouseTotal) * 1000) / 10 : 0, total > 0 ? Math.round((r.money / total) * 1000) / 10 : 0, r.maxDays ?? "не продавался", r.turnover === null ? "" : Math.round(r.turnover * 10) / 10];
+          return [r.supplier, r.articles, Math.round(r.stock), Math.round(r.money), warehouseTotal > 0 ? Math.round((total / warehouseTotal) * 10000) / 100 : 0, total > 0 ? Math.round((r.money / total) * 10000) / 100 : 0, r.maxDays ?? "не продавался", r.turnover === null ? "" : Math.round(r.turnover * 100) / 100];
         })
       );
     }

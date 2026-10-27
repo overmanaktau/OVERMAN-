@@ -1,5 +1,6 @@
 // Тексты бота-помощника для продавцов. Цифры — в блоках <pre> с пустой первой
 // строкой (общее правило оформления отчётов, функция pre из lib/reports/sales).
+import { trim2 } from "@/lib/numFormat";
 import { escapeHtml } from "@/lib/telegram";
 import { money, num, pre } from "@/lib/reports/sales";
 import {
@@ -18,7 +19,7 @@ function line(label: string, value: string): string {
   return `${label.padEnd(20)}${value.padStart(12)}`;
 }
 function pct(n: number): string {
-  return `${n.toFixed(2)}%`;
+  return `${trim2(n)}%`;
 }
 
 export const NO_PLAN_TEXT =
@@ -113,24 +114,24 @@ const LAGGING_TIP: Record<NonNullable<Advice["lagging"]>, string> = {
 // при более высоком среднем чеке или понемногу тем и другим. need — выручка за смену, которая нужна.
 function scenariosText(own: PerShift, need: number): string {
   if (need <= own.revenue) {
-    return `✅ По вашему обычному темпу (${money(own.revenue)} за смену в среднем) это закрывается — нужно ${money(need)}. Держите количество чеков (${own.receipts.toFixed(1)}) и средний чек (${money(own.avgCheck)}).`;
+    return `✅ По вашему обычному темпу (${money(own.revenue)} за смену в среднем) это закрывается — нужно ${money(need)}. Держите количество чеков (${trim2(own.receipts)}) и средний чек (${money(own.avgCheck)}).`;
   }
   const s = closePlanScenarios(own, need);
-  const up = (r: number) => `+${Math.round((r - 1) * 100)}%`;
-  const maxPct = Math.round((MAX_AVG_CHECK_GROWTH - 1) * 100);
+  const up = (r: number) => `+${trim2((r - 1) * 100)}%`;
+  const maxPct = trim2((MAX_AVG_CHECK_GROWTH - 1) * 100);
   const r = s.raiseCheck;
   const b = s.balanced;
   const capped = s.growth > MAX_AVG_CHECK_GROWTH; // даже с максимальным ростом среднего чека одним чеком не обойтись
   return [
-    `<b>Нужно в среднем ${money(need)} за смену</b> — сейчас вы делаете ${money(own.revenue)} (рост в ${s.growth.toFixed(2)} раза). Оборот за смену = чеки × средний чек, поэтому закрыть можно по-разному:`,
+    `<b>Нужно в среднем ${money(need)} за смену</b> — сейчас вы делаете ${money(own.revenue)} (рост в ${trim2(s.growth)} раза). Оборот за смену = чеки × средний чек, поэтому закрыть можно по-разному:`,
     "",
-    `<b>1️⃣ По вашему среднему чеку (${money(own.avgCheck)})</b>\nНужно больше чеков: <b>${s.sameCheck.receipts.toFixed(1)}</b> за смену вместо ${own.receipts.toFixed(1)} (${up(s.growth)}).`,
+    `<b>1️⃣ По вашему среднему чеку (${money(own.avgCheck)})</b>\nНужно больше чеков: <b>${trim2(s.sameCheck.receipts)}</b> за смену вместо ${trim2(own.receipts)} (${up(s.growth)}).`,
     "",
     `<b>2️⃣ Поднять средний чек${capped ? ` на максимум ${maxPct}%` : ""}</b>\nСредний чек <b>${money(Math.round(r.avgCheck))}</b> вместо ${money(own.avgCheck)} (${up(r.checkGrowth)}), ` +
-      `чеков ${capped ? `<b>${r.receipts.toFixed(1)}</b> вместо ${own.receipts.toFixed(1)} (${up(r.receiptsGrowth)})` : `столько же (${own.receipts.toFixed(1)})`}. ` +
-      `Для этого в чеке нужно ≈ ${r.depth.toFixed(2)} товара вместо ${own.depth.toFixed(2)} или более дорогие модели. Так чеков нужно меньше всего.`,
+      `чеков ${capped ? `<b>${trim2(r.receipts)}</b> вместо ${trim2(own.receipts)} (${up(r.receiptsGrowth)})` : `столько же (${trim2(own.receipts)})`}. ` +
+      `Для этого в чеке нужно ≈ ${trim2(r.depth)} товара вместо ${trim2(own.depth)} или более дорогие модели. Так чеков нужно меньше всего.`,
     "",
-    `<b>3️⃣ Понемногу и то и другое</b>\nСредний чек ${money(Math.round(b.avgCheck))} (${up(b.checkGrowth)}) и ${b.receipts.toFixed(1)} чека за смену (${up(b.receiptsGrowth)}).`,
+    `<b>3️⃣ Понемногу и то и другое</b>\nСредний чек ${money(Math.round(b.avgCheck))} (${up(b.checkGrowth)}) и ${trim2(b.receipts)} чека за смену (${up(b.receiptsGrowth)}).`,
     "",
     `Средний чек можно поднять не больше чем на ${maxPct}%, остальное добирается количеством чеков.`,
   ].join("\n");
@@ -147,7 +148,7 @@ function weekLines(w: WeekSummary, conv?: string | null): { last: string; next: 
           line("Смен", num(l.shifts)),
           line("Чеков", num(l.receipts)),
           line("Средний чек", l.receipts > 0 ? money(l.fact / l.receipts) : "—"),
-          line("Глубина чека", l.receipts > 0 ? (l.items / l.receipts).toFixed(2) : "—"),
+          line("Глубина чека", l.receipts > 0 ? trim2((l.items / l.receipts)) : "—"),
           ...(conv ? [line("Конверсия", conv)] : []),
         ]
       : [];
@@ -205,7 +206,7 @@ export function dailyMessage(emp: EmployeeRef, date: string, day: DayRow, s: Mon
       ...(dayPlan != null && dayPlan > 0 ? [line("План дня", money(dayPlan)), line("Выполнение", pct((day.revenue / dayPlan) * 100))] : []),
       line("Чеков", num(day.receipts)),
       line("Средний чек", day.receipts > 0 ? money(avgCheck) : "—"),
-      line("Глубина чека", day.receipts > 0 ? depth.toFixed(2) : "—"),
+      line("Глубина чека", day.receipts > 0 ? trim2(depth) : "—"),
       ...(conv ? [line("Конверсия", conv)] : []),
     ].join("\n")
   )}`;

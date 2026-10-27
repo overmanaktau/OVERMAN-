@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2, trim2Ru } from "@/lib/numFormat";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
@@ -67,7 +68,7 @@ function lastDayOf(month: string): string {
 
 function pctText(p: number | null): string {
   if (p === null || !Number.isFinite(p)) return "";
-  return `${p.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  return `${trim2Ru(p)}%`;
 }
 
 function Inner() {
@@ -209,9 +210,9 @@ function Inner() {
     const indent = items.map(({ depth }) => depth);
     const kpis = [
       { label: "Оборот", value: revenue ? fmtMoney(revenue.fact) : "—" },
-      { label: "Валовая прибыль", value: gross ? fmtMoney(gross.fact) : "—", note: marginPct === null ? undefined : `валовый ${marginPct.toFixed(1)}%` },
-      { label: "Расходы", value: total ? fmtMoney(total.expenses.fact) : "—", note: expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от оборота` },
-      { label: "Рентабельность", value: net ? fmtMoney(net.fact) : "—", note: netPct === null ? undefined : `${netPct.toFixed(1)}% от оборота` },
+      { label: "Валовая прибыль", value: gross ? fmtMoney(gross.fact) : "—", note: marginPct === null ? undefined : `валовый ${trim2(marginPct)}%` },
+      { label: "Расходы", value: total ? fmtMoney(total.expenses.fact) : "—", note: expensesPct === null ? undefined : `${trim2(expensesPct)}% от оборота` },
+      { label: "Рентабельность", value: net ? fmtMoney(net.fact) : "—", note: netPct === null ? undefined : `${trim2(netPct)}% от оборота` },
     ];
     const common = { subtitle: `${ruDate(start)} — ${ruDate(end)} · отчёт ${storeScope}`, kpis, orientation: "landscape" as const };
     if (view === "months") {
@@ -248,7 +249,7 @@ function Inner() {
           headers: ["Статья", "План", "Факт", "Отклонение", "% плана"],
           rows: items.map(({ row }) => {
             const diff = row.fact - row.plan;
-            return [row.label, row.plan ? fmtMoney(row.plan) : "—", fmtMoney(row.fact), row.plan ? `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${fmtMoney(Math.abs(diff))}` : "—", row.plan > 0 ? `${Math.round((row.fact / row.plan) * 100)}%` : "—"];
+            return [row.label, row.plan ? fmtMoney(row.plan) : "—", fmtMoney(row.fact), row.plan ? `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${fmtMoney(Math.abs(diff))}` : "—", row.plan > 0 ? `${trim2((row.fact / row.plan) * 100)}%` : "—"];
           }),
           rowKinds: kinds,
           indent,
@@ -326,9 +327,9 @@ function Inner() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <KpiCard label="Оборот" value={revenue ? fmtMoney(revenue.fact) : "—"} note={view === "planfact" && revenue?.plan ? `${fmtPct(pct(revenue))} от плана` : "за выбранный период"} />
-        <KpiCard label="Валовая прибыль" value={gross ? fmtMoney(gross.fact) : "—"} note={marginPct === null ? undefined : `валовый ${marginPct.toFixed(1)}%`} />
-        <KpiCard label="Расходы" value={total ? fmtMoney(total.expenses.fact) : "—"} note={expensesPct === null ? undefined : `${expensesPct.toFixed(1)}% от оборота`} />
-        <KpiCard label="Рентабельность" value={net ? fmtMoney(net.fact) : "—"} valueTone={(net?.fact ?? 0) < 0 ? "negative" : "positive"} note={netPct === null ? undefined : `${netPct.toFixed(1)}% от оборота`} />
+        <KpiCard label="Валовая прибыль" value={gross ? fmtMoney(gross.fact) : "—"} note={marginPct === null ? undefined : `валовый ${trim2(marginPct)}%`} />
+        <KpiCard label="Расходы" value={total ? fmtMoney(total.expenses.fact) : "—"} note={expensesPct === null ? undefined : `${trim2(expensesPct)}% от оборота`} />
+        <KpiCard label="Рентабельность" value={net ? fmtMoney(net.fact) : "—"} valueTone={(net?.fact ?? 0) < 0 ? "negative" : "positive"} note={netPct === null ? undefined : `${trim2(netPct)}% от оборота`} />
       </div>
 
       <Tabs value={view} onChange={setView} items={[{ key: "months", label: "По месяцам" }, { key: "planfact", label: "План и факт" }]} />

@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2, trim2Ru } from "@/lib/numFormat";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthGate";
 import { useSiteVersion } from "@/components/SiteVersion";
@@ -59,11 +60,8 @@ function parseYmd(s: string): Date {
   return new Date(y, m - 1, day);
 }
 
-// Посетители: целое число — без дробной части («4 028»), иначе два знака после запятой («282,15»)
-const trafficText = (n: number) => {
-  const r = Math.round(n * 100) / 100;
-  return Number.isInteger(r) ? r.toLocaleString("ru-RU") : r.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+// Посетители и остальные числа статистики: целое — без дробной части, иначе два знака после запятой (lib/numFormat.ts)
+const trafficText = trim2Ru;
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
@@ -550,7 +548,7 @@ export default function SalesPage() {
         if (v !== null && ov !== null) {
           const abs = v - ov;
           const pct = ov > 0 ? ((v - ov) / ov) * 100 : null;
-          const pctText = pct === null ? "—" : `${pct > 0.05 ? "+" : pct < -0.05 ? "−" : ""}${Math.abs(pct).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+          const pctText = pct === null ? "—" : `${pct > 0.05 ? "+" : pct < -0.05 ? "−" : ""}${trim2Ru(Math.abs(pct))}%`;
           diff = `${sign(abs)}${num(Math.abs(abs))}\n${pctText}`;
         }
         out.push(ov === null ? "—" : num(ov), v === null ? "—" : num(v), diff);
@@ -637,7 +635,7 @@ export default function SalesPage() {
   const overallConversionPct = totalTraffic > 0 ? (totalReceipts / totalTraffic) * 100 : null;
 
   function conversionLabel(receipts: number, traffic: number): string {
-    return traffic > 0 ? `${((receipts / traffic) * 100).toFixed(2)}%` : "—";
+    return traffic > 0 ? `${trim2(((receipts / traffic) * 100))}%` : "—";
   }
 
   // "0" when nothing was returned; otherwise a compact "sum · N чек · N тов."
@@ -666,7 +664,7 @@ export default function SalesPage() {
     return (
       <>
         {money(profit)}
-        <span className="text-mutedLight"> ({margin.toFixed(1)}%)</span>
+        <span className="text-mutedLight"> ({trim2(margin)}%)</span>
       </>
     );
   }
@@ -906,11 +904,11 @@ export default function SalesPage() {
             const profitText = (revenue: number, cost: number | null) => {
               if (cost === null) return "—";
               const profit = revenue - cost;
-              return `${money(profit)} (${(revenue !== 0 ? (profit / revenue) * 100 : 0).toFixed(1)}%)`;
+              return `${money(profit)} (${trim2((revenue !== 0 ? (profit / revenue) * 100 : 0))}%)`;
             };
             const costText = (cost: number | null) => (cost === null ? "—" : money(cost));
             const avg = (revenue: number, receipts: number) => (receipts > 0 ? money(revenue / receipts) : "—");
-            const depth = (items: number, receipts: number) => (receipts > 0 ? (items / receipts).toFixed(1) : "—");
+            const depth = (items: number, receipts: number) => (receipts > 0 ? trim2((items / receipts)) : "—");
 
             // Кассы по городам, с итогом города и общим итогом
             const regRows: (string | number)[][] = [];
@@ -1001,8 +999,8 @@ export default function SalesPage() {
                 { label: "Оборот", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: avg(totalRevenue, totalReceipts) },
-                ...(ltvValue !== null ? [{ label: "Годовой LTV", value: ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), note: "продаж на клиента за 365 дней" }] : []),
-                { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(2)}%` : "—", note: totalTraffic > 0 ? `${trafficText(totalTraffic)} посетителей` : undefined },
+                ...(ltvValue !== null ? [{ label: "Годовой LTV", value: trim2Ru(ltvValue), note: "продаж на клиента за 365 дней" }] : []),
+                { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${trim2(overallConversionPct)}%` : "—", note: totalTraffic > 0 ? `${trafficText(totalTraffic)} посетителей` : undefined },
               ],
               sections,
             };
@@ -1016,7 +1014,7 @@ export default function SalesPage() {
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-1.5 w-fit">
         <div className="text-xs text-muted">Конверсия (чек / посетитель)</div>
         <div className="font-serif text-[26px] font-semibold num">
-          {loading ? "…" : overallConversionPct !== null ? `${overallConversionPct.toFixed(2)}%` : "—"}
+          {loading ? "…" : overallConversionPct !== null ? `${trim2(overallConversionPct)}%` : "—"}
         </div>
         <div className="text-xs text-mutedLight">
           {loading
@@ -1030,7 +1028,7 @@ export default function SalesPage() {
       <div className="bg-surface border border-border rounded-card px-6 py-[22px] flex flex-col gap-1.5 w-fit" title="Не зависит от выбранного периода: всегда последние 365 дней">
         <div className="text-xs text-muted">Годовой LTV (продаж на клиента)</div>
         <div className="font-serif text-[26px] font-semibold num">
-          {ltvLoading ? "…" : ltvValue !== null ? ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
+          {ltvLoading ? "…" : ltvValue !== null ? trim2Ru(ltvValue) : "—"}
         </div>
         <div className="text-xs text-mutedLight">
           {ltvLoading
@@ -1119,7 +1117,7 @@ export default function SalesPage() {
                           value={d.items.toLocaleString("ru-RU")}
                           extra={!showGross && r.returnedItems > 0 ? `(${r.returnedItems})` : null}
                         />
-                        <SalesField label="Глубина чека" value={checkDepth.toFixed(3)} />
+                        <SalesField label="Глубина чека" value={trim2(checkDepth)} />
                         <SalesField label="Вал. прибыль" value={grossProfit(d.revenue, r.cost)} />
                         <SalesField label="Возврат" value={returnSummary(r)} />
                       </div>
@@ -1144,7 +1142,7 @@ export default function SalesPage() {
                         value={groupItems.toLocaleString("ru-RU")}
                         extra={!showGross && groupReturned.returnedItems > 0 ? `(${groupReturned.returnedItems})` : null}
                       />
-                      <SalesField label="Глубина чека" value={groupReceipts > 0 ? (groupItems / groupReceipts).toFixed(3) : "—"} />
+                      <SalesField label="Глубина чека" value={groupReceipts > 0 ? trim2((groupItems / groupReceipts)) : "—"} />
                       <SalesField label="Вал. прибыль" value={grossProfit(groupRevenue, groupCost)} />
                       <SalesField label="Возврат" value={returnSummary(groupReturned)} />
                     </div>
@@ -1170,7 +1168,7 @@ export default function SalesPage() {
                 value={totalItems.toLocaleString("ru-RU")}
                 extra={!showGross && totalReturned.returnedItems > 0 ? `(${totalReturned.returnedItems})` : null}
               />
-              <SalesField label="Глубина чека" value={totalReceipts > 0 ? (totalItems / totalReceipts).toFixed(3) : "—"} />
+              <SalesField label="Глубина чека" value={totalReceipts > 0 ? trim2((totalItems / totalReceipts)) : "—"} />
               <SalesField label="Вал. прибыль" value={grossProfit(totalRevenue, totalCost)} />
               <SalesField label="Возврат" value={returnSummary(totalReturned)} />
             </div>
@@ -1241,7 +1239,7 @@ export default function SalesPage() {
                             <span className="text-mutedLight"> ({r.returnedItems})</span>
                           )}
                         </div>
-                        <div className="num">{checkDepth.toFixed(3)}</div>
+                        <div className="num">{trim2(checkDepth)}</div>
                         <div className="num">{grossProfit(d.revenue, r.cost)}</div>
                         <div className="num text-muted">{returnSummary(r)}</div>
                       </div>
@@ -1269,7 +1267,7 @@ export default function SalesPage() {
                           <span className="text-mutedLight font-normal"> ({groupReturned.returnedItems})</span>
                         )}
                       </div>
-                      <div className="num">{groupReceipts > 0 ? (groupItems / groupReceipts).toFixed(3) : "—"}</div>
+                      <div className="num">{groupReceipts > 0 ? trim2((groupItems / groupReceipts)) : "—"}</div>
                       <div className="num">{grossProfit(groupRevenue, groupCost)}</div>
                       <div className="num text-muted font-normal">{returnSummary(groupReturned)}</div>
                     </div>
@@ -1298,7 +1296,7 @@ export default function SalesPage() {
                   <span className="text-mutedLight font-normal"> ({totalReturned.returnedItems})</span>
                 )}
               </div>
-              <div className="num">{totalReceipts > 0 ? (totalItems / totalReceipts).toFixed(3) : "—"}</div>
+              <div className="num">{totalReceipts > 0 ? trim2((totalItems / totalReceipts)) : "—"}</div>
               <div className="num">{grossProfit(totalRevenue, totalCost)}</div>
               <div className="num text-muted font-normal">{returnSummary(totalReturned)}</div>
             </div>
@@ -1378,7 +1376,7 @@ export default function SalesPage() {
                       />
                       <SalesField
                         label="Глубина чека"
-                        value={displayed(r).receipts > 0 ? (displayed(r).items / displayed(r).receipts).toFixed(3) : "—"}
+                        value={displayed(r).receipts > 0 ? trim2((displayed(r).items / displayed(r).receipts)) : "—"}
                       />
                     </div>
                   ))}
@@ -1405,7 +1403,7 @@ export default function SalesPage() {
                         label="Конверсия"
                         value={conversionLabel(g.receipts, trafficByStore.get(group.store ?? "") ?? 0)}
                       />
-                      <SalesField label="Глубина чека" value={g.receipts > 0 ? (g.items / g.receipts).toFixed(3) : "—"} />
+                      <SalesField label="Глубина чека" value={g.receipts > 0 ? trim2((g.items / g.receipts)) : "—"} />
                     </div>
                   )}
                 </div>
@@ -1435,7 +1433,7 @@ export default function SalesPage() {
               <SalesField label="Конверсия" value={conversionLabel(totalEmployeeReceipts, totalTraffic)} />
               <SalesField
                 label="Глубина чека"
-                value={totalEmployeeReceipts > 0 ? (totalEmployeeItems / totalEmployeeReceipts).toFixed(3) : "—"}
+                value={totalEmployeeReceipts > 0 ? trim2((totalEmployeeItems / totalEmployeeReceipts)) : "—"}
               />
             </div>
           </div>
@@ -1487,7 +1485,7 @@ export default function SalesPage() {
                         </div>
                         <div className="num">{money(avgCheck)}</div>
                         <div className="num">{conversionLabel(d.receipts, r.shiftTraffic)}</div>
-                        <div className="num">{checkDepth.toFixed(3)}</div>
+                        <div className="num">{trim2(checkDepth)}</div>
                       </div>
                     );
                   })}
@@ -1514,7 +1512,7 @@ export default function SalesPage() {
                       </div>
                       <div className="num">{g.receipts > 0 ? money(g.revenue / g.receipts) : "—"}</div>
                       <div className="num">{conversionLabel(g.receipts, trafficByStore.get(group.store ?? "") ?? 0)}</div>
-                      <div className="num">{g.receipts > 0 ? (g.items / g.receipts).toFixed(3) : "—"}</div>
+                      <div className="num">{g.receipts > 0 ? trim2((g.items / g.receipts)) : "—"}</div>
                     </div>
                   )}
                 </div>
@@ -1543,7 +1541,7 @@ export default function SalesPage() {
               <div className="num">{totalEmployeeReceipts > 0 ? money(totalEmployeeRevenue / totalEmployeeReceipts) : "—"}</div>
               <div className="num">{conversionLabel(totalEmployeeReceipts, totalTraffic)}</div>
               <div className="num">
-                {totalEmployeeReceipts > 0 ? (totalEmployeeItems / totalEmployeeReceipts).toFixed(3) : "—"}
+                {totalEmployeeReceipts > 0 ? trim2((totalEmployeeItems / totalEmployeeReceipts)) : "—"}
               </div>
             </div>
           </div>

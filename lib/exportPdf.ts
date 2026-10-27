@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { trim2Ru } from "@/lib/numFormat";
 
 // Единая выгрузка в PDF для всех разделов портала. Оформление в цветах портала:
 // тёплая бумага, глубокий зелёный акцент, мягкая зебра в таблицах, крупные итоги,
@@ -70,7 +71,7 @@ const C = {
 
 // В шрифтах нет стрелок и геометрических фигур — заменяем на то, что точно есть.
 function clean(v: string | number): string {
-  if (typeof v === "number") return Number.isFinite(v) ? v.toLocaleString("ru-RU").replace(/\u00a0|\u202f/g, " ") : "";
+  if (typeof v === "number") return Number.isFinite(v) ? trim2Ru(v).replace(/\u00a0|\u202f/g, " ") : "";
   return String(v)
     .replace(/[→⟶]/g, "—")
     .replace(/↔/g, "/")

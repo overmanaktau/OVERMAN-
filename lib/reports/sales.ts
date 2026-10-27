@@ -1,3 +1,4 @@
+import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { warehousesForCities } from "@/lib/warehouses";
 import { escapeHtml, packSections } from "@/lib/telegram";
@@ -44,19 +45,19 @@ export function shortName(name: string): string {
 
 // Числа трафика в отчётах: два знака и запятая («94,05»).
 export function dec2(n: number): string {
-  return n.toFixed(2).replace(".", ",");
+  return trim2(n, ",");
 }
 
 // Проценты в отчётах: два знака и запятая («11,02%»).
 export function pct2(n: number): string {
-  return `${n.toFixed(2).replace(".", ",")}%`;
+  return `${trim2(n, ",")}%`;
 }
 export function money(n: number): string {
   return `${num(n)} ₸`;
 }
 function pct(revenue: number, cost: number | null): string {
   if (cost === null || revenue <= 0) return "—";
-  return `${Math.round(((revenue - cost) / revenue) * 100)}%`;
+  return `${trim2(((revenue - cost) / revenue) * 100)}%`;
 }
 function fit(s: string, width: number): string {
   const chars = [...s];
@@ -168,13 +169,13 @@ function kpiBlock(rows: SalesRow[], visitors: number, compact: boolean): string 
         line("Чеков", num(receipts)),
         line("Колич.товара", num(items)),
         line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
-        line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
+        line("Глубина чека", receipts > 0 ? trim2((items / receipts)) : "—"),
       ]
     : [
         line("Оборот", money(revenue)),
         line("Чеков", num(receipts)),
         line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
-        line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
+        line("Глубина чека", receipts > 0 ? trim2((items / receipts)) : "—"),
         line("Валовый", pct(revenue, cost)),
         conversion,
       ];
@@ -424,7 +425,7 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
     .map(([id, e], i) => {
       const mark = bigCheck && bigCheck.ownerId === id ? ` (бигчек ${num(bigCheck.sum / 100)})` : "";
       const avgCheck = e.receipts > 0 ? money(e.revenue / e.receipts) : "—";
-      const depth = e.receipts > 0 ? (e.items / e.receipts).toFixed(2) : "—";
+      const depth = e.receipts > 0 ? trim2((e.items / e.receipts)) : "—";
       const shiftTraffic = [...e.shiftDays].reduce((acc, k) => acc + (trafficByDay.get(k) ?? 0), 0);
       // в скобках — трафик за дни смен сотрудника
       const conversion = shiftTraffic > 0 ? `${pct2((e.receipts / shiftTraffic) * 100)} (${num(Math.round(shiftTraffic))})` : "нет трафика";
@@ -780,7 +781,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
       line("Чеков", num(receipts)),
       line("Колич.товара", num(items)),
       line("Средний чек", receipts > 0 ? money(revenue / receipts) : "—"),
-      line("Глубина чека", receipts > 0 ? (items / receipts).toFixed(2) : "—"),
+      line("Глубина чека", receipts > 0 ? trim2((items / receipts)) : "—"),
     ].join("\n")
   );
   const paymentLines = [line("Наличные", money((cash - retCash) / 100)), line("Безнал", money((total - cash - (retTotal - retCash)) / 100 - bonusPaid))];
@@ -800,7 +801,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
   const people = [...byPerson.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
   const empLines = people.map(([id, e], i) => {
     const avgCheck = e.receipts > 0 ? money(e.revenue / e.receipts) : "—";
-    const depth = e.receipts > 0 ? (e.items / e.receipts).toFixed(2) : "—";
+    const depth = e.receipts > 0 ? trim2((e.items / e.receipts)) : "—";
     const worked = e.receipts > 0 || e.revenue > 0;
     const showConv = traffic && worked && !NO_CONVERSION_EMPLOYEE_IDS.has(id);
     return (

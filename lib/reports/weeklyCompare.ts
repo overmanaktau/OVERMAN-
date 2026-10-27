@@ -4,6 +4,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { trim2 } from "@/lib/numFormat";
 import { addDays, mondayOf } from "@/lib/coach/metrics";
 import { addDaysYmd, dayPlanForDate, mondayYmd, remainingAddOn, type PlanLookup } from "@/lib/dayPlan";
 
@@ -160,7 +161,7 @@ export const sumDays = (days: CompareDay[]): Totals =>
 
 const nf0 = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 export const int = (n: number) => nf0.format(Math.round(n)).replace(/[  ]/g, " ");
-export const dec = (n: number, d: number) => n.toFixed(d).replace(".", ",");
+export const dec = (n: number, _digits?: number) => trim2(n, ","); // правило показа чисел — lib/numFormat.ts (число знаков задаёт оно)
 export const pct = (n: number, d = 2) => `${dec(n, d)}%`;
 export const signed = (n: number, f: (x: number) => string) => (n > 0 ? `+${f(n)}` : f(n));
 

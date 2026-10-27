@@ -1,5 +1,6 @@
 // Оформление PDF «Сравнение недель / периодов» — «тепловая карта»: тёмная шапка, ячейки подсвечены (выполнение плана и средний чек —
 // зелёный / жёлтый / красный, оборот, посетители и конверсия — по силе дня), разница окрашена. Данные и расчёты — в weeklyCompare.ts.
+import { trim2 } from "@/lib/numFormat";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { MONTH, dec, int, loadFonts, pct, ratios, signed, sumDays, weekdayOf, weekOfMonth, type CompareLabels, type CompareWeek } from "@/lib/reports/weeklyCompare";
@@ -27,7 +28,7 @@ const vis = (n: number) => (Number.isInteger(Math.round(n * 100) / 100) ? int(n)
 const dm = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 const span = (w: CompareWeek) => `${dm(w.from)}–${dm(w.to)}`;
 const rel = (a: number, b: number): number | null => (a > 0 ? ((b - a) / a) * 100 : null);
-const relText = (v: number | null) => (v === null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1).replace(".", ",")}%`);
+const relText = (v: number | null) => (v === null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${trim2(Math.abs(v), ",")}%`);
 const tone = (v: number | null): RGB => (v === null || Math.abs(v) < 0.05 ? C.muted : v > 0 ? C.green : C.red);
 const mix = (a: RGB, b: RGB, t: number): RGB => [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t)];
 

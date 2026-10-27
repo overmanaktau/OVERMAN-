@@ -1,5 +1,6 @@
 // Истории: Instagram отдаёт только активные (24 часа), поэтому раз в час забираем их с цифрами и обложкой в свою базу (smm_story_log).
 // Из базы потом собираем «первая и последняя история за период».
+import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { CITIES, CITY_KEYS, type CityKey } from "@/lib/smm/config";
 import { listLiveStories, type LiveStory } from "@/lib/smm/meta";
@@ -133,7 +134,7 @@ export async function storiesList(city: CityKey, p: Period, now = new Date()): P
   const first = rows[0].views;
   const lines = rows.map((r, i) => {
     const live = now.getTime() - new Date(r.posted_at).getTime() < 24 * 3600000;
-    const share = i === 0 || first <= 0 ? "" : ` · ${Math.round((r.views / first) * 100)}% от первой`;
+    const share = i === 0 || first <= 0 ? "" : ` · ${trim2((r.views / first) * 100)}% от первой`;
     return `${i + 1}. ${almatyStamp(r.posted_at).slice(6)} · 👁 <b>${fmt(r.views)}</b>${share} · 🎯 ${fmt(r.reach)}${live ? " ⏳" : ""}`;
   });
   const note = rows.some((r) => now.getTime() - new Date(r.posted_at).getTime() < 24 * 3600000) ? `${NL}${NL}⏳ — история ещё не закончилась, просмотры ещё растут.` : "";

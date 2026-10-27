@@ -1,6 +1,7 @@
 // Раздел «Продажи» для администратора бота: продажи стилистов-консультантов по
 // выбранному городу за сегодня, вчера, эту и прошлую неделю, этот и прошлый месяц или свой период. Администратор видит
 // только свои города (admin_scope: 'city' — свой, 'all' — все).
+import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { SCOPES, buildCashReport, buildIntradayReport, money, num, pre, shortName } from "@/lib/reports/sales";
@@ -242,7 +243,7 @@ type Total = {
 type Agg = Total & { id: string; name: string };
 const EMPTY: Total = { revenue: 0, receipts: 0, items: 0, retAmount: 0, retReceipts: 0, retItems: 0, shifts: 0 };
 const avgCheck = (a: Total) => (a.receipts > 0 ? money(a.revenue / a.receipts) : "—");
-const depth = (a: Total) => (a.receipts > 0 ? (a.items / a.receipts).toFixed(2) : "—");
+const depth = (a: Total) => (a.receipts > 0 ? trim2((a.items / a.receipts)) : "—");
 
 // Стилисты одного города за период: список по убыванию выручки и планы месяца.
 type SalesRow = {
@@ -373,7 +374,7 @@ function cityLines(list: Agg[], planOf: Map<string, number>, period: Period): st
     lines.push(`${shortName(a.name).slice(0, 13).padEnd(13)}${money(a.revenue).padStart(13)}`, ...detailLines(a));
     const plan = planOf.get(a.id);
     if ((period === "m" || period === "pm") && plan !== undefined && plan > 0) {
-      lines.push(`  план ${money(plan)} · ${((a.revenue / plan) * 100).toFixed(1)}%`);
+      lines.push(`  план ${money(plan)} · ${trim2(((a.revenue / plan) * 100))}%`);
     }
   }
   lines.push("─".repeat(26), ...totalLines("Итого", sumOf(list)));
@@ -411,7 +412,7 @@ function dayLabel(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
   return `${WEEKDAY_SHORT[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${shortDate(date)}`;
 }
-const pctText = (fact: number, plan: number) => (plan > 0 ? `${Math.round((fact / plan) * 100)}%` : "—");
+const pctText = (fact: number, plan: number) => (plan > 0 ? `${trim2((fact / plan) * 100)}%` : "—");
 
 type PlanDay = { date: string; plan: number; addOn: number; fact: number | null }; // fact null — день ещё не закончился; addOn — недобор месяца на этот день
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2, trim2Ru } from "@/lib/numFormat";
 import { useCallback, useEffect, useRef, useState } from "react";
 import KpiCard from "@/components/KpiCard";
 import { useAuth } from "@/components/AuthGate";
@@ -133,11 +134,8 @@ function pctChange(curr: number, prev: number): number | null {
   return ((curr - prev) / prev) * 100;
 }
 
-// Посетители: целое число — без дробной части («4 028»), иначе два знака после запятой («282,15»)
-const trafficText = (n: number) => {
-  const r = Math.round(n * 100) / 100;
-  return Number.isInteger(r) ? r.toLocaleString("ru-RU") : r.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+// Посетители и остальные числа статистики: целое — без дробной части, иначе два знака после запятой (lib/numFormat.ts)
+const trafficText = trim2Ru;
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
@@ -519,7 +517,7 @@ export default function StatisticsPage() {
       kpis: [
         { label: "Трафик, факт", value: trafficText(totals.fact), note: `план ${trafficText(totals.plan)}` },
         { label: "Чеков", value: salesTotals.receipts.toLocaleString("ru-RU") },
-        { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—" },
+        { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${trim2(conversionPct)}%` : "—" },
         { label: "Средний чек", value: avgCheck !== null ? `${Math.round(avgCheck).toLocaleString("ru-RU")} ₸` : "—" },
       ],
       sections: [
@@ -556,17 +554,18 @@ export default function StatisticsPage() {
       { label: "Цена одного покупателя", cur: costPerBuyer, prev: prevCostPerBuyer, kind: "money" },
     ];
     const num = (n: number, digits: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" ? `${num(n, 1)}%` : kind === "conv" ? `${num(n, 2)}%` : kind === "traf" ? trafficText(n) : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
+    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" || kind === "conv" ? `${trim2Ru(n)}%` : kind === "traf" ? trafficText(n) : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
+    // digits = 0 — целые (деньги, штуки), иначе по правилу: целое без дробной части, иначе два знака
     const signed = (n: number, digits: number) => {
-      const r = Number(n.toFixed(digits));
-      return `${r > 0 ? "+" : r < 0 ? "−" : ""}${num(Math.abs(r), digits)}`;
+      const r = digits === 0 ? Math.round(n) : Math.round(n * 100) / 100;
+      return `${r > 0 ? "+" : r < 0 ? "−" : ""}${digits === 0 ? num(Math.abs(r), 0) : trim2Ru(Math.abs(r))}`;
     };
     const rows: (string | number)[][] = items.map((it) => {
       if (it.cur === null || it.prev === null) return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), "—", "—"];
       const abs = it.cur - it.prev;
       const pc = pctChange(it.cur, it.prev);
-      const absText = it.kind === "traf" ? signed(abs, Number.isInteger(Math.round(abs * 100) / 100) ? 0 : 2) : it.kind === "conv" ? `${signed(abs, 2)} п.п.` : it.kind === "pct" ? `${signed(abs, 1)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
-      return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), absText, pc === null ? "—" : `${signed(pc, 1)}%`];
+      const absText = it.kind === "traf" ? signed(abs, 2) : it.kind === "conv" || it.kind === "pct" ? `${signed(abs, 2)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
+      return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), absText, pc === null ? "—" : `${signed(pc, 2)}%`];
     });
     const prevLabel = `${ru(range.prevStart)}${range.prevStart.getTime() === range.prevEnd.getTime() ? "" : ` — ${ru(range.prevEnd)}`}`;
     const curLabel = `${ru(range.start)}${range.start.getTime() === range.end.getTime() ? "" : ` — ${ru(range.end)}`}`;
@@ -706,7 +705,7 @@ export default function StatisticsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
         <KpiCard
           label="Выполнение плана по трафику"
-          value={totals.plan > 0 ? `${Math.round((totals.fact / totals.plan) * 100)}%` : "—"}
+          value={totals.plan > 0 ? `${trim2((totals.fact / totals.plan) * 100)}%` : "—"}
           valueTone={totals.plan > 0 ? planCompletionTone((totals.fact / totals.plan) * 100) : "neutral"}
           valueSuffix={
             totals.plan > 0
@@ -717,7 +716,7 @@ export default function StatisticsPage() {
           }
           note={
             planCompletionChange !== null
-              ? `${planCompletionChange >= 0 ? "▲" : "▼"} ${Math.abs(planCompletionChange).toFixed(0)}% к пред. периоду`
+              ? `${planCompletionChange >= 0 ? "▲" : "▼"} ${trim2(Math.abs(planCompletionChange))}% к пред. периоду`
               : planCompletionNote
           }
           noteTone={planCompletionChange !== null ? (planCompletionChange >= 0 ? "positive" : "negative") : "neutral"}
@@ -725,41 +724,41 @@ export default function StatisticsPage() {
         <KpiCard
           label="Общий расход на маркетинг"
           value={money(totalSpend)}
-          note={spendChange !== null ? `${spendChange >= 0 ? "▲" : "▼"} ${Math.abs(spendChange).toFixed(0)}% к пред. периоду` : undefined}
+          note={spendChange !== null ? `${spendChange >= 0 ? "▲" : "▼"} ${trim2(Math.abs(spendChange))}% к пред. периоду` : undefined}
           noteTone={spendChange !== null ? (spendChange >= 0 ? "negative" : "positive") : "neutral"}
         />
         <KpiCard
           label="Доп. расходы"
           value={money(expensesTotal)}
-          note={expensesChange !== null ? `${expensesChange >= 0 ? "▲" : "▼"} ${Math.abs(expensesChange).toFixed(0)}% к пред. периоду` : undefined}
+          note={expensesChange !== null ? `${expensesChange >= 0 ? "▲" : "▼"} ${trim2(Math.abs(expensesChange))}% к пред. периоду` : undefined}
           noteTone={expensesChange !== null ? (expensesChange >= 0 ? "negative" : "positive") : "neutral"}
         />
         <KpiCard
           label="Цена одного посетителя"
           value={costPerVisitor !== null ? money(costPerVisitor) : "—"}
           valueTone={costPerVisitor !== null ? costPerVisitorTone(costPerVisitor) : "neutral"}
-          note={costChange !== null ? `${costChange >= 0 ? "▲" : "▼"} ${Math.abs(costChange).toFixed(0)}% к пред. периоду` : undefined}
+          note={costChange !== null ? `${costChange >= 0 ? "▲" : "▼"} ${trim2(Math.abs(costChange))}% к пред. периоду` : undefined}
           noteTone={costChange !== null ? (costChange >= 0 ? "negative" : "positive") : "neutral"}
         />
         <KpiCard
           label="Цена одного покупателя"
           value={costPerBuyer !== null ? money(costPerBuyer) : "—"}
-          valueSuffix={conversionPct !== null ? `(${conversionPct.toFixed(2)}%)` : undefined}
+          valueSuffix={conversionPct !== null ? `(${trim2(conversionPct)}%)` : undefined}
           note={
             costPerBuyerChange !== null
-              ? `${costPerBuyerChange >= 0 ? "▲" : "▼"} ${Math.abs(costPerBuyerChange).toFixed(0)}% к пред. периоду`
+              ? `${costPerBuyerChange >= 0 ? "▲" : "▼"} ${trim2(Math.abs(costPerBuyerChange))}% к пред. периоду`
               : costPerBuyerNote
           }
           noteTone={costPerBuyerChange !== null ? (costPerBuyerChange >= 0 ? "negative" : "positive") : "neutral"}
         />
         <KpiCard
           label="Маркетинг, % от среднего чека"
-          value={spendVsCheckPct !== null ? `${spendVsCheckPct.toFixed(1)}%` : "—"}
+          value={spendVsCheckPct !== null ? `${trim2(spendVsCheckPct)}%` : "—"}
           valueTone={spendVsCheckPct !== null ? spendVsCheckTone(spendVsCheckPct) : "neutral"}
           valueSuffix={avgCheck !== null ? `(${money(avgCheck)})` : undefined}
           note={
             spendVsCheckChange !== null
-              ? `${spendVsCheckChange >= 0 ? "▲" : "▼"} ${Math.abs(spendVsCheckChange).toFixed(0)}% к пред. периоду`
+              ? `${spendVsCheckChange >= 0 ? "▲" : "▼"} ${trim2(Math.abs(spendVsCheckChange))}% к пред. периоду`
               : spendVsCheckNote
           }
           noteTone={spendVsCheckChange !== null ? (spendVsCheckChange >= 0 ? "negative" : "positive") : "neutral"}

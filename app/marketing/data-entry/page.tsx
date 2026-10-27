@@ -1,5 +1,6 @@
 "use client";
 
+import { trim2Ru } from "@/lib/numFormat";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/components/AuthGate";
@@ -168,7 +169,7 @@ function parseAmountText(text: string): number | "" {
 // being actively typed into — up to 2 decimals for money, none for counts.
 function formatGrouped(n: number | "", maximumFractionDigits = 0): string {
   if (n === "") return "";
-  return n.toLocaleString("ru-RU", { maximumFractionDigits });
+  return maximumFractionDigits > 0 ? trim2Ru(n) : n.toLocaleString("ru-RU", { maximumFractionDigits });
 }
 
 function friendlyError(e: unknown): string {
@@ -1025,15 +1026,15 @@ export default function DataEntryPage() {
 
                 <div className="grid grid-cols-[60px_46px_84px_84px_78px_78px_96px_74px_74px_100px] gap-2 items-center pt-2.5 border-t-2 border-[#E4DFC8] text-[12.5px] font-bold">
                   <div className="col-span-2">Итого</div>
-                  <div className="num text-right pr-[7px]">{totals.trafficPlan.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num text-right pr-[7px]">{totals.trafficFact.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num text-right pr-[7px]">{totals.instagram.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num text-right pr-[7px]">{totals.tiktok.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num text-right pr-[7px]">{trim2Ru(totals.trafficPlan)}</div>
+                  <div className="num text-right pr-[7px]">{trim2Ru(totals.trafficFact)}</div>
+                  <div className="num text-right pr-[7px]">{trim2Ru(totals.instagram)}</div>
+                  <div className="num text-right pr-[7px]">{trim2Ru(totals.tiktok)}</div>
                   <div className="num text-right pr-[7px]">
-                    {totals.instagramPublic.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}
+                    {trim2Ru(totals.instagramPublic)}
                   </div>
-                  <div className="num text-right pr-[7px]">{totals.flyer.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
-                  <div className="num text-right pr-[7px]">{totals.twoGis.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</div>
+                  <div className="num text-right pr-[7px]">{trim2Ru(totals.flyer)}</div>
+                  <div className="num text-right pr-[7px]">{trim2Ru(totals.twoGis)}</div>
                   <div />
                 </div>
               </>
@@ -1055,7 +1056,7 @@ export default function DataEntryPage() {
                 ).map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between gap-2">
                     <span className="font-normal text-muted">{label}</span>
-                    <span className="num">{value.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</span>
+                    <span className="num">{trim2Ru(value)}</span>
                   </div>
                 ))}
               </div>
@@ -1065,7 +1066,7 @@ export default function DataEntryPage() {
               <div className="text-[13px] text-muted">
                 Итого расходов на маркетинг за месяц (по каналам):{" "}
                 <span className="num text-ink font-bold">
-                  {channelTotal.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₸
+                  {trim2Ru(channelTotal)} ₸
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -1296,7 +1297,7 @@ export default function DataEntryPage() {
 
             <div className="flex items-center justify-between pt-2.5 border-t border-borderSoft text-[13px] font-bold">
               <span>Общая сумма расходов</span>
-              <span className="num">{expensesTotal.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₸</span>
+              <span className="num">{trim2Ru(expensesTotal)} ₸</span>
             </div>
 
             <div className="flex items-center justify-end">

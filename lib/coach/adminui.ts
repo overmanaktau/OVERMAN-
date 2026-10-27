@@ -2,6 +2,7 @@
 // (coach_users.is_admin): список заявок и сотрудников, карточка сотрудника,
 // принять / отклонить / отключить / включить / убрать. Решения проходят через
 // ту же логику, что и страница портала (lib/coach/decisions).
+import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml } from "@/lib/telegram";
 import { getErrorMessage } from "@/lib/errors";
@@ -143,7 +144,7 @@ async function sendCard(t: Transport, chatId: number | string, id: number, store
       month =
         s.plan === null
           ? `\nМесяц: факт ${money(s.fact)}, план не внесён`
-          : `\nМесяц: факт ${money(s.fact)} из плана ${money(s.plan)}${s.pct !== null ? ` (${s.pct.toFixed(1)}%)` : ""}`;
+          : `\nМесяц: факт ${money(s.fact)} из плана ${money(s.plan)}${s.pct !== null ? ` (${trim2(s.pct)}%)` : ""}`;
     } catch (e) {
       console.error("coach card stats error:", getErrorMessage(e));
     }
