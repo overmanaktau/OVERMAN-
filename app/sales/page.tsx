@@ -59,6 +59,7 @@ function parseYmd(s: string): Date {
   return new Date(y, m - 1, day);
 }
 
+const trafficText = (n: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // посетители везде с двумя знаками («282,15»)
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
@@ -997,7 +998,7 @@ export default function SalesPage() {
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: avg(totalRevenue, totalReceipts) },
                 ...(ltvValue !== null ? [{ label: "Годовой LTV", value: ltvValue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), note: "продаж на клиента за 365 дней" }] : []),
-                { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(2)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
+                { label: "Конверсия", group: "conversion" as const, value: overallConversionPct !== null ? `${overallConversionPct.toFixed(2)}%` : "—", note: totalTraffic > 0 ? `${trafficText(totalTraffic)} посетителей` : undefined },
               ],
               sections,
             };
@@ -1017,7 +1018,7 @@ export default function SalesPage() {
           {loading
             ? "Загрузка…"
             : totalTraffic > 0
-              ? `${totalReceipts.toLocaleString("ru-RU")} чек из ${totalTraffic.toLocaleString("ru-RU")} посетителей`
+              ? `${totalReceipts.toLocaleString("ru-RU")} чек из ${trafficText(totalTraffic)} посетителей`
               : "нет данных по трафику за этот период"}
         </div>
       </div>

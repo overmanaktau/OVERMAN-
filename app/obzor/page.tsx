@@ -55,6 +55,7 @@ function parseYmd(s: string): Date {
   return new Date(y, m - 1, day);
 }
 
+const trafficText = (n: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // посетители везде с двумя знаками («282,15»)
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
@@ -546,7 +547,7 @@ export default function ObzorPage() {
                       r.receipts,
                       r.items,
                       r.receipts > 0 ? money(r.revenue / r.receipts) : "—",
-                      trafficByDate.has(r.date) ? Math.round(trafficByDate.get(r.date) as number) : "—",
+                      trafficByDate.has(r.date) ? trafficText(trafficByDate.get(r.date) as number) : "—",
                       (trafficByDate.get(r.date) ?? 0) > 0 ? `${((r.receipts / (trafficByDate.get(r.date) as number)) * 100).toFixed(2)}%` : "—",
                       r.cost !== null ? money(r.cost) : "—",
                       r.cost !== null ? money(r.revenue - r.cost) : "—",
@@ -559,7 +560,7 @@ export default function ObzorPage() {
                       totalReceipts,
                       totalItems,
                       totalReceipts > 0 ? money(avgCheck) : "—",
-                      totalTraffic > 0 ? Math.round(totalTraffic) : "—",
+                      totalTraffic > 0 ? trafficText(totalTraffic) : "—",
                       conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—",
                       totalCost !== null ? money(totalCost) : "—",
                       margin !== null ? money(margin) : "—",
@@ -595,7 +596,7 @@ export default function ObzorPage() {
                 { label: "Оборот", value: money(totalRevenue) },
                 { label: "Чеков", value: totalReceipts.toLocaleString("ru-RU") },
                 { label: "Средний чек", value: totalReceipts > 0 ? money(avgCheck) : "—" },
-                { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—", note: totalTraffic > 0 ? `${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : undefined },
+                { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—", note: totalTraffic > 0 ? `${trafficText(totalTraffic)} посетителей` : undefined },
                 { label: "Глубина чека", value: totalReceipts > 0 ? `${itemsPerReceipt.toFixed(1)} шт` : "—" },
                 { label: "Валовая прибыль", group: "cost" as const, value: margin !== null ? money(margin) : "—", note: marginPct !== null ? `${marginPct.toFixed(0)}% от оборота` : undefined },
                 { label: "Оборачиваемость склада", group: "cost" as const, value: turnoverPct !== null ? `${turnoverPct.toFixed(1)}%` : "—" },
@@ -622,7 +623,7 @@ export default function ObzorPage() {
               value={conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—"}
               suffix={
                 <span className="text-[11px] text-mutedLight">
-                  {totalTraffic > 0 ? `${totalReceipts.toLocaleString("ru-RU")} чеков из ${Math.round(totalTraffic).toLocaleString("ru-RU")} посетителей` : "нет данных по трафику за период"}
+                  {totalTraffic > 0 ? `${totalReceipts.toLocaleString("ru-RU")} чеков из ${trafficText(totalTraffic)} посетителей` : "нет данных по трафику за период"}
                 </span>
               }
             />

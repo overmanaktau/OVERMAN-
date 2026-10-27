@@ -133,6 +133,7 @@ function pctChange(curr: number, prev: number): number | null {
   return ((curr - prev) / prev) * 100;
 }
 
+const trafficText = (n: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // посетители везде с двумя знаками («282,15»)
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
@@ -512,7 +513,7 @@ export default function StatisticsPage() {
       subtitle: `${ru(range.start)} — ${ru(range.end)}`,
       orientation: "landscape",
       kpis: [
-        { label: "Трафик, факт", value: Math.round(totals.fact).toLocaleString("ru-RU"), note: `план ${Math.round(totals.plan).toLocaleString("ru-RU")}` },
+        { label: "Трафик, факт", value: trafficText(totals.fact), note: `план ${trafficText(totals.plan)}` },
         { label: "Чеков", value: salesTotals.receipts.toLocaleString("ru-RU") },
         { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${conversionPct.toFixed(2)}%` : "—" },
         { label: "Средний чек", value: avgCheck !== null ? `${Math.round(avgCheck).toLocaleString("ru-RU")} ₸` : "—" },
@@ -534,11 +535,11 @@ export default function StatisticsPage() {
   // «Сравнение периодов» для PDF: по каждому показателю предыдущий период, выбранный и разница (цифра и %). Появляется в окне «Что скачать» отдельной галочкой, по умолчанию выключена.
   function comparisonSection(ru: (d: Date) => string): NonNullable<PdfDoc["sections"]> {
     if (!range || !range.hasPrev) return [];
-    type Kind = "int" | "money" | "pct" | "conv";
+    type Kind = "int" | "money" | "pct" | "conv" | "traf";
     const prevConversion = prevTotals.fact > 0 ? (prevSalesTotals.receipts / prevTotals.fact) * 100 : null;
     const items: { label: string; cur: number | null; prev: number | null; kind: Kind }[] = [
-      { label: "Трафик план", cur: totals.plan, prev: prevTotals.plan, kind: "int" },
-      { label: "Трафик факт", cur: totals.fact, prev: prevTotals.fact, kind: "int" },
+      { label: "Трафик план", cur: totals.plan, prev: prevTotals.plan, kind: "traf" },
+      { label: "Трафик факт", cur: totals.fact, prev: prevTotals.fact, kind: "traf" },
       { label: "Выполнение плана", cur: planCompletionPct, prev: prevPlanCompletionPct, kind: "pct" },
       { label: "Количество чеков", cur: salesTotals.receipts, prev: prevSalesTotals.receipts, kind: "int" },
       { label: "Конверсия", cur: conversionPct, prev: prevConversion, kind: "conv" },
@@ -551,7 +552,7 @@ export default function StatisticsPage() {
       { label: "Цена одного покупателя", cur: costPerBuyer, prev: prevCostPerBuyer, kind: "money" },
     ];
     const num = (n: number, digits: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" ? `${num(n, 1)}%` : kind === "conv" ? `${num(n, 2)}%` : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
+    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" ? `${num(n, 1)}%` : kind === "conv" ? `${num(n, 2)}%` : kind === "traf" ? num(n, 2) : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
     const signed = (n: number, digits: number) => {
       const r = Number(n.toFixed(digits));
       return `${r > 0 ? "+" : r < 0 ? "−" : ""}${num(Math.abs(r), digits)}`;
@@ -560,7 +561,7 @@ export default function StatisticsPage() {
       if (it.cur === null || it.prev === null) return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), "—", "—"];
       const abs = it.cur - it.prev;
       const pc = pctChange(it.cur, it.prev);
-      const absText = it.kind === "conv" ? `${signed(abs, 2)} п.п.` : it.kind === "pct" ? `${signed(abs, 1)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
+      const absText = it.kind === "traf" ? signed(abs, 2) : it.kind === "conv" ? `${signed(abs, 2)} п.п.` : it.kind === "pct" ? `${signed(abs, 1)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
       return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), absText, pc === null ? "—" : `${signed(pc, 1)}%`];
     });
     const prevLabel = `${ru(range.prevStart)}${range.prevStart.getTime() === range.prevEnd.getTime() ? "" : ` — ${ru(range.prevEnd)}`}`;
@@ -705,8 +706,8 @@ export default function StatisticsPage() {
           valueTone={totals.plan > 0 ? planCompletionTone((totals.fact / totals.plan) * 100) : "neutral"}
           valueSuffix={
             totals.plan > 0
-              ? `(${totals.fact.toLocaleString("ru-RU")} из ${totals.plan.toLocaleString("ru-RU")}${
-                  trafficShortfall > 0 ? ` · не хватает ${trafficShortfall.toLocaleString("ru-RU")}` : ""
+              ? `(${trafficText(totals.fact)} из ${trafficText(totals.plan)}${
+                  trafficShortfall > 0 ? ` · не хватает ${trafficText(trafficShortfall)}` : ""
                 })`
               : undefined
           }

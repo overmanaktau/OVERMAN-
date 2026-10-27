@@ -76,7 +76,7 @@ export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], c
   const body: Cell[][] = [];
   const cells = (lbl: string, wd: string, t: ReturnType<typeof sumDays>): string[] => {
     const q = ratios(t);
-    return [lbl, wd, t.planRevenue > 0 ? int(t.planRevenue) : "—", t.planTraffic > 0 ? int(t.planTraffic) : "—", int(t.revenue), int(t.visitors), int(t.receipts), int(t.items), int(q.atv), q.revPct === null ? "—" : pct(q.revPct, 1), q.trafPct === null ? "—" : pct(q.trafPct, 1), pct(q.cr, 2), dec(q.depth, 2)];
+    return [lbl, wd, t.planRevenue > 0 ? int(t.planRevenue) : "—", t.planTraffic > 0 ? int(t.planTraffic) : "—", int(t.revenue), dec(t.visitors, 2), int(t.receipts), int(t.items), int(q.atv), q.revPct === null ? "—" : pct(q.revPct, 1), q.trafPct === null ? "—" : pct(q.trafPct, 1), pct(q.cr, 2), dec(q.depth, 2)];
   };
   weeks.forEach((w, i) => {
     body.push([{ content: custom ? label(i) : `${label(i)}   ·   ${span(w)}`, colSpan: 13 }]);
@@ -106,7 +106,7 @@ export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], c
     [r1.cr, r2.cr],
     [r1.depth, r2.depth],
   ];
-  const diffNum = pairs.map(([a, b], i) => (a === null || b === null ? "—" : i >= 7 && i <= 9 ? "" : signed(b - a, i === 10 ? (x) => dec(x, 2) : int)));
+  const diffNum = pairs.map(([a, b], i) => (a === null || b === null ? "—" : i >= 7 && i <= 9 ? "" : signed(b - a, i === 10 || i === 3 ? (x) => dec(x, 2) : int)));
   const diffPct = pairs.map(([a, b]) => (a === null || b === null ? null : rel(a, b)));
   const diffCell = (i: number, txt: string): Cell => ({ content: txt, styles: { fillColor: diffPct[i] === null ? C.paper : diffPct[i]! >= 0 ? C.greenBg : C.redBg, textColor: tone(diffPct[i]), fontStyle: "bold" } });
   const diffLabel = custom ? custom.diff : `Разница: ${short(1)} от ${short(0)}`;
