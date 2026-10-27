@@ -55,7 +55,11 @@ function parseYmd(s: string): Date {
   return new Date(y, m - 1, day);
 }
 
-const trafficText = (n: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // посетители везде с двумя знаками («282,15»)
+// Посетители: целое число — без дробной части («4 028»), иначе два знака после запятой («282,15»)
+const trafficText = (n: number) => {
+  const r = Math.round(n * 100) / 100;
+  return Number.isInteger(r) ? r.toLocaleString("ru-RU") : r.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }

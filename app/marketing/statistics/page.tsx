@@ -133,7 +133,11 @@ function pctChange(curr: number, prev: number): number | null {
   return ((curr - prev) / prev) * 100;
 }
 
-const trafficText = (n: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // посетители везде с двумя знаками («282,15»)
+// Посетители: целое число — без дробной части («4 028»), иначе два знака после запятой («282,15»)
+const trafficText = (n: number) => {
+  const r = Math.round(n * 100) / 100;
+  return Number.isInteger(r) ? r.toLocaleString("ru-RU") : r.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 function money(n: number) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₸`;
 }
@@ -552,7 +556,7 @@ export default function StatisticsPage() {
       { label: "Цена одного покупателя", cur: costPerBuyer, prev: prevCostPerBuyer, kind: "money" },
     ];
     const num = (n: number, digits: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" ? `${num(n, 1)}%` : kind === "conv" ? `${num(n, 2)}%` : kind === "traf" ? num(n, 2) : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
+    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" ? `${num(n, 1)}%` : kind === "conv" ? `${num(n, 2)}%` : kind === "traf" ? trafficText(n) : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
     const signed = (n: number, digits: number) => {
       const r = Number(n.toFixed(digits));
       return `${r > 0 ? "+" : r < 0 ? "−" : ""}${num(Math.abs(r), digits)}`;
@@ -561,7 +565,7 @@ export default function StatisticsPage() {
       if (it.cur === null || it.prev === null) return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), "—", "—"];
       const abs = it.cur - it.prev;
       const pc = pctChange(it.cur, it.prev);
-      const absText = it.kind === "traf" ? signed(abs, 2) : it.kind === "conv" ? `${signed(abs, 2)} п.п.` : it.kind === "pct" ? `${signed(abs, 1)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
+      const absText = it.kind === "traf" ? signed(abs, Number.isInteger(Math.round(abs * 100) / 100) ? 0 : 2) : it.kind === "conv" ? `${signed(abs, 2)} п.п.` : it.kind === "pct" ? `${signed(abs, 1)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
       return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), absText, pc === null ? "—" : `${signed(pc, 1)}%`];
     });
     const prevLabel = `${ru(range.prevStart)}${range.prevStart.getTime() === range.prevEnd.getTime() ? "" : ` — ${ru(range.prevEnd)}`}`;
