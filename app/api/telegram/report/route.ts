@@ -7,6 +7,7 @@ import { REPORT_ROUTES } from "@/lib/reports/routes";
 import { activeHoldFor, recordHeldReport, reportKindOf, reportRange } from "@/lib/verify/holds";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { stable } from "@/lib/reports/stable";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const maxDuration = 120;
 
@@ -16,6 +17,8 @@ export const maxDuration = 120;
 // ?evening=1 — вечерняя конверсия за вчера (17:00–00:00, чеки до 01:00; шлётся в 01:00), ?intraday=1 — дневной отчёт «сегодня, данные до N:00» (?until=17 по умолчанию, дата — сегодня), ?scope=point_1|point_3 — только отчёты этого города, ?force=1 — отправить, даже если отчёт удержан.
 // Отчёт города удерживается (не уходит в группы), если ночная сверка нашла расхождение и автоисправление
 // не помогло (см. lib/verify/holds.ts): неправильный отчёт отправлять нельзя, он уйдёт после исправления.
+// ?check=1 — проверка после основной рассылки (pg_cron через 20 минут): группы, в которые отчёт не дошёл, получают его повторно,
+// а владельцу приходит сообщение, что отчёт не ушёл вовремя; отчёты, уже отправленные или удержанные по сверке, не трогаем.
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization") ?? "";
@@ -36,6 +39,7 @@ async function handle(request: Request) {
   const onlyChat = url.searchParams.get("chat");
   const onlyScope = url.searchParams.get("scope");
   const force = url.searchParams.get("force") === "1";
+  const check = url.searchParams.get("check") === "1";
   // ?period=week|month — недельный/месячный отчёт, заканчивающийся днём `date`
   // (по умолчанию вчера: в понедельник это воскресенье, 1-го числа — последний
   // день прошлого месяца). Без period — обычный дневной отчёт.
@@ -45,7 +49,7 @@ async function handle(request: Request) {
   }
   const period = periodParam as "week" | "month" | null;
 
-  const results: { chat: string; scope: string; messages: number; error?: string; preview?: string[]; held?: string }[] = [];
+  const results: { chat: string; scope: string; messages: number; error?: string; preview?: string[]; held?: string; resent?: boolean }[] = [];
   const cache = new Map<string, string[]>();
 
   for (const route of REPORT_ROUTES) {
@@ -54,7 +58,20 @@ async function handle(request: Request) {
       const scope = SCOPES[scopeKey];
       if (!scope) continue;
       if (onlyScope && scopeKey !== onlyScope) continue;
+      const sentKind = evening ? "evening" : intraday ? "intraday" : period ?? "day";
       try {
+        // Проверка: в эту группу отчёт уже дошёл — пропускаем.
+        if (check && !dry) {
+          const { count, error: sentError } = await supabaseAdmin
+            .from("telegram_sent_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("chat_id", route.chatId)
+            .eq("report_kind", sentKind)
+            .eq("report_date", date)
+            .eq("scope", scopeKey);
+          if (sentError) throw sentError;
+          if ((count ?? 0) > 0) continue;
+        }
         // Удержание: за период отчёта есть неисправленное расхождение этого города — не отправляем.
         if (!force && !dry && !intraday && !evening) {
           const kind = reportKindOf(periodParam);
@@ -97,17 +114,21 @@ async function handle(request: Request) {
         if (dry) {
           results.push({ chat: route.label, scope: scopeKey, messages: messages.length, preview: messages });
         } else {
-          await sendTelegramMessages(route.chatId, messages, {
-            kind: evening ? "evening" : intraday ? "intraday" : period ?? "day",
-            date,
-            scope: scopeKey,
-          });
-          results.push({ chat: route.label, scope: scopeKey, messages: messages.length });
+          await sendTelegramMessages(route.chatId, messages, { kind: sentKind, date, scope: scopeKey });
+          results.push({ chat: route.label, scope: scopeKey, messages: messages.length, ...(check ? { resent: true } : {}) });
         }
       } catch (e) {
         results.push({ chat: route.label, scope: scopeKey, messages: 0, error: getErrorMessage(e) });
+        if (!dry) await notifyOwner(`⚠️ <b>Отчёт не отправлен · ${scope.title}</b> (${route.label}, ${date.split("-").reverse().join(".")})\nОшибка: ${getErrorMessage(e)}${check ? "" : "\nЧерез 20 минут бот попробует отправить ещё раз."}`);
       }
     }
+  }
+
+  // Проверка нашла группы без отчёта и отправила его повторно — сообщаем владельцу.
+  const resent = results.filter((r) => r.resent);
+  if (check && !dry && resent.length > 0) {
+    const kindName = evening ? "Вечерняя конверсия" : intraday ? "Дневной отчёт до 17:00" : period === "week" ? "Недельный отчёт" : period === "month" ? "Месячный отчёт" : "Утренний отчёт";
+    await notifyOwner(`⚠️ <b>${kindName} не ушёл вовремя</b>\nОтправил повторно: ${resent.map((r) => r.chat).join(", ")}. Причина первой неудачи — в журнале запуска.`);
   }
 
   const failed = results.some((r) => r.error);
