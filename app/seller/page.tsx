@@ -1,32 +1,75 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Nunito } from "next/font/google";
-import { authFetch } from "@/lib/apiClient";
 import { getErrorMessage } from "@/lib/errors";
 import { trim2Ru } from "@/lib/numFormat";
 import type { CitySellers } from "@/lib/sellers/overview";
 
 // Оформление как у кабинета продавца seller.overman.kz: кремовый фон, большие скруглённые плитки, шрифт Nunito, яркие статусные цвета.
-const nunito = Nunito({ subsets: ["latin", "cyrillic"], weight: ["500", "700", "800", "900"] });
+const nunito = Nunito({
+  subsets: ["latin", "cyrillic"],
+  weight: ["500", "700", "800", "900"],
+});
 
-type Response = { stores: { code: string; label: string }[]; store: string; data: CitySellers };
+type Response = {
+  stores: { code: string; label: string }[];
+  store: string;
+  data: CitySellers;
+};
 
 const INK = "#261a52";
 const LABEL = "#8a7cc0";
 const money = (n: number) => `${trim2Ru(n)} ₸`;
 const pct = (n: number) => `${trim2Ru(n)}%`;
-const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
-const timeAlmaty = (iso: string) => new Intl.DateTimeFormat("ru-RU", { timeZone: "Asia/Almaty", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+const MONTHS = [
+  "Январь",
+  "Февраль",
+  "Март",
+  "Апрель",
+  "Май",
+  "Июнь",
+  "Июль",
+  "Август",
+  "Сентябрь",
+  "Октябрь",
+  "Ноябрь",
+  "Декабрь",
+];
+const timeAlmaty = (iso: string) =>
+  new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Asia/Almaty",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
 
 // Те же цвета, что в кабинете продавца: от 100% зелёный, от 85% оранжевый, ниже красный.
-const statusColor = (n: number | null) => (n === null ? LABEL : n >= 100 ? "#12b886" : n >= 85 ? "#f5a524" : "#ff5c7a");
+const statusColor = (n: number | null) =>
+  n === null ? LABEL : n >= 100 ? "#12b886" : n >= 85 ? "#f5a524" : "#ff5c7a";
 
-function Tile({ label, value, color }: { label: string; value: string; color?: string }) {
+function Tile({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
   return (
-    <div className="rounded-[22px] px-5 py-4" style={{ background: "rgba(38,26,82,0.07)" }}>
-      <p className="text-xs font-extrabold" style={{ color: LABEL }}>{label}</p>
-      <p className="text-[22px] leading-tight font-black mt-1" style={{ color: color ?? INK }}>{value}</p>
+    <div
+      className="rounded-[22px] px-5 py-4"
+      style={{ background: "rgba(38,26,82,0.07)" }}
+    >
+      <p className="text-xs font-extrabold" style={{ color: LABEL }}>
+        {label}
+      </p>
+      <p
+        className="text-[22px] leading-tight font-black mt-1"
+        style={{ color: color ?? INK }}
+      >
+        {value}
+      </p>
     </div>
   );
 }
@@ -36,13 +79,31 @@ export default function SellerPage() {
   const [resp, setResp] = useState<Response | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [needLogin, setNeedLogin] = useState(false);
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
+  const token = useRef(""); // пропуск только в памяти страницы: после обновления страницы пароль спрашивается снова
 
   const load = useCallback(async (code: string | null) => {
     setLoading(true);
     try {
-      const r = (await authFetch(`/api/sellers${code ? `?store=${code}` : ""}`)) as Response;
-      setResp(r);
-      setStore(r.store);
+      const res = await fetch(`/api/sellers${code ? `?store=${code}` : ""}`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${token.current}` },
+      });
+      if (res.status === 401) {
+        setNeedLogin(true);
+        setResp(null);
+        setError(null);
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok)
+        throw new Error(body.error || `Ошибка запроса (${res.status})`);
+      setResp(body as Response);
+      setStore((body as Response).store);
+      setNeedLogin(false);
       setError(null);
     } catch (e) {
       setError(getErrorMessage(e));
@@ -50,6 +111,29 @@ export default function SellerPage() {
       setLoading(false);
     }
   }, []);
+
+  async function signIn(e: React.FormEvent) {
+    e.preventDefault();
+    setSigningIn(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/sellers/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ login, password }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok)
+        throw new Error(body.error || `Ошибка входа (${res.status})`);
+      token.current = body.token as string;
+      setPassword("");
+      await load(null);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSigningIn(false);
+    }
+  }
 
   useEffect(() => {
     load(null);
@@ -63,113 +147,285 @@ export default function SellerPage() {
   }, [store, load]);
 
   const d = resp?.data;
-  const month = d ? `${MONTHS[Number(d.date.slice(5, 7)) - 1]} ${d.date.slice(0, 4)}` : "";
+  const month = d
+    ? `${MONTHS[Number(d.date.slice(5, 7)) - 1]} ${d.date.slice(0, 4)}`
+    : "";
+
+  const field =
+    "w-full rounded-2xl px-4 py-3 text-base font-bold outline-none border-2 border-transparent focus:border-[#6d3df5]";
 
   return (
     <div
-      className={`${nunito.className} max-w-6xl rounded-[32px] p-4 sm:p-7`}
-      style={{ background: "linear-gradient(160deg,#fffbe0 0%,#f6f8cf 55%,#eef5c4 100%)", color: INK }}
+      className={`${nunito.className} fixed inset-0 overflow-auto`}
+      style={{
+        background:
+          "linear-gradient(160deg,#fffbe0 0%,#f6f8cf 55%,#eef5c4 100%)",
+        color: INK,
+      }}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div>
-          <h1 className="text-[26px] sm:text-[30px] font-black leading-tight">Продавцы: кто как идёт</h1>
-          {d && <p className="text-sm font-extrabold mt-1" style={{ color: LABEL }}>{month} · день {d.day} из {d.daysInMonth}</p>}
-        </div>
-        {resp && resp.stores.length > 1 && (
-          <div className="flex gap-2">
-            {resp.stores.map((s) => (
-              <button
-                key={s.code}
-                type="button"
-                onClick={() => load(s.code)}
-                className="px-5 py-2.5 rounded-full text-sm font-extrabold"
-                style={store === s.code ? { background: "#6d3df5", color: "#fff" } : { background: "#fff", color: INK }}
+      <div className="max-w-6xl mx-auto p-4 sm:p-7">
+        {needLogin && (
+          <form
+            onSubmit={signIn}
+            className="max-w-sm mx-auto mt-[12vh] rounded-[28px] p-7 flex flex-col gap-4"
+            style={{ background: "rgba(255,255,255,0.8)" }}
+          >
+            <h1 className="text-[26px] font-black leading-tight">
+              Продавцы: кто как идёт
+            </h1>
+            <p className="text-sm font-extrabold" style={{ color: LABEL }}>
+              Введите логин и пароль. Пароль спрашивается при каждом открытии и
+              обновлении страницы.
+            </p>
+            <input
+              className={field}
+              style={{ background: "#f1ecff", color: INK }}
+              placeholder="Логин"
+              autoComplete="username"
+              autoCapitalize="none"
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
+            />
+            <input
+              className={field}
+              style={{ background: "#f1ecff", color: INK }}
+              placeholder="Пароль"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            {error && (
+              <p
+                className="text-sm font-extrabold"
+                style={{ color: "#ff5c7a" }}
               >
-                {s.label}
-              </button>
-            ))}
+                {error}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={signingIn || !login || !password}
+              className="rounded-full py-3 text-base font-black text-white disabled:opacity-50"
+              style={{ background: "#6d3df5" }}
+            >
+              {signingIn ? "Вхожу…" : "Войти"}
+            </button>
+          </form>
+        )}
+        {!needLogin && (
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h1 className="text-[26px] sm:text-[30px] font-black leading-tight">
+                Продавцы: кто как идёт
+              </h1>
+              {d && (
+                <p
+                  className="text-sm font-extrabold mt-1"
+                  style={{ color: LABEL }}
+                >
+                  {month} · день {d.day} из {d.daysInMonth}
+                </p>
+              )}
+            </div>
+            {resp && resp.stores.length > 1 && (
+              <div className="flex gap-2">
+                {resp.stores.map((s) => (
+                  <button
+                    key={s.code}
+                    type="button"
+                    onClick={() => load(s.code)}
+                    className="px-5 py-2.5 rounded-full text-sm font-extrabold"
+                    style={
+                      store === s.code
+                        ? { background: "#6d3df5", color: "#fff" }
+                        : { background: "#fff", color: INK }
+                    }
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!needLogin && error && (
+          <p
+            className="text-sm font-extrabold mb-3"
+            style={{ color: "#ff5c7a" }}
+          >
+            {error}
+          </p>
+        )}
+        {!d && loading && !needLogin && (
+          <p className="text-sm font-extrabold" style={{ color: LABEL }}>
+            Загрузка…
+          </p>
+        )}
+
+        {d && (
+          <div className={loading ? "opacity-60 transition-opacity" : ""}>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
+              <Tile label="Оборот месяца" value={money(d.team.turnover)} />
+              <Tile label="План команды" value={money(d.team.plan)} />
+              <Tile
+                label="Выполнение"
+                value={
+                  d.team.fulfillment === null ? "—" : pct(d.team.fulfillment)
+                }
+                color={statusColor(d.team.fulfillment)}
+              />
+              <Tile label="Прогноз на месяц" value={money(d.team.forecast)} />
+              <Tile
+                label="Прогноз к плану"
+                value={
+                  d.team.forecastPct === null ? "—" : pct(d.team.forecastPct)
+                }
+                color={statusColor(d.team.forecastPct)}
+              />
+              <Tile label="Сегодня" value={money(d.team.today)} />
+              <Tile label="Неделя" value={money(d.team.week)} />
+              <Tile label="Чеков" value={trim2Ru(d.team.receipts)} />
+              <Tile
+                label="Средний чек"
+                value={d.team.avgCheck === null ? "—" : money(d.team.avgCheck)}
+              />
+            </div>
+
+            <div
+              className="rounded-[28px] p-4 sm:p-6"
+              style={{ background: "rgba(255,255,255,0.7)" }}
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[900px]">
+                  <thead>
+                    <tr
+                      className="text-left text-xs font-extrabold"
+                      style={{ color: LABEL }}
+                    >
+                      <th className="px-3 py-2 w-8">#</th>
+                      <th className="px-3 py-2">Продавец</th>
+                      <th className="px-3 py-2 text-right">Оборот</th>
+                      <th className="px-3 py-2 text-right">План</th>
+                      <th className="px-3 py-2 min-w-[170px]">Выполнение</th>
+                      <th className="px-3 py-2 text-right">Ставка</th>
+                      <th className="px-3 py-2 text-right">Бонус сейчас</th>
+                      <th className="px-3 py-2 text-right">Прогноз %</th>
+                      <th className="px-3 py-2 text-right">Сегодня</th>
+                      <th className="px-3 py-2 text-right">Неделя</th>
+                      <th className="px-3 py-2 text-right">Чеки</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.rows.map((r, i) => (
+                      <tr
+                        key={r.id}
+                        style={{ borderTop: "1px solid rgba(38,26,82,0.08)" }}
+                      >
+                        <td
+                          className="px-3 py-3.5 font-extrabold"
+                          style={{ color: LABEL }}
+                        >
+                          {i + 1}
+                        </td>
+                        <td className="px-3 py-3.5 font-black text-[15px] whitespace-nowrap">
+                          {r.name}
+                        </td>
+                        <td className="px-3 py-3.5 text-right whitespace-nowrap font-extrabold">
+                          {money(r.turnover)}
+                        </td>
+                        <td
+                          className="px-3 py-3.5 text-right whitespace-nowrap font-bold"
+                          style={{ color: LABEL }}
+                        >
+                          {r.plan === null ? "—" : money(r.plan)}
+                        </td>
+                        <td className="px-3 py-3.5">
+                          {r.fulfillment === null ? (
+                            <span style={{ color: LABEL }}>—</span>
+                          ) : (
+                            <div className="flex items-center gap-2.5">
+                              <div
+                                className="h-3 flex-1 rounded-full min-w-[70px] overflow-hidden"
+                                style={{ background: "#e5defa" }}
+                              >
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${Math.min(100, r.fulfillment)}%`,
+                                    background: statusColor(r.fulfillment),
+                                  }}
+                                />
+                              </div>
+                              <span
+                                className="text-sm font-black w-16 text-right"
+                                style={{ color: statusColor(r.fulfillment) }}
+                              >
+                                {pct(r.fulfillment)}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-3.5 text-right font-extrabold">
+                          {r.rate === null ? "—" : pct(r.rate)}
+                        </td>
+                        <td
+                          className="px-3 py-3.5 text-right whitespace-nowrap font-black text-[15px]"
+                          style={{ color: "#6d3df5" }}
+                        >
+                          {r.bonus === null ? "—" : money(r.bonus)}
+                        </td>
+                        <td
+                          className="px-3 py-3.5 text-right font-black"
+                          style={{ color: statusColor(r.forecastPct) }}
+                        >
+                          {r.forecastPct === null ? "—" : pct(r.forecastPct)}
+                        </td>
+                        <td className="px-3 py-3.5 text-right whitespace-nowrap font-bold">
+                          {money(r.today)}
+                        </td>
+                        <td className="px-3 py-3.5 text-right whitespace-nowrap font-bold">
+                          {money(r.week)}
+                        </td>
+                        <td className="px-3 py-3.5 text-right font-extrabold">
+                          {trim2Ru(r.receipts)}
+                        </td>
+                      </tr>
+                    ))}
+                    {d.rows.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={11}
+                          className="px-3 py-8 text-center font-extrabold"
+                          style={{ color: LABEL }}
+                        >
+                          В этом месяце продаж пока нет.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {d.noSales.length > 0 && (
+              <p
+                className="text-xs font-extrabold mt-4"
+                style={{ color: LABEL }}
+              >
+                Нет продаж в этом месяце: {d.noSales.join(", ")}
+              </p>
+            )}
+            <p className="text-xs font-bold mt-1.5" style={{ color: LABEL }}>
+              Данные с учётом возвратов. Бонус сейчас = оборот × ставка
+              (выполнение 0–85% — 2%, 86–90% — 2,5%, 91–99% — 3%, от 100% — 4%).
+              Прогноз — по текущему темпу на дни месяца. Обновлено в{" "}
+              {timeAlmaty(d.updatedAt)}.
+            </p>
           </div>
         )}
       </div>
-
-      {error && <p className="text-sm font-extrabold mb-3" style={{ color: "#ff5c7a" }}>{error}</p>}
-      {!d && loading && <p className="text-sm font-extrabold" style={{ color: LABEL }}>Загрузка…</p>}
-
-      {d && (
-        <div className={loading ? "opacity-60 transition-opacity" : ""}>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
-            <Tile label="Оборот месяца" value={money(d.team.turnover)} />
-            <Tile label="План команды" value={money(d.team.plan)} />
-            <Tile label="Выполнение" value={d.team.fulfillment === null ? "—" : pct(d.team.fulfillment)} color={statusColor(d.team.fulfillment)} />
-            <Tile label="Прогноз на месяц" value={money(d.team.forecast)} />
-            <Tile label="Прогноз к плану" value={d.team.forecastPct === null ? "—" : pct(d.team.forecastPct)} color={statusColor(d.team.forecastPct)} />
-            <Tile label="Сегодня" value={money(d.team.today)} />
-            <Tile label="Неделя" value={money(d.team.week)} />
-            <Tile label="Чеков" value={trim2Ru(d.team.receipts)} />
-            <Tile label="Средний чек" value={d.team.avgCheck === null ? "—" : money(d.team.avgCheck)} />
-          </div>
-
-          <div className="rounded-[28px] p-4 sm:p-6" style={{ background: "rgba(255,255,255,0.7)" }}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[900px]">
-                <thead>
-                  <tr className="text-left text-xs font-extrabold" style={{ color: LABEL }}>
-                    <th className="px-3 py-2 w-8">#</th>
-                    <th className="px-3 py-2">Продавец</th>
-                    <th className="px-3 py-2 text-right">Оборот</th>
-                    <th className="px-3 py-2 text-right">План</th>
-                    <th className="px-3 py-2 min-w-[170px]">Выполнение</th>
-                    <th className="px-3 py-2 text-right">Ставка</th>
-                    <th className="px-3 py-2 text-right">Бонус сейчас</th>
-                    <th className="px-3 py-2 text-right">Прогноз %</th>
-                    <th className="px-3 py-2 text-right">Сегодня</th>
-                    <th className="px-3 py-2 text-right">Неделя</th>
-                    <th className="px-3 py-2 text-right">Чеки</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.rows.map((r, i) => (
-                    <tr key={r.id} style={{ borderTop: "1px solid rgba(38,26,82,0.08)" }}>
-                      <td className="px-3 py-3.5 font-extrabold" style={{ color: LABEL }}>{i + 1}</td>
-                      <td className="px-3 py-3.5 font-black text-[15px]">{r.name}</td>
-                      <td className="px-3 py-3.5 text-right whitespace-nowrap font-extrabold">{money(r.turnover)}</td>
-                      <td className="px-3 py-3.5 text-right whitespace-nowrap font-bold" style={{ color: LABEL }}>{r.plan === null ? "—" : money(r.plan)}</td>
-                      <td className="px-3 py-3.5">
-                        {r.fulfillment === null ? (
-                          <span style={{ color: LABEL }}>—</span>
-                        ) : (
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-3 flex-1 rounded-full min-w-[70px] overflow-hidden" style={{ background: "#e5defa" }}>
-                              <div className="h-full rounded-full" style={{ width: `${Math.min(100, r.fulfillment)}%`, background: statusColor(r.fulfillment) }} />
-                            </div>
-                            <span className="text-sm font-black w-16 text-right" style={{ color: statusColor(r.fulfillment) }}>{pct(r.fulfillment)}</span>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-3.5 text-right font-extrabold">{r.rate === null ? "—" : pct(r.rate)}</td>
-                      <td className="px-3 py-3.5 text-right whitespace-nowrap font-black text-[15px]" style={{ color: "#6d3df5" }}>{r.bonus === null ? "—" : money(r.bonus)}</td>
-                      <td className="px-3 py-3.5 text-right font-black" style={{ color: statusColor(r.forecastPct) }}>{r.forecastPct === null ? "—" : pct(r.forecastPct)}</td>
-                      <td className="px-3 py-3.5 text-right whitespace-nowrap font-bold">{money(r.today)}</td>
-                      <td className="px-3 py-3.5 text-right whitespace-nowrap font-bold">{money(r.week)}</td>
-                      <td className="px-3 py-3.5 text-right font-extrabold">{trim2Ru(r.receipts)}</td>
-                    </tr>
-                  ))}
-                  {d.rows.length === 0 && (
-                    <tr>
-                      <td colSpan={11} className="px-3 py-8 text-center font-extrabold" style={{ color: LABEL }}>В этом месяце продаж пока нет.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {d.noSales.length > 0 && <p className="text-xs font-extrabold mt-4" style={{ color: LABEL }}>Нет продаж в этом месяце: {d.noSales.join(", ")}</p>}
-          <p className="text-xs font-bold mt-1.5" style={{ color: LABEL }}>
-            Данные с учётом возвратов. Бонус сейчас = оборот × ставка (выполнение 0–85% — 2%, 86–90% — 2,5%, 91–99% — 3%, от 100% — 4%). Прогноз — по текущему темпу на дни месяца. Обновлено в {timeAlmaty(d.updatedAt)}.
-          </p>
-        </div>
-      )}
     </div>
   );
 }

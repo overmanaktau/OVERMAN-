@@ -1,22 +1,23 @@
 import { NextResponse } from "next/server";
 import { getErrorMessage } from "@/lib/errors";
-import { requireSectionStores } from "@/lib/sectionAccess";
+import { isValidSession } from "@/lib/sellers/session";
 import { citySellers, type CitySellers } from "@/lib/sellers/overview";
 
 export const maxDuration = 60;
 
-const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
+const CITIES = [
+  { code: "point_1", label: "Актау" },
+  { code: "point_3", label: "Актобе" },
+];
 const CACHE_MS = 2 * 60 * 1000; // расчёт ходит в МойСклад за сегодняшний день — не чаще раза в 2 минуты на город
 const cache = new Map<string, { at: number; data: CitySellers }>();
 
-// Продавцы города за текущий месяц для руководителей. GET ?store=point_1 — город (по умолчанию первый из доступных); в ответе stores — доступные города.
+// Продавцы города за текущий месяц для руководителей (страница /seller). Нужен пропуск после входа по логину и паролю (заголовок Authorization).
+// GET ?store=point_1 — город (по умолчанию Актау); в ответе stores — оба города.
 export async function GET(request: Request) {
-  const caller = await requireSectionStores(request, "sellers.list", "view");
-  if (!caller) return NextResponse.json({ error: "Нет доступа." }, { status: 403 });
-  const stores = caller.stores.filter((c) => CITY[c]).sort();
-  if (stores.length === 0) return NextResponse.json({ error: "Нет доступных городов." }, { status: 403 });
+  if (!isValidSession(request.headers.get("authorization"))) return NextResponse.json({ error: "Нужен вход." }, { status: 401 });
   const requested = new URL(request.url).searchParams.get("store");
-  const store = requested && stores.includes(requested) ? requested : stores[0];
+  const store = CITIES.find((c) => c.code === requested)?.code ?? CITIES[0].code;
   try {
     const hit = cache.get(store);
     let data: CitySellers;
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
       data = await citySellers(store);
       cache.set(store, { at: Date.now(), data });
     }
-    return NextResponse.json({ stores: stores.map((code) => ({ code, label: CITY[code] })), store, data });
+    return NextResponse.json({ stores: CITIES, store, data });
   } catch (e) {
     return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
   }
