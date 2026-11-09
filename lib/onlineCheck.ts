@@ -1,5 +1,5 @@
 // Онлайн-чеки Актау: «онлайн» в комментарии — онлайн сразу; «похоже на онлайн» — Нуржану уходит вопрос с кнопками ✅ Да / ❌ Нет (решение владельца 09.11.2026).
-// Ответы хранятся в журнале бота coach_messages_sent: вид «onl_y:<id чека>» / «onl_n:<id чека>», «onl_q:<id чека>» — вопрос уже задан (одна запись на чек).
+// Ответы хранятся в таблице online_check_answers (миграция 121): одна строка на чек МойСклад — вопрос задан, ответ да/нет/ещё нет.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchRetailDemandsForDate, type RetailDemand } from "@/lib/moysklad";
 import { REGISTER_STORE, registerCounts } from "@/lib/registers";
@@ -13,12 +13,10 @@ const NURZHAN_MS_ID = "755c7139-b6de-11f0-0a80-15b80002bbcb"; // Картбае�
 // Ответы по чекам: true — онлайн, false — нет. Чеков без ответа в карте нет.
 export async function loadOnlineAnswers(ids: string[]): Promise<Map<string, boolean>> {
   const out = new Map<string, boolean>();
-  for (let i = 0; i < ids.length; i += 60) {
-    const part = ids.slice(i, i + 60);
-    const kinds = part.flatMap((id) => [`onl_y:${id}`, `onl_n:${id}`]);
-    const { data, error } = await supabaseAdmin.from("coach_messages_sent").select("kind, sent_at").in("kind", kinds).order("sent_at", { ascending: true });
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await supabaseAdmin.from("online_check_answers").select("demand_id, online").in("demand_id", ids.slice(i, i + 100)).not("online", "is", null);
     if (error) throw error;
-    for (const r of (data ?? []) as { kind: string }[]) out.set(r.kind.slice(6), r.kind.startsWith("onl_y:")); // позже записанный ответ перекрывает прежний
+    for (const r of (data ?? []) as { demand_id: string; online: boolean }[]) out.set(r.demand_id, r.online);
   }
   return out;
 }
@@ -33,15 +31,15 @@ export async function onlineOnly(demands: RetailDemand[]): Promise<RetailDemand[
   });
 }
 
-// Записать ответ на вопрос «Это онлайн?» (кнопка у Нуржана или владельца).
+// Записать ответ на вопрос «Это онлайн?» (кнопка у Нуржана или владельца). Если вопроса в таблице нет (например, чек выбран вручную), строка создаётся.
 export async function saveOnlineAnswer(demandId: string, online: boolean, userId: number): Promise<void> {
-  const { data: q, error } = await supabaseAdmin.from("coach_messages_sent").select("ref_date").eq("kind", `onl_q:${demandId}`).limit(1).maybeSingle();
+  const { data: row, error } = await supabaseAdmin.from("online_check_answers").select("demand_id").eq("demand_id", demandId).maybeSingle();
   if (error) throw error;
-  const refDate = (q as { ref_date?: string } | null)?.ref_date ?? new Date().toISOString().slice(0, 10);
-  const { error: delErr } = await supabaseAdmin.from("coach_messages_sent").delete().in("kind", [`onl_y:${demandId}`, `onl_n:${demandId}`]);
-  if (delErr) throw delErr;
-  const { error: insErr } = await supabaseAdmin.from("coach_messages_sent").insert({ user_id: userId, kind: `${online ? "onl_y" : "onl_n"}:${demandId}`, ref_date: refDate });
-  if (insErr) throw insErr;
+  const answer = { online, answered_by: userId, answered_at: new Date().toISOString() };
+  const { error: wErr } = row
+    ? await supabaseAdmin.from("online_check_answers").update(answer).eq("demand_id", demandId)
+    : await supabaseAdmin.from("online_check_answers").insert({ demand_id: demandId, ref_date: new Date().toISOString().slice(0, 10), ...answer });
+  if (wErr) throw wErr;
 }
 
 const dm = (ymd: string) => `${ymd.slice(8, 10)}.${ymd.slice(5, 7)}`;
@@ -58,12 +56,11 @@ export async function askOnlineQuestions(date: string, dry = false): Promise<{ a
   if (!user) return { asked: 0, checks: [], reason: "Нуржан не подключён к боту-помощнику" };
 
   const ids = demands.map((d) => d.id as string);
-  const answered = await loadOnlineAnswers(ids);
-  const { data: asked, error: askErr } = await supabaseAdmin.from("coach_messages_sent").select("kind").in("kind", ids.map((id) => `onl_q:${id}`));
+  const { data: asked, error: askErr } = await supabaseAdmin.from("online_check_answers").select("demand_id").in("demand_id", ids);
   if (askErr) throw askErr;
-  const askedSet = new Set(((asked ?? []) as { kind: string }[]).map((r) => r.kind.slice(6)));
-
-  const todo = demands.filter((d) => !answered.has(d.id as string) && !askedSet.has(d.id as string));
+  const askedSet = new Set(((asked ?? []) as { demand_id: string }[]).map((r) => r.demand_id));
+  // чек, по которому вопрос уже задан (с ответом или без), второй раз не спрашиваем
+  const todo = demands.filter((d) => !askedSet.has(d.id as string));
   const checks = todo.map((d) => ({ number: d.name ?? "—", comment: (d.description ?? "").trim() }));
   if (dry) return { asked: 0, checks };
   for (const d of todo) {
@@ -73,7 +70,7 @@ export async function askOnlineQuestions(date: string, dry = false): Promise<{ a
       `Чек ${escapeHtml(d.name ?? "—")} · ${dm(date)} · ${escapeHtml(d.owner?.name ?? "—")} · ${trim2Ru((d.sum ?? 0) / 100)} ₸\n` +
       `Комментарий: «${escapeHtml((d.description ?? "").trim())}»`;
     await telegramTransport.send(user.telegram_chat_id, text, { inline_keyboard: [[{ text: "✅ Да", callback_data: `ol:y:${id}` }, { text: "❌ Нет", callback_data: `ol:n:${id}` }]] });
-    const { error: markErr } = await supabaseAdmin.from("coach_messages_sent").insert({ user_id: user.id, kind: `onl_q:${id}`, ref_date: date });
+    const { error: markErr } = await supabaseAdmin.from("online_check_answers").insert({ demand_id: id, ref_date: date });
     if (markErr) throw markErr;
   }
   return { asked: todo.length, checks };
