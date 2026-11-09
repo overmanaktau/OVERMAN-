@@ -3,7 +3,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { dailyMessage, weekMessage } from "@/lib/coach/messages";
 import { addDays, buildAdvice, dayStats, employeeDayPlans, loadEmployeeDays, monthStatus, weekSummary, type EmployeeRef } from "@/lib/coach/metrics";
-import { NO_CONVERSION_EMPLOYEE_IDS, pct2 } from "@/lib/reports/sales";
+import { pct2 } from "@/lib/reports/sales";
 
 // Трафик города по дням (счётчик на входе) — знаменатель конверсии: чеки сотрудника ÷ трафик города за его смены.
 async function cityTraffic(store: string, from: string, to: string): Promise<Map<string, number>> {
@@ -14,9 +14,8 @@ async function cityTraffic(store: string, from: string, to: string): Promise<Map
   return map;
 }
 
-// У «Болат Наргиза» конверсию не показываем (решение владельца); нет трафика — так и пишем.
-function conversionText(employeeId: string, receipts: number, traffic: number): string | null {
-  if (NO_CONVERSION_EMPLOYEE_IDS.has(employeeId)) return null;
+// Конверсия сотрудника: чеки ÷ трафик; нет трафика — так и пишем.
+function conversionText(receipts: number, traffic: number): string {
   return traffic > 0 ? pct2((receipts / traffic) * 100) : "нет трафика";
 }
 
@@ -28,7 +27,7 @@ export async function buildDailyText(emp: EmployeeRef, today: string): Promise<s
   const s = await monthStatus(emp, today);
   const traffic = (await cityTraffic(emp.store, yesterday, yesterday)).get(yesterday) ?? 0;
   const dayPlan = (await employeeDayPlans(emp, yesterday, yesterday).catch(() => []))[0]?.plan ?? null;
-  return dailyMessage(emp, yesterday, day, s, buildAdvice(s), conversionText(emp.id, day.receipts, traffic), dayPlan);
+  return dailyMessage(emp, yesterday, day, s, buildAdvice(s), conversionText(day.receipts, traffic), dayPlan);
 }
 
 // Понедельничное сообщение: цель на новую неделю и итоги прошлой.
@@ -38,7 +37,6 @@ export async function buildWeeklyText(emp: EmployeeRef, today: string): Promise<
   const shifts = (await loadEmployeeDays(emp.id, w.lastWeek.from, w.lastWeek.to)).filter((d) => d.receipts > 0 || d.revenue > 0);
   const trafficByDay = await cityTraffic(emp.store, w.lastWeek.from, w.lastWeek.to);
   const weekConv = conversionText(
-    emp.id,
     shifts.reduce((a, d) => a + d.receipts, 0),
     shifts.reduce((a, d) => a + (trafficByDay.get(d.date) ?? 0), 0)
   );

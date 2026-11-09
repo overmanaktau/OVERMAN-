@@ -7,8 +7,8 @@ export const CITIES: Record<CityKey, { title: string; ig: string; ad: string; st
   aktobe: { title: "Актобе", ig: "17841446559692743", ad: "act_182042481376645", store: "overman_aktobe" },
 };
 
-// Онлайн-продавец (чеки с её именем — онлайн-продажи), только Актау.
-export const ONLINE_SELLER = { ms_id: "4d408fda-490d-11f1-0a80-1a3e0018b649", name: "Болат Наргиза", city: "aktau" as CityKey };
+// Онлайн-продажи ведутся только в Актау; чек считается онлайн по комментарию «онлайн» (lib/onlineSales.ts).
+export const ONLINE_CITY: CityKey = "aktau";
 
 export type SmmRole = "smm_aktau" | "smm_aktobe" | "marketer" | "admin";
 export const SMM_ROLES: SmmRole[] = ["smm_aktau", "smm_aktobe", "marketer", "admin"];

@@ -363,9 +363,6 @@ async function freshEmployeeNames(): Promise<Map<string, string>> {
   }
 }
 
-// Сотрудники, у которых в отчётах не показываем конверсию и трафик (решение владельца 2026-10-08).
-export const NO_CONVERSION_EMPLOYEE_IDS = new Set(["4d408fda-490d-11f1-0a80-1a3e0018b649"]); // Болат Наргиза
-
 // Для недели и месяца (from < to) метка «бигчек» не ставится — отчёт за период
 // только суммирует сотрудников.
 async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, withBigCheck = true): Promise<string> {
@@ -429,7 +426,6 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
       const shiftTraffic = [...e.shiftDays].reduce((acc, k) => acc + (trafficByDay.get(k) ?? 0), 0);
       // в скобках — трафик за дни смен сотрудника
       const conversion = shiftTraffic > 0 ? `${pct2((e.receipts / shiftTraffic) * 100)} (${num(Math.round(shiftTraffic))})` : "нет трафика";
-      const hide = NO_CONVERSION_EMPLOYEE_IDS.has(id);
       if (from === to) {
         // Дневной отчёт: короткие подписи (чек, тов, ср.ч — средний чек, гл.ч — глубина чека, конв. — конверсия),
         // трафик в скобке не показываем. В недельном и месячном подписи те же, но трафик в скобке остаётся.
@@ -437,13 +433,13 @@ async function buildEmployeeBlock(scope: ReportScope, from: string, to: string, 
         return (
           `${i + 1}. ${shortName(e.name)}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
           `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
-          (hide ? "" : `\n   конв. ${dayConv}`)
+          `\n   конв. ${dayConv}`
         );
       }
       return (
         `${i + 1}. ${shortName(e.name)}${mark}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
         `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
-        (hide ? "" : `\n   конв. ${conversion}`)
+        `\n   конв. ${conversion}`
       );
     });
   const body = lines.join("\n\n"); // между сотрудниками одна пустая строка
@@ -803,7 +799,7 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
     const avgCheck = e.receipts > 0 ? money(e.revenue / e.receipts) : "—";
     const depth = e.receipts > 0 ? trim2((e.items / e.receipts)) : "—";
     const worked = e.receipts > 0 || e.revenue > 0;
-    const showConv = traffic && worked && !NO_CONVERSION_EMPLOYEE_IDS.has(id);
+    const showConv = traffic && worked;
     return (
       `${i + 1}. ${shortName(e.name)}\n   ${money(e.revenue)} · ${num(e.receipts)} чек · ${num(e.items)} тов` +
       `\n   ср.ч ${avgCheck} · гл.ч ${depth}` +
@@ -882,7 +878,7 @@ export async function buildEveningReport(scope: ReportScope, date: string): Prom
   const people = [...byPerson.entries()].filter(([, e]) => e.receipts > 0).sort((a, b) => b[1].receipts - a[1].receipts);
   const empLines = people.map(([id, e], i) => {
     const conv = traffic ? (visitors > 0 ? pct2((e.receipts / visitors) * 100) : "нет трафика") : "нет данных";
-    return `${i + 1}. ${shortName(e.name)}\n   ${num(e.receipts)} чек` + (NO_CONVERSION_EMPLOYEE_IDS.has(id) ? "" : `\n   конв. ${conv}`);
+    return `${i + 1}. ${shortName(e.name)}\n   ${num(e.receipts)} чек` + `\n   конв. ${conv}`;
   });
   const employees = people.length === 0 ? "<i>вечером продаж не было</i>" : pre(empLines.join("\n\n"));
   return packSections([title, section("ВЕЧЕРНЯЯ КОНВЕРСИЯ", body), section("ПО СОТРУДНИКАМ", employees)]);

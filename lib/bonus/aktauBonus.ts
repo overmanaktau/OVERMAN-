@@ -2,8 +2,8 @@
 //  1) командный бонус — общая касса Актау за день: средний чек ≥ 34 000 ₸ и конверсия ≥ 21% → 1 000 ₸ каждому, кто был на смене;
 //     средний чек ≥ 36 000 ₸ и конверсия ≥ 23% → 2 500 ₸ (вместо 1 000). Нужны оба показателя;
 //  2) личный бонус за чек: чек ≥ 60 000 ₸ → 1 000 ₸, чек ≥ 100 000 ₸ → 2 500 ₸ (вместо 1 000) тому, кто его пробил; за день бонусов может быть несколько.
-// Онлайн-продажи определяются по комментарию к чеку («онлайн»): в бонусах не участвуют (ни в среднем чеке и конверсии, ни в личных).
-// На смене — тот, у кого за день есть хотя бы один (не онлайн) чек в Актау. Возвращённые целиком чеки не считаются.
+// Онлайн-продажи входят во все продажи (владелец 09.11.2026): считаются как обычные чеки, отдельно не выделяются.
+// На смене — тот, у кого за день есть хотя бы один чек в Актау. Возвращённые целиком чеки не считаются.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchRetailDemandsForDate, fetchRetailSalesReturnsForDate, type RetailDemand, type RetailSalesReturn } from "@/lib/moysklad";
 import { aggregateSales } from "@/lib/salesAggregate";
@@ -28,26 +28,6 @@ const ru = (ymd: string) => ymd.split("-").reverse().join(".");
 const dm = (ymd: string) => `${ymd.slice(8, 10)}.${ymd.slice(5, 7)}`;
 const rub = (n: number) => `${trim2Ru(n)} ₸`;
 
-function lev(a: string, b: string): number {
-  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
-  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-  return dp[a.length][b.length];
-}
-
-// «Онлайн» в комментарии: yes — слово начинается на «онл»/«onl»; maybe — похоже с опечаткой («онлаин», «анлайн», «он лайн»); hint — признаки доставки/соцсетей без слова «онлайн» (не считаем, но показываем Нуржану).
-export type OnlineKind = "yes" | "maybe" | "hint" | "no";
-export function detectOnline(description: string | undefined): OnlineKind {
-  const text = (description ?? "").toLowerCase();
-  if (!text.trim()) return "no";
-  const tokens = text.split(/[^a-zа-яёәіңғүұқөһ]+/i).filter(Boolean);
-  const cand = [...tokens, ...tokens.slice(0, -1).map((t, i) => t + tokens[i + 1])];
-  if (cand.some((t) => t.startsWith("онл") || t.startsWith("onl"))) return "yes";
-  if (cand.some((t) => t.length >= 4 && (lev(t, "онлайн") <= 2 || lev(t, "online") <= 2 || lev(t, "оnлайн") <= 2))) return "maybe";
-  if (/доставк|ауданы|инстаграм|instagram|директ|direct|whatsapp|ватсап|вотсап|интернет|сайт/i.test(text)) return "hint";
-  return "no";
-}
-
 type CheckLine = { number: string; owner: string; amount: number; bonus: number };
 export type AktauBonusDay = {
   date: string;
@@ -59,8 +39,6 @@ export type AktauBonusDay = {
   teamBonus: number; // за человека
   shift: string[];
   perPerson: { name: string; total: number; checks: CheckLine[] }[];
-  online: { number: string; owner: string; amount: number; comment: string; kind: OnlineKind }[];
-  hints: { number: string; owner: string; amount: number; comment: string }[];
 };
 
 const isAktau = (d: { retailStore?: { id?: string } | null }, date: string) => {
@@ -70,27 +48,10 @@ const isAktau = (d: { retailStore?: { id?: string } | null }, date: string) => {
 
 export async function computeAktauBonus(date: string): Promise<AktauBonusDay> {
   const [allDemands, allReturns] = await Promise.all([fetchRetailDemandsForDate(date), fetchRetailSalesReturnsForDate(date)]);
-  const demands = allDemands.filter((d) => isAktau(d, date));
-  const returns = allReturns.filter((r) => isAktau(r, date));
+  const store: RetailDemand[] = allDemands.filter((d) => isAktau(d, date));
+  const storeReturns: RetailSalesReturn[] = allReturns.filter((r) => isAktau(r, date));
 
-  const online: AktauBonusDay["online"] = [];
-  const hints: AktauBonusDay["hints"] = [];
-  const onlineHrefs = new Set<string>();
-  const store: RetailDemand[] = [];
-  for (const d of demands) {
-    const kind = detectOnline(d.description);
-    const line = { number: d.name ?? "—", owner: d.owner?.name ?? "—", amount: (d.sum ?? 0) / 100, comment: (d.description ?? "").trim() };
-    if (kind === "yes" || kind === "maybe") {
-      online.push({ ...line, kind });
-      if (d.meta?.href) onlineHrefs.add(d.meta.href);
-      continue;
-    }
-    if (kind === "hint") hints.push(line);
-    store.push(d);
-  }
-  const storeReturns = returns.filter((r: RetailSalesReturn) => !(r.demand?.meta?.href && onlineHrefs.has(r.demand.meta.href)));
-
-  // общая касса Актау без онлайна — те же правила возвратов и аннулирования, что в отчётах
+  // общая касса Актау — те же правила возвратов и аннулирования, что в отчётах
   const agg = await aggregateSales(date, store, storeReturns);
   let revenue = 0;
   let receipts = 0;
@@ -129,7 +90,7 @@ export async function computeAktauBonus(date: string): Promise<AktauBonusDay> {
   }
   const perPerson = [...people.values()].map((p) => ({ ...p, checks: p.checks.sort((a, b) => b.amount - a.amount) })).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "ru"));
 
-  return { date, revenue, receipts, avgCheck, visitors, conversion, teamBonus: tier?.bonus ?? 0, shift, perPerson, online, hints };
+  return { date, revenue, receipts, avgCheck, visitors, conversion, teamBonus: tier?.bonus ?? 0, shift, perPerson };
 }
 
 export function buildBonusMessage(b: AktauBonusDay): string {
@@ -159,14 +120,6 @@ export function buildBonusMessage(b: AktauBonusDay): string {
     }
     lines.push("");
     lines.push(`Всего за чеки: ${rub(b.perPerson.reduce((a, p) => a + p.total, 0))}`);
-  }
-  if (b.online.length > 0) {
-    lines.push("", "Онлайн-чеки (в бонусах не участвуют):");
-    for (const o of b.online) lines.push(`• чек ${escapeHtml(o.number)} · ${escapeHtml(o.owner)} · ${rub(o.amount)} · «${escapeHtml(o.comment)}»${o.kind === "maybe" ? " ⚠️ похоже на «онлайн», проверьте" : ""}`);
-  }
-  if (b.hints.length > 0) {
-    lines.push("", "⚠️ Возможно онлайн, но слова «онлайн» нет — посчитаны как обычные, проверьте:");
-    for (const h of b.hints) lines.push(`• чек ${escapeHtml(h.number)} · ${escapeHtml(h.owner)} · ${rub(h.amount)} · «${escapeHtml(h.comment)}»`);
   }
   return lines.join("\n");
 }

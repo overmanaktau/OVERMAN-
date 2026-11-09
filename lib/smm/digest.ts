@@ -3,7 +3,7 @@
 //  4) расход на рекламу за вчера (маркетолог и администратор). Повторный запуск не шлёт то, что уже ушло (журнал smm_messages_sent).
 import { todayInAlmaty } from "@/lib/coach/metrics";
 import { addDaysYmd } from "@/lib/dayPlan";
-import { ONLINE_SELLER, citiesOf, seesSpend } from "@/lib/smm/config";
+import { ONLINE_CITY, citiesOf, seesSpend } from "@/lib/smm/config";
 import { sendCategories, sendStories } from "@/lib/smm/flows";
 import { spendText } from "@/lib/smm/reports";
 import { syncStories } from "@/lib/smm/stories";
@@ -43,7 +43,7 @@ export async function runMorning(t: Transport, opts: { only?: SmmUser[]; force?:
     };
     for (const city of citiesOf(u.role)) {
       await step(`cat-${city}`, () => sendCategories(t, u.telegram_chat_id, city, p, "all"));
-      if (city === ONLINE_SELLER.city) await step("online", () => sendCategories(t, u.telegram_chat_id, city, p, "online", false, true));
+      if (city === ONLINE_CITY) await step("online", () => sendCategories(t, u.telegram_chat_id, city, p, "online", false, true));
       await step(`stories-${city}`, () => sendStories(t, u.telegram_chat_id, city, p));
     }
     if (seesSpend(u.role)) await step("spend", async () => void (await t.send(u.telegram_chat_id, await spendText(p))));
