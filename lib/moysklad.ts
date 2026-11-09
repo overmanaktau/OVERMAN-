@@ -90,6 +90,7 @@ export function totalCostKopecks(rows: PositionRow[] | undefined): number {
 export type RetailDemand = {
   id?: string;
   name?: string; // номер чека в МойСклад
+  description?: string; // комментарий к чеку (продавцы пишут «онлайн» у онлайн-продаж)
   meta?: { href?: string };
   moment: string; // "2026-09-21 14:32:00.000"
   sum: number; // total in kopecks

@@ -8,6 +8,7 @@ import { refOf, type CoachUser } from "@/lib/coach/handler";
 import { buildDailyText, buildWeeklyText } from "@/lib/coach/notifyBuild";
 import { PLAN_ASK_MARKUP, PLAN_ASK_TEXT } from "@/lib/coach/planview";
 import { addDays, todayInAlmaty } from "@/lib/coach/metrics";
+import { sendAktauBonusToNurzhan } from "@/lib/bonus/aktauBonus";
 
 export const maxDuration = 60;
 
@@ -82,6 +83,12 @@ async function handle(request: Request) {
       } catch (e) {
         results.push({ user: user.employee_name, kind: "расчёт", action: `ошибка: ${getErrorMessage(e)}` });
       }
+    }
+
+    // Нуржану — бонусы по Актау за вчера (командный и за чеки); один раз в день, при сбое владельцу уходит отдельное сообщение
+    if (!dry && !onlyUser) {
+      const bonus = await sendAktauBonusToNurzhan(yesterday).catch((e) => ({ sent: false, reason: `ошибка: ${getErrorMessage(e)}` }));
+      results.push({ user: "Картбаев Нуржан", kind: "бонусы Актау", action: bonus.sent ? "отправлено" : `не отправлено: ${bonus.reason ?? ""}` });
     }
 
     return NextResponse.json({ ok: true, dry, today, isMonday, users: (data ?? []).length, results });
