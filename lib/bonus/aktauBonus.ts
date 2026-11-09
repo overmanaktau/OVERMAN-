@@ -2,11 +2,12 @@
 //  1) командный бонус — общая касса Актау за день: средний чек ≥ 34 000 ₸ и конверсия ≥ 21% → 1 000 ₸ каждому, кто был на смене;
 //     средний чек ≥ 36 000 ₸ и конверсия ≥ 23% → 2 500 ₸ (вместо 1 000). Нужны оба показателя;
 //  2) личный бонус за чек: чек ≥ 60 000 ₸ → 1 000 ₸, чек ≥ 100 000 ₸ → 2 500 ₸ (вместо 1 000) тому, кто его пробил; за день бонусов может быть несколько.
-// Онлайн-продажи входят во все продажи (владелец 09.11.2026): считаются как обычные чеки, отдельно не выделяются.
+// Онлайн-продажи (комментарий «онлайн», lib/onlineSales.ts) считаются как обычные чеки во всех расчётах и дополнительно показываются отдельным блоком (владелец 09.11.2026).
 // На смене — тот, у кого за день есть хотя бы один чек в Актау. Возвращённые целиком чеки не считаются.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchRetailDemandsForDate, fetchRetailSalesReturnsForDate, type RetailDemand, type RetailSalesReturn } from "@/lib/moysklad";
 import { aggregateSales } from "@/lib/salesAggregate";
+import { isOnlineComment } from "@/lib/onlineSales";
 import { REGISTER_STORE, registerCounts } from "@/lib/registers";
 import { escapeHtml } from "@/lib/telegram";
 import { telegramTransport } from "@/lib/coach/bot";
@@ -39,6 +40,7 @@ export type AktauBonusDay = {
   teamBonus: number; // за человека
   shift: string[];
   perPerson: { name: string; total: number; checks: CheckLine[] }[];
+  online: { number: string; owner: string; amount: number; comment: string }[]; // уже входят в расчёт выше, показываются отдельно
 };
 
 const isAktau = (d: { retailStore?: { id?: string } | null }, date: string) => {
@@ -90,7 +92,11 @@ export async function computeAktauBonus(date: string): Promise<AktauBonusDay> {
   }
   const perPerson = [...people.values()].map((p) => ({ ...p, checks: p.checks.sort((a, b) => b.amount - a.amount) })).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "ru"));
 
-  return { date, revenue, receipts, avgCheck, visitors, conversion, teamBonus: tier?.bonus ?? 0, shift, perPerson };
+  const online = store
+    .filter((d) => isOnlineComment(d.description))
+    .map((d) => ({ number: d.name ?? "—", owner: d.owner?.name ?? "—", amount: (d.sum ?? 0) / 100, comment: (d.description ?? "").trim() }));
+
+  return { date, revenue, receipts, avgCheck, visitors, conversion, teamBonus: tier?.bonus ?? 0, shift, perPerson, online };
 }
 
 export function buildBonusMessage(b: AktauBonusDay): string {
@@ -120,6 +126,10 @@ export function buildBonusMessage(b: AktauBonusDay): string {
     }
     lines.push("");
     lines.push(`Всего за чеки: ${rub(b.perPerson.reduce((a, p) => a + p.total, 0))}`);
+  }
+  if (b.online.length > 0) {
+    lines.push("", `Из них онлайн: ${b.online.length} шт. на ${rub(b.online.reduce((a, o) => a + o.amount, 0))} (входят в расчёт выше)`);
+    for (const o of b.online) lines.push(`• чек ${escapeHtml(o.number)} · ${escapeHtml(o.owner)} · ${rub(o.amount)} · «${escapeHtml(o.comment)}»`);
   }
   return lines.join("\n");
 }
