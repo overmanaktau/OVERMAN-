@@ -25,6 +25,7 @@ const CHECK_TIERS = [
 ];
 
 const ru = (ymd: string) => ymd.split("-").reverse().join(".");
+const dm = (ymd: string) => `${ymd.slice(8, 10)}.${ymd.slice(5, 7)}`;
 const rub = (n: number) => `${trim2Ru(n)} ₸`;
 
 function lev(a: string, b: string): number {
@@ -132,7 +133,7 @@ export async function computeAktauBonus(date: string): Promise<AktauBonusDay> {
 }
 
 export function buildBonusMessage(b: AktauBonusDay): string {
-  const lines: string[] = [`🎯 <b>Бонусы за ${ru(b.date)} · Актау</b>`, ""];
+  const lines: string[] = [`🎯 <b>Бонусы за ${dm(b.date)} · Актау</b>`, ""];
   const base = TEAM_TIERS[TEAM_TIERS.length - 1];
   if (b.avgCheck === null || b.conversion === null) {
     lines.push("Командный бонус: не посчитан");
@@ -140,11 +141,11 @@ export function buildBonusMessage(b: AktauBonusDay): string {
   } else if (b.teamBonus > 0) {
     const t = TEAM_TIERS.find((x) => x.bonus === b.teamBonus) ?? base;
     lines.push(`Командный бонус: ${rub(b.teamBonus)} каждому на смене ✅`);
-    lines.push(`Средний чек ${rub(b.avgCheck)} (от ${trim2Ru(t.avg)} ✅) · Конверсия ${trim2(b.conversion, ",")}% (от ${t.conv}% ✅)`);
+    lines.push(`Средний чек ${rub(Math.round(b.avgCheck))} (от ${trim2Ru(t.avg)} ✅) · Конверсия ${trim2(b.conversion, ",")}% (от ${t.conv}% ✅)`);
     lines.push(`На смене: ${escapeHtml(b.shift.join(", "))} (${b.shift.length} чел.) — ${rub(b.teamBonus * b.shift.length)}`);
   } else {
     lines.push("Командный бонус: нет");
-    lines.push(`Средний чек ${rub(b.avgCheck)} — нужно от ${trim2Ru(base.avg)} ${b.avgCheck >= base.avg ? "✅" : "❌"}`);
+    lines.push(`Средний чек ${rub(Math.round(b.avgCheck))} — нужно от ${trim2Ru(base.avg)} ${b.avgCheck >= base.avg ? "✅" : "❌"}`);
     lines.push(`Конверсия ${trim2(b.conversion, ",")}% — нужно от ${base.conv}% ${b.conversion >= base.conv ? "✅" : "❌"}`);
   }
   lines.push("");
