@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/requireAdmin";
 import { getErrorMessage } from "@/lib/errors";
 import { fetchDailyTraffic } from "@/lib/trafficCounters";
 import { yesterdayInAlmaty } from "@/lib/reports/sales";
+import { autoFillMarketing, notifyFilled } from "@/lib/marketing/autoFill";
 
 export const maxDuration = 60;
 
@@ -68,7 +69,20 @@ async function handle(request: Request) {
       results.push({ ...base, action: existing ? "обновлён пустой факт" : "создана строка" });
     }
 
-    return NextResponse.json({ ok: true, dry, days, results });
+    // Ночью по расписанию (и в повторах) заодно вносим вчерашний расход в «Внесение данных» (Instagram по расходу Meta × курс МиГ, 2ГИС Актау);
+    // сбой здесь не мешает загрузке трафика — владельцу о нём приходит отдельное сообщение.
+    let marketing: unknown = null;
+    if (isCron && !dry) {
+      const date = yesterdayInAlmaty();
+      marketing = await autoFillMarketing(date)
+        .then(async (r) => {
+          if (r.rate) await notifyFilled(date, r.rate, r.results);
+          return r;
+        })
+        .catch((e) => ({ error: getErrorMessage(e) }));
+    }
+
+    return NextResponse.json({ ok: true, dry, days, results, marketing });
   } catch (e) {
     return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
   }
