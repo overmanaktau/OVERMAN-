@@ -10,6 +10,7 @@ import { TEST_EMPLOYEE_ID, TEST_LABEL, expireTestUser, isTestExpired } from "@/l
 import { handleVerifyCallback } from "@/lib/verify/botActions";
 import { handleCompareCallback, handleCompareInput, sendCompareStart } from "@/lib/coach/compareReport";
 import { handleEditRequestCallback } from "@/lib/editRequests";
+import { handleOnlineCallback } from "@/lib/onlineCheck";
 import { handleSmmOwnerCallback } from "@/lib/smm/approvals";
 import { handlePlanCallback, sendPlanMenu } from "@/lib/coach/planview";
 import { handleExpiryCallback } from "@/lib/kassa/expiryRequests";
@@ -470,6 +471,14 @@ async function handleCallback(cb: NonNullable<TgUpdate["callback_query"]>, t: Tr
     if (!existing || existing.status !== "approved" || !existing.is_protected) return;
     await clearCurrent();
     await t.send(chatId, await handleEditRequestCallback(cb.data, existing.employee_name));
+    return;
+  }
+
+  if (cb.data.startsWith("ol:")) {
+    // Вопрос «Это онлайн-продажа?» по чеку Актау — администратор Актау или главный владелец.
+    if (!existing || existing.status !== "approved" || existing.is_test || !(existing.is_admin || existing.is_protected)) return;
+    await clearCurrent();
+    await t.send(chatId, await handleOnlineCallback(cb.data, existing.id));
     return;
   }
 

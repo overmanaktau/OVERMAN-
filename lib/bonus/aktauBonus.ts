@@ -2,12 +2,12 @@
 //  1) командный бонус — общая касса Актау за день: средний чек ≥ 34 000 ₸ и конверсия ≥ 21% → 1 000 ₸ каждому, кто был на смене;
 //     средний чек ≥ 36 000 ₸ и конверсия ≥ 23% → 2 500 ₸ (вместо 1 000). Нужны оба показателя;
 //  2) личный бонус за чек: чек ≥ 60 000 ₸ → 1 000 ₸, чек ≥ 100 000 ₸ → 2 500 ₸ (вместо 1 000) тому, кто его пробил; за день бонусов может быть несколько.
-// Онлайн-продажи (комментарий «онлайн», lib/onlineSales.ts) считаются как обычные чеки во всех расчётах и дополнительно показываются отдельным блоком (владелец 09.11.2026).
+// Онлайн-продажи (комментарий «онлайн», lib/onlineSales.ts; сомнительные подтверждает Нуржан кнопкой, lib/onlineCheck.ts) считаются как обычные чеки во всех расчётах и дополнительно показываются отдельным блоком (владелец 09.11.2026).
 // На смене — тот, у кого за день есть хотя бы один чек в Актау. Возвращённые целиком чеки не считаются.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchRetailDemandsForDate, fetchRetailSalesReturnsForDate, type RetailDemand, type RetailSalesReturn } from "@/lib/moysklad";
 import { aggregateSales } from "@/lib/salesAggregate";
-import { isOnlineComment } from "@/lib/onlineSales";
+import { onlineOnly } from "@/lib/onlineCheck";
 import { REGISTER_STORE, registerCounts } from "@/lib/registers";
 import { escapeHtml } from "@/lib/telegram";
 import { telegramTransport } from "@/lib/coach/bot";
@@ -92,8 +92,7 @@ export async function computeAktauBonus(date: string): Promise<AktauBonusDay> {
   }
   const perPerson = [...people.values()].map((p) => ({ ...p, checks: p.checks.sort((a, b) => b.amount - a.amount) })).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "ru"));
 
-  const online = store
-    .filter((d) => isOnlineComment(d.description))
+  const online = (await onlineOnly(store))
     .map((d) => ({ number: d.name ?? "—", owner: d.owner?.name ?? "—", amount: (d.sum ?? 0) / 100, comment: (d.description ?? "").trim() }));
 
   return { date, revenue, receipts, avgCheck, visitors, conversion, teamBonus: tier?.bonus ?? 0, shift, perPerson, online };

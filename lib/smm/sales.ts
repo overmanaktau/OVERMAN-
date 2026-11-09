@@ -3,7 +3,7 @@ import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { fetchOnlineCandidateDemands } from "@/lib/moysklad";
 import { REGISTER_STORE } from "@/lib/registers";
-import { isOnlineComment } from "@/lib/onlineSales";
+import { onlineOnly } from "@/lib/onlineCheck";
 import { CITIES, type CityKey } from "@/lib/smm/config";
 import { periodLabel, type Period } from "@/lib/smm/periods";
 import { escapeHtml } from "@/lib/telegram";
@@ -34,7 +34,7 @@ export async function categoryProducts(city: CityKey, p: Period, categories: str
 type OnlineItem = { productId: string; name: string; qty: number; revenue: number };
 
 async function onlineItems(p: Period): Promise<{ checks: number; items: OnlineItem[] }> {
-  const demands = (await fetchOnlineCandidateDemands(p.from, p.to)).filter((d) => REGISTER_STORE[d.retailStore?.id ?? ""] === "point_1" && isOnlineComment(d.description));
+  const demands = await onlineOnly((await fetchOnlineCandidateDemands(p.from, p.to)).filter((d) => REGISTER_STORE[d.retailStore?.id ?? ""] === "point_1"));
   const byProduct = new Map<string, OnlineItem>();
   for (const d of demands) {
     for (const pos of ((d.positions as { rows?: any[] } | undefined)?.rows ?? []) as any[]) {

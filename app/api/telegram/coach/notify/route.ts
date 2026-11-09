@@ -9,6 +9,7 @@ import { buildDailyText, buildWeeklyText } from "@/lib/coach/notifyBuild";
 import { PLAN_ASK_MARKUP, PLAN_ASK_TEXT } from "@/lib/coach/planview";
 import { addDays, todayInAlmaty } from "@/lib/coach/metrics";
 import { sendAktauBonusToNurzhan } from "@/lib/bonus/aktauBonus";
+import { askOnlineQuestions } from "@/lib/onlineCheck";
 
 export const maxDuration = 60;
 
@@ -89,6 +90,9 @@ async function handle(request: Request) {
     if (!dry && !onlyUser) {
       const bonus = await sendAktauBonusToNurzhan(yesterday).catch((e) => ({ sent: false, reason: `ошибка: ${getErrorMessage(e)}` }));
       results.push({ user: "Картбаев Нуржан", kind: "бонусы Актау", action: bonus.sent ? "отправлено" : `не отправлено: ${bonus.reason ?? ""}` });
+      // и вопросы «Это онлайн?» по чекам, где комментарий похож на онлайн, но не уверенно
+      const asked = await askOnlineQuestions(yesterday).catch((e) => ({ asked: 0, checks: [], reason: `ошибка: ${getErrorMessage(e)}` }));
+      if (asked.asked > 0 || asked.reason) results.push({ user: "Картбаев Нуржан", kind: "вопросы про онлайн", action: asked.reason ?? `задано: ${asked.asked}` });
     }
 
     return NextResponse.json({ ok: true, dry, today, isMonday, users: (data ?? []).length, results });

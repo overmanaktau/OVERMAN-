@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getErrorMessage } from "@/lib/errors";
 import { yesterdayInAlmaty } from "@/lib/reports/sales";
 import { buildBonusMessage, computeAktauBonus, sendAktauBonusToNurzhan } from "@/lib/bonus/aktauBonus";
+import { askOnlineQuestions } from "@/lib/onlineCheck";
 
 export const maxDuration = 60;
 
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
   try {
     if (url.searchParams.get("dry") === "1") {
       const day = await computeAktauBonus(date);
-      return NextResponse.json({ ok: true, dry: true, day, text: buildBonusMessage(day) });
+      return NextResponse.json({ ok: true, dry: true, day, text: buildBonusMessage(day), questions: (await askOnlineQuestions(date, true)).checks });
     }
     return NextResponse.json({ ok: true, ...(await sendAktauBonusToNurzhan(date)) });
   } catch (e) {
