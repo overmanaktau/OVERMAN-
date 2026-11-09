@@ -32,11 +32,6 @@ export type CitySellers = {
   updatedAt: string; // ISO
 };
 
-// Продавцы, которых на странице не показываем (владелец): ни в таблице, ни в плане и итогах команды.
-const HIDDEN = new Set([
-  "a8605fa5-c2fe-11f1-0a80-02920050bab4", // Бекберген Бердібек
-]);
-
 type Acc = { name: string; turnover: number; week: number; today: number; receipts: number; items: number };
 
 export async function citySellers(store: string): Promise<CitySellers> {
@@ -49,7 +44,6 @@ export async function citySellers(store: string): Promise<CitySellers> {
 
   const people = new Map<string, Acc>();
   const get = (id: string, name: string) => {
-    if (HIDDEN.has(id)) return { name, turnover: 0, week: 0, today: 0, receipts: 0, items: 0 }; // не сохраняем
     const p = people.get(id) ?? { name, turnover: 0, week: 0, today: 0, receipts: 0, items: 0 };
     if (name) p.name = name;
     people.set(id, p);
@@ -93,7 +87,6 @@ export async function citySellers(store: string): Promise<CitySellers> {
   if (planErr) throw planErr;
   const plans = new Map<string, number | null>();
   for (const r of (planRows ?? []) as { employee_ms_id: string; employee_name: string; sales_plan: number | null }[]) {
-    if (HIDDEN.has(r.employee_ms_id)) continue;
     plans.set(r.employee_ms_id, r.sales_plan === null ? null : Number(r.sales_plan));
     if (!people.has(r.employee_ms_id)) get(r.employee_ms_id, r.employee_name);
   }
