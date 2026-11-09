@@ -31,6 +31,7 @@ export const SECTIONS = [
   { key: "warehouse.suppliers", label: "Склад: По поставщикам", group: "warehouse", hasEdit: false },
 
   { key: "marketing.statistics", label: "Статистика (+ Обзор, Продажа)", group: "marketing", hasEdit: false },
+  { key: "sellers.list", label: "Продавцы по городам (/seller)", group: "marketing", hasEdit: false },
   { key: "marketing.data_entry", label: "Внесение данных", group: "marketing", hasEdit: true },
   { key: "sales.plan", label: "Внесение плана продаж (раздел Продажа)", group: "marketing", hasEdit: true },
   { key: "marketing.publications", label: "Публикации", group: "marketing", hasEdit: true },

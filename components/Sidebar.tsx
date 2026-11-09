@@ -158,6 +158,7 @@ export default function Sidebar() {
   const canSeeRequests = isAdmin || permissions["requests"].canView || permissions["requests"].canEdit;
   const canSeeSales = isAdmin || permissions["marketing.statistics"].canView;
   const canSeeOverview = isAdmin || permissions["marketing.statistics"].canView;
+  const canSeeSellers = isAdmin || permissions["sellers.list"].canView;
 
   // RLS on edit_requests already scopes this to "my own requests" or "every
   // pending request" depending on whether the viewer has requests.view/edit —
@@ -278,6 +279,17 @@ export default function Sidebar() {
               }`}
             >
               Продажа
+            </GuardedLink>
+          )}
+          {canSeeSellers && (
+            <GuardedLink
+              href="/seller"
+              onNavigate={closeMobile}
+              className={`block px-3 py-2.5 rounded-lg text-sm font-semibold ${
+                pathname === "/seller" ? "bg-accent text-paper" : "text-sidebarText hover:text-sidebarText"
+              }`}
+            >
+              Продавцы
             </GuardedLink>
           )}
         </div>
