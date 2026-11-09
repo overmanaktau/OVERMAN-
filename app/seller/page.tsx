@@ -158,8 +158,7 @@ export default function SellerPage() {
     <div
       className={`${nunito.className} fixed inset-0 overflow-auto`}
       style={{
-        background:
-          "linear-gradient(160deg,#fffbe0 0%,#f6f8cf 55%,#eef5c4 100%)",
+        background: "#ffffff",
         color: INK,
       }}
     >
@@ -168,7 +167,7 @@ export default function SellerPage() {
           <form
             onSubmit={signIn}
             className="max-w-sm mx-auto mt-[12vh] rounded-[28px] p-7 flex flex-col gap-4"
-            style={{ background: "rgba(255,255,255,0.8)" }}
+            style={{ background: "#fff", border: "1px solid rgba(38,26,82,0.1)" }}
           >
             <h1 className="text-[26px] font-black leading-tight">
               Продавцы: кто как идёт
@@ -291,14 +290,18 @@ export default function SellerPage() {
                 label="Средний чек"
                 value={d.team.avgCheck === null ? "—" : money(d.team.avgCheck)}
               />
+              <Tile
+                label="Глубина чека"
+                value={d.team.depth === null ? "—" : trim2Ru(d.team.depth)}
+              />
             </div>
 
             <div
               className="rounded-[28px] p-4 sm:p-6"
-              style={{ background: "rgba(255,255,255,0.7)" }}
+              style={{ background: "#fff", border: "1px solid rgba(38,26,82,0.1)" }}
             >
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[900px]">
+                <table className="w-full text-sm min-w-[980px]">
                   <thead>
                     <tr
                       className="text-left text-xs font-extrabold"
@@ -312,9 +315,10 @@ export default function SellerPage() {
                       <th className="px-3 py-2 text-right">Ставка</th>
                       <th className="px-3 py-2 text-right">Бонус сейчас</th>
                       <th className="px-3 py-2 text-right">Прогноз %</th>
-                      <th className="px-3 py-2 text-right">Сегодня</th>
-                      <th className="px-3 py-2 text-right">Неделя</th>
+                      <th className="px-3 py-2 text-right" title="Оборот за сегодняшний день с учётом возвратов">Сегодня</th>
+                      <th className="px-3 py-2 text-right" title="Оборот с понедельника по сегодня с учётом возвратов">Неделя</th>
                       <th className="px-3 py-2 text-right">Чеки</th>
+                      <th className="px-3 py-2 text-right" title="Сколько товаров в среднем в одном чеке за месяц">Глубина чека</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -391,12 +395,15 @@ export default function SellerPage() {
                         <td className="px-3 py-3.5 text-right font-extrabold">
                           {trim2Ru(r.receipts)}
                         </td>
+                        <td className="px-3 py-3.5 text-right font-extrabold">
+                          {r.depth === null ? "—" : trim2Ru(r.depth)}
+                        </td>
                       </tr>
                     ))}
                     {d.rows.length === 0 && (
                       <tr>
                         <td
-                          colSpan={11}
+                          colSpan={12}
                           className="px-3 py-8 text-center font-extrabold"
                           style={{ color: LABEL }}
                         >
@@ -417,7 +424,24 @@ export default function SellerPage() {
                 Нет продаж в этом месяце: {d.noSales.join(", ")}
               </p>
             )}
-            <p className="text-xs font-bold mt-1.5" style={{ color: LABEL }}>
+            <div
+              className="rounded-[22px] px-5 py-4 mt-4 text-sm font-bold leading-relaxed"
+              style={{ background: "rgba(38,26,82,0.05)", color: INK }}
+            >
+              <p>
+                <span className="font-black">Сегодня</span> — оборот за сегодняшний день с учётом возвратов.
+              </p>
+              <p>
+                <span className="font-black">Неделя</span> — оборот с понедельника по сегодня с учётом возвратов.
+              </p>
+              <p>
+                <span className="font-black">Чеки</span> — сколько чеков пробито с начала месяца.
+              </p>
+              <p>
+                <span className="font-black">Глубина чека</span> — сколько товаров в среднем в одном чеке за месяц.
+              </p>
+            </div>
+            <p className="text-xs font-bold mt-3" style={{ color: LABEL }}>
               Данные с учётом возвратов. Бонус сейчас = оборот × ставка
               (выполнение 0–85% — 2%, 86–90% — 2,5%, 91–99% — 3%, от 100% — 4%).
               Прогноз — по текущему темпу на дни месяца. Обновлено в{" "}

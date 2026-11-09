@@ -18,6 +18,7 @@ export type SellerRow = {
   today: number;
   week: number;
   receipts: number;
+  depth: number | null; // глубина чека: товаров в чеке в среднем за месяц
 };
 
 export type CitySellers = {
@@ -25,13 +26,13 @@ export type CitySellers = {
   date: string; // сегодня (Алматы)
   day: number; // какой день месяца
   daysInMonth: number;
-  team: { turnover: number; plan: number; fulfillment: number | null; forecast: number; forecastPct: number | null; today: number; week: number; receipts: number; avgCheck: number | null };
+  team: { turnover: number; plan: number; fulfillment: number | null; forecast: number; forecastPct: number | null; today: number; week: number; receipts: number; avgCheck: number | null; depth: number | null };
   rows: SellerRow[];
   noSales: string[]; // есть в плане или в таблице, но продаж в этом месяце нет
   updatedAt: string; // ISO
 };
 
-type Acc = { name: string; turnover: number; week: number; today: number; receipts: number };
+type Acc = { name: string; turnover: number; week: number; today: number; receipts: number; items: number };
 
 export async function citySellers(store: string): Promise<CitySellers> {
   const today = todayInAlmaty();
@@ -43,7 +44,7 @@ export async function citySellers(store: string): Promise<CitySellers> {
 
   const people = new Map<string, Acc>();
   const get = (id: string, name: string) => {
-    const p = people.get(id) ?? { name, turnover: 0, week: 0, today: 0, receipts: 0 };
+    const p = people.get(id) ?? { name, turnover: 0, week: 0, today: 0, receipts: 0, items: 0 };
     if (name) p.name = name;
     people.set(id, p);
     return p;
@@ -53,16 +54,17 @@ export async function citySellers(store: string): Promise<CitySellers> {
   if (yesterday >= monthStart) {
     const { data, error } = await supabaseAdmin
       .from("moysklad_employee_sales_daily")
-      .select("employee_ms_id, employee_name, sale_date, revenue, receipts_count")
+      .select("employee_ms_id, employee_name, sale_date, revenue, receipts_count, items_count")
       .eq("store", store)
       .gte("sale_date", monthStart)
       .lte("sale_date", yesterday);
     if (error) throw error;
-    for (const r of (data ?? []) as { employee_ms_id: string; employee_name: string; sale_date: string; revenue: number; receipts_count: number }[]) {
+    for (const r of (data ?? []) as { employee_ms_id: string; employee_name: string; sale_date: string; revenue: number; receipts_count: number; items_count: number }[]) {
       const p = get(r.employee_ms_id, r.employee_name);
       const rev = Number(r.revenue) || 0;
       p.turnover += rev;
       p.receipts += Number(r.receipts_count) || 0;
+      p.items += Number(r.items_count) || 0;
       if (r.sale_date >= weekStart) p.week += rev;
     }
   }
@@ -77,6 +79,7 @@ export async function citySellers(store: string): Promise<CitySellers> {
     p.today += a.revenue;
     p.week += a.revenue;
     p.receipts += a.receipts;
+    p.items += a.items;
   }
 
   // личные планы месяца
@@ -111,6 +114,7 @@ export async function citySellers(store: string): Promise<CitySellers> {
       today: p.today,
       week: p.week,
       receipts: p.receipts,
+      depth: p.receipts > 0 ? p.items / p.receipts : null,
     });
   }
   rows.sort((a, b) => b.turnover - a.turnover || a.name.localeCompare(b.name, "ru"));
@@ -120,6 +124,7 @@ export async function citySellers(store: string): Promise<CitySellers> {
   const teamPlan = [...plans.values()].reduce<number>((a, v) => a + (v ?? 0), 0);
   const turnover = rows.reduce((a, r) => a + r.turnover, 0);
   const receipts = rows.reduce((a, r) => a + r.receipts, 0);
+  const items = [...people.values()].filter((p) => p.turnover > 0 || p.receipts > 0).reduce((a, p) => a + p.items, 0);
   return {
     store,
     date: today,
@@ -135,6 +140,7 @@ export async function citySellers(store: string): Promise<CitySellers> {
       week: rows.reduce((a, r) => a + r.week, 0),
       receipts,
       avgCheck: receipts > 0 ? turnover / receipts : null,
+      depth: receipts > 0 ? items / receipts : null,
     },
     rows,
     noSales,
