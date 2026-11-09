@@ -54,7 +54,6 @@ export default function SellerPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [needLogin, setNeedLogin] = useState(false);
-  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [signingIn, setSigningIn] = useState(false);
   const token = useRef(""); // пропуск только в памяти страницы: после обновления страницы пароль спрашивается снова
@@ -93,7 +92,7 @@ export default function SellerPage() {
       const res = await fetch("/api/sellers/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ login, password }),
+        body: JSON.stringify({ password }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `Ошибка входа (${res.status})`);
@@ -130,16 +129,15 @@ export default function SellerPage() {
           <form onSubmit={signIn} className="max-w-sm mx-auto mt-[12vh] rounded-[28px] p-7 flex flex-col gap-4" style={{ background: PANEL }}>
             <h1 className="text-[26px] font-black leading-tight">Продавцы: кто как идёт</h1>
             <p className="text-sm font-extrabold" style={{ color: LABEL }}>
-              Введите логин и пароль. Пароль спрашивается при каждом открытии и обновлении страницы.
+              Введите пароль. Он спрашивается при каждом открытии и обновлении страницы.
             </p>
-            <input className={field} style={{ background: TILE, color: INK }} placeholder="Логин" autoComplete="username" autoCapitalize="none" value={login} onChange={(e) => setLogin(e.target.value)} />
-            <input className={field} style={{ background: TILE, color: INK }} placeholder="Пароль" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <input className={field} style={{ background: TILE, color: INK }} placeholder="Пароль" type="password" autoFocus autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             {error && (
               <p className="text-sm font-extrabold" style={{ color: "#ff5c7a" }}>
                 {error}
               </p>
             )}
-            <button type="submit" disabled={signingIn || !login || !password} className="rounded-full py-3 text-base font-black text-white disabled:opacity-50" style={{ background: "#6d3df5" }}>
+            <button type="submit" disabled={signingIn || !password} className="rounded-full py-3 text-base font-black text-white disabled:opacity-50" style={{ background: "#6d3df5" }}>
               {signingIn ? "Вхожу…" : "Войти"}
             </button>
           </form>

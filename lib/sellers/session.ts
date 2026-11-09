@@ -1,5 +1,5 @@
-// Вход на /seller по своему логину и паролю, без входа в портал (решение владельца 09.11.2026).
-// Логин и хэш пароля — в таблице seller_access (миграция 122). После входа страница получает подписанный пропуск и держит его только в памяти:
+// Вход на /seller только по паролю, без входа в портал (решение владельца 09.11.2026).
+// Хэш пароля — в таблице seller_access (миграция 122; логин там просто метка строки). После входа страница получает подписанный пропуск и держит его только в памяти:
 // обновили страницу или открыли заново — пароль спрашивается снова (решение владельца 09.11.2026). Пропуск живёт 12 часов, чтобы открытая вкладка не вылетала.
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -35,15 +35,17 @@ export function hashPassword(password: string): string {
   return `scrypt$${salt}$${scryptSync(password, salt, 32).toString("hex")}`;
 }
 
-export async function checkPassword(login: string, password: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.from("seller_access").select("password_hash").eq("login", login.trim().toLowerCase()).maybeSingle();
+// Вход только по паролю (решение владельца 09.11.2026): пароль сверяется с хэшами в seller_access, логин в форме не нужен.
+export async function checkPassword(password: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.from("seller_access").select("password_hash");
   if (error) throw error;
-  const [kind, salt, hash] = ((data?.password_hash as string | undefined) ?? "").split("$");
-  if (kind !== "scrypt" || !salt || !hash) {
-    scryptSync(password, "00", 32); // тот же расход времени, если такого логина нет
-    return false;
+  let ok = false;
+  for (const row of (data ?? []) as { password_hash: string }[]) {
+    const [kind, salt, hash] = row.password_hash.split("$");
+    if (kind !== "scrypt" || !salt || !hash) continue;
+    const given = scryptSync(password, salt, 32);
+    const good = Buffer.from(hash, "hex");
+    if (good.length === given.length && timingSafeEqual(good, given)) ok = true;
   }
-  const given = scryptSync(password, salt, 32);
-  const good = Buffer.from(hash, "hex");
-  return good.length === given.length && timingSafeEqual(good, given);
+  return ok;
 }
