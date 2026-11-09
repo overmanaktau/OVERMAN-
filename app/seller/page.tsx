@@ -124,7 +124,7 @@ export default function SellerPage() {
 
   return (
     <div className={`${nunito.className} fixed inset-0 overflow-auto`} style={{ background: "#ffffff", color: INK }}>
-      <div className="max-w-6xl mx-auto p-3 sm:p-6">
+      <div className="max-w-7xl mx-auto p-2 xl:p-6">
         {needLogin && (
           <form onSubmit={signIn} className="max-w-sm mx-auto mt-[12vh] rounded-[28px] p-7 flex flex-col gap-4" style={{ background: PANEL }}>
             <h1 className="text-[26px] font-black leading-tight">Продавцы: кто как идёт</h1>
@@ -192,28 +192,28 @@ export default function SellerPage() {
               </p>
             </div>
 
-            <div className="rounded-[32px] p-4 sm:p-6 mt-4" style={{ background: PANEL }}>
+            <div className="rounded-[32px] p-3 xl:p-6 mt-4" style={{ background: PANEL }}>
               <h1 className="text-[24px] sm:text-[28px] font-black leading-tight mb-3">Продавцы: кто как идёт</h1>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[980px]">
+                <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs font-extrabold" style={{ color: LABEL }}>
-                      <th className="px-3 py-2 w-8">#</th>
-                      <th className="px-3 py-2">Продавец</th>
-                      <th className="px-3 py-2 text-right">Оборот</th>
-                      <th className="px-3 py-2 text-right">План</th>
-                      <th className="px-3 py-2 min-w-[190px]">Выполнение</th>
-                      <th className="px-3 py-2 text-right">Ставка</th>
-                      <th className="px-3 py-2 text-right">Бонус сейчас</th>
-                      <th className="px-3 py-2 text-right">Прогноз %</th>
-                      <th className="px-3 py-2 text-right" title="Оборот по факту за сегодняшний день, с учётом возвратов">
+                      <th className="whitespace-nowrap px-1 py-2 w-8">#</th>
+                      <th className="whitespace-nowrap px-1 py-2">Продавец</th>
+                      <th className="whitespace-nowrap px-1 py-2 text-right">Оборот</th>
+                      <th className="whitespace-nowrap px-1 py-2 text-right">План</th>
+                      <th className="whitespace-nowrap px-1 py-2 min-w-[140px]">Выполнение</th>
+                      <th className="whitespace-nowrap px-1 py-2 text-right">Ставка</th>
+                      <th className="whitespace-nowrap px-1 py-2 text-right">Бонус сейчас</th>
+                      <th className="whitespace-nowrap px-1 py-2 text-right">Прогноз %</th>
+                      <th className="whitespace-nowrap px-1 py-2 text-right" title="Оборот по факту за сегодняшний день, с учётом возвратов">
                         Сегодня
                       </th>
-                      <th className="px-3 py-2 text-right" title="Оборот по факту с понедельника по сегодня, с учётом возвратов">
+                      <th className="whitespace-nowrap px-1 py-2 text-right" title="Оборот по факту с понедельника по сегодня, с учётом возвратов">
                         Неделя
                       </th>
-                      <th className="px-3 py-2 text-right">Чеки</th>
-                      <th className="px-3 py-2 text-right" title="Сколько товаров в среднем в одном чеке за месяц">
+                      <th className="whitespace-nowrap px-1 py-2 text-right">Чеки</th>
+                      <th className="whitespace-nowrap px-1 py-2 text-right" title="Сколько товаров в среднем в одном чеке за месяц">
                         Глубина чека
                       </th>
                     </tr>
@@ -221,20 +221,20 @@ export default function SellerPage() {
                   <tbody>
                     {d.rows.map((r, i) => (
                       <tr key={r.id} style={{ borderTop: "1px solid rgba(38,26,82,0.08)" }}>
-                        <td className="px-3 py-3.5 font-extrabold" style={{ color: LABEL }}>
+                        <td className="px-1 py-3.5 font-extrabold" style={{ color: LABEL }}>
                           {i + 1}
                         </td>
-                        <td className="px-3 py-3.5 font-black text-[15px] whitespace-nowrap">{r.name}</td>
-                        <td className="px-3 py-3.5 text-right whitespace-nowrap font-extrabold">{money(r.turnover)}</td>
-                        <td className="px-3 py-3.5 text-right whitespace-nowrap font-bold" style={{ color: LABEL }}>
+                        <td className="px-1 py-3.5 font-black text-[15px] whitespace-nowrap">{r.name}</td>
+                        <td className="px-1 py-3.5 text-right whitespace-nowrap font-extrabold">{money(r.turnover)}</td>
+                        <td className="px-1 py-3.5 text-right whitespace-nowrap font-bold" style={{ color: LABEL }}>
                           {r.plan === null ? "—" : money(r.plan)}
                         </td>
-                        <td className="px-3 py-3.5">
+                        <td className="px-1 py-3.5">
                           {r.fulfillment === null ? (
                             <span style={{ color: LABEL }}>—</span>
                           ) : (
-                            <div className="flex items-center gap-3">
-                              <span className="text-sm font-black w-[72px] shrink-0" style={{ color: statusColor(r.fulfillment) }}>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-black w-[60px] shrink-0" style={{ color: statusColor(r.fulfillment) }}>
                                 {pct(r.fulfillment)}
                               </span>
                               <div className="h-3 flex-1 rounded-full min-w-[70px] overflow-hidden" style={{ background: "#ddd8ee" }}>
@@ -243,15 +243,15 @@ export default function SellerPage() {
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-3.5 text-right font-extrabold">{r.rate === null ? "—" : pct(r.rate)}</td>
-                        <td className="px-3 py-3.5 text-right whitespace-nowrap font-black text-[15px]">{r.bonus === null ? "—" : money(r.bonus)}</td>
-                        <td className="px-3 py-3.5 text-right font-black" style={{ color: statusColor(r.forecastPct) }}>
+                        <td className="px-1 py-3.5 text-right font-extrabold">{r.rate === null ? "—" : pct(r.rate)}</td>
+                        <td className="px-1 py-3.5 text-right whitespace-nowrap font-black text-[15px]">{r.bonus === null ? "—" : money(r.bonus)}</td>
+                        <td className="px-1 py-3.5 text-right font-black" style={{ color: statusColor(r.forecastPct) }}>
                           {r.forecastPct === null ? "—" : pct(r.forecastPct)}
                         </td>
-                        <td className="px-3 py-3.5 text-right whitespace-nowrap font-bold">{money(r.today)}</td>
-                        <td className="px-3 py-3.5 text-right whitespace-nowrap font-bold">{money(r.week)}</td>
-                        <td className="px-3 py-3.5 text-right font-extrabold">{trim2Ru(r.receipts)}</td>
-                        <td className="px-3 py-3.5 text-right font-extrabold">{r.depth === null ? "—" : trim2Ru(r.depth)}</td>
+                        <td className="px-1 py-3.5 text-right whitespace-nowrap font-bold">{money(r.today)}</td>
+                        <td className="px-1 py-3.5 text-right whitespace-nowrap font-bold">{money(r.week)}</td>
+                        <td className="px-1 py-3.5 text-right font-extrabold">{trim2Ru(r.receipts)}</td>
+                        <td className="px-1 py-3.5 text-right font-extrabold">{r.depth === null ? "—" : trim2Ru(r.depth)}</td>
                       </tr>
                     ))}
                     {d.rows.length === 0 && (
