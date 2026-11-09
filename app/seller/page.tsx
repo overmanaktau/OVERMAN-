@@ -208,10 +208,10 @@ export default function SellerPage() {
                       <th className="px-3 py-2 text-right">Ставка</th>
                       <th className="px-3 py-2 text-right">Бонус сейчас</th>
                       <th className="px-3 py-2 text-right">Прогноз %</th>
-                      <th className="px-3 py-2 text-right" title="Оборот за сегодняшний день с учётом возвратов">
+                      <th className="px-3 py-2 text-right" title="Оборот по факту за сегодняшний день, с учётом возвратов">
                         Сегодня
                       </th>
-                      <th className="px-3 py-2 text-right" title="Оборот с понедельника по сегодня с учётом возвратов">
+                      <th className="px-3 py-2 text-right" title="Оборот по факту с понедельника по сегодня, с учётом возвратов">
                         Неделя
                       </th>
                       <th className="px-3 py-2 text-right">Чеки</th>
@@ -273,7 +273,7 @@ export default function SellerPage() {
               )}
               <div className="text-xs font-bold mt-3 leading-relaxed" style={{ color: LABEL }}>
                 <p>
-                  <span className="font-black">Сегодня</span> — оборот за сегодняшний день. <span className="font-black">Неделя</span> — оборот с понедельника по сегодня. Оба с учётом возвратов.
+                  <span className="font-black">Сегодня</span> и <span className="font-black">Неделя</span> — оборот по факту: за сегодняшний день и с понедельника по сегодня. Оба с учётом возвратов.
                 </p>
                 <p>
                   <span className="font-black">Чеки</span> — сколько чеков пробито с начала месяца. <span className="font-black">Глубина чека</span> — сколько товаров в среднем в одном чеке за месяц.
