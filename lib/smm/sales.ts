@@ -1,7 +1,9 @@
 // Продажи по категориям для бота СММ: общие продажи города (из таблицы продаж по товарам) и онлайн-продажи (чеки Актау из МойСклад с отметкой «онлайн» в комментарии).
 import { trim2 } from "@/lib/numFormat";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { fetchOnlineCandidateDemands } from "@/lib/moysklad";
+import { fetchOnlineCandidateDemands, fetchProfitByProductForDate } from "@/lib/moysklad";
+import { WAREHOUSE_STORE } from "@/lib/warehouses";
+import { addDays, todayInAlmaty } from "@/lib/coach/metrics";
 import { REGISTER_STORE } from "@/lib/registers";
 import { onlineOnly } from "@/lib/onlineCheck";
 import { CITIES, type CityKey } from "@/lib/smm/config";
@@ -14,19 +16,70 @@ export type SalesSource = "all" | "online";
 
 export type CategoryReport = { rows: CategoryRow[]; totalQty: number; totalRevenue: number; checks?: number };
 
+// Таблица продаж по товарам пополняется ночью за вчера, сегодняшнего дня в ней нет. Поэтому, если период доходит до сегодня, сегодняшние продажи берём прямо из МойСклад
+// тем же отчётом «Прибыль по товарам», что и ночное обновление (по складу города), а прошлые дни — из таблицы. Так «Сегодня» показывает продажи в реальном времени.
+type LiveRow = { productId: string; name: string; qty: number; revenue: number; category: string };
+
+async function liveToday(city: CityKey): Promise<LiveRow[]> {
+  const warehouseId = Object.keys(WAREHOUSE_STORE).find((id) => WAREHOUSE_STORE[id] === CITIES[city].store);
+  if (!warehouseId) return [];
+  const rows = (await fetchProfitByProductForDate(todayInAlmaty(), warehouseId)).filter((r) => r.quantity !== 0);
+  const cat = await topCategories(rows.map((r) => r.productMsId));
+  return rows.map((r) => ({ productId: r.productMsId, name: r.name, qty: r.quantity, revenue: r.revenue, category: cat.get(r.productMsId) ?? "Без категории" }));
+}
+
+// Период для таблицы: без сегодняшнего дня (его добавляет liveToday). null — в таблице искать нечего.
+function storedPeriod(p: Period): Period | null {
+  const today = todayInAlmaty();
+  if (p.to < today) return p;
+  const to = addDays(today, -1);
+  return p.from <= to ? { from: p.from, to } : null;
+}
+
 export async function categorySales(city: CityKey, p: Period): Promise<CategoryReport> {
-  const { data, error } = await supabaseAdmin.rpc("smm_category_sales", { p_store: CITIES[city].store, p_from: p.from, p_to: p.to });
-  if (error) throw error;
-  const rows = ((data ?? []) as { category: string; qty: number | string; revenue: number | string }[]).map((r) => ({ category: r.category, qty: Number(r.qty), revenue: Number(r.revenue) })).filter((r) => r.qty > 0);
+  const stored = storedPeriod(p);
+  const by = new Map<string, CategoryRow>();
+  const add = (category: string, qty: number, revenue: number) => {
+    const c = by.get(category) ?? { category, qty: 0, revenue: 0 };
+    c.qty += qty;
+    c.revenue += revenue;
+    by.set(category, c);
+  };
+  if (stored) {
+    const { data, error } = await supabaseAdmin.rpc("smm_category_sales", { p_store: CITIES[city].store, p_from: stored.from, p_to: stored.to });
+    if (error) throw error;
+    for (const r of (data ?? []) as { category: string; qty: number | string; revenue: number | string }[]) add(r.category, Number(r.qty), Number(r.revenue));
+  }
+  if (p.to >= todayInAlmaty() && p.from <= todayInAlmaty()) for (const r of await liveToday(city)) add(r.category, r.qty, r.revenue);
+  const rows = [...by.values()].filter((r) => r.qty > 0).sort((a, b) => b.qty - a.qty);
   return { rows, totalQty: rows.reduce((a, r) => a + r.qty, 0), totalRevenue: rows.reduce((a, r) => a + r.revenue, 0) };
 }
 
 export async function categoryProducts(city: CityKey, p: Period, categories: string[]): Promise<ProductRow[]> {
-  const { data, error } = await supabaseAdmin.rpc("smm_category_products", { p_store: CITIES[city].store, p_from: p.from, p_to: p.to, p_categories: categories });
-  if (error) throw error;
-  return ((data ?? []) as { category: string; product_name: string; qty: number | string; revenue: number | string }[])
-    .map((r) => ({ category: r.category, name: r.product_name, qty: Number(r.qty), revenue: Number(r.revenue) }))
-    .filter((r) => r.qty > 0);
+  const stored = storedPeriod(p);
+  const rows: ProductRow[] = [];
+  const byName = new Map<string, ProductRow>(); // категория|название → строка: сегодняшние продажи дописываются к строке товара из таблицы
+  const add = (category: string, name: string, qty: number, revenue: number, merge: boolean) => {
+    const key = `${category}|${name}`;
+    const r = merge ? byName.get(key) : undefined;
+    if (r) {
+      r.qty += qty;
+      r.revenue += revenue;
+      return;
+    }
+    const row = { category, name, qty, revenue };
+    rows.push(row);
+    if (!byName.has(key)) byName.set(key, row);
+  };
+  if (stored) {
+    const { data, error } = await supabaseAdmin.rpc("smm_category_products", { p_store: CITIES[city].store, p_from: stored.from, p_to: stored.to, p_categories: categories });
+    if (error) throw error;
+    for (const r of (data ?? []) as { category: string; product_name: string; qty: number | string; revenue: number | string }[]) add(r.category, r.product_name, Number(r.qty), Number(r.revenue), false);
+  }
+  if (p.to >= todayInAlmaty() && p.from <= todayInAlmaty()) {
+    for (const r of await liveToday(city)) if (categories.includes(r.category)) add(r.category, r.name, r.qty, r.revenue, true);
+  }
+  return rows.filter((r) => r.qty > 0).sort((a, b) => a.category.localeCompare(b.category, "ru") || b.qty - a.qty);
 }
 
 // ---- онлайн-продажи (чеки Актау с отметкой «онлайн» в комментарии) ----
