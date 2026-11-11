@@ -19,8 +19,8 @@ const TIMETABLE_FILTER = "false";
 
 // Сколько процентов «вошло» вычитается по точке. Актау: счётчик у входа
 // считает и тех, кто зашёл не за покупкой (сотрудники и т.п.), — по решению
-// владельца в трафик идёт «вошло» минус 5%. Актобе — по факту.
-const DEDUCT_PERCENT: Record<string, number> = { point_1: 5, point_3: 0 };
+// владельца в трафик идёт «вошло» минус 5%. Актобе — минус 3% (решение владельца 11.11.2026, «со следующего раза»: уже внесённое не пересчитываем).
+const DEDUCT_PERCENT: Record<string, number> = { point_1: 5, point_3: 3 };
 
 function orgKey(): string {
   const key = process.env.GSMCOUNTERS_ORG_KEY;
