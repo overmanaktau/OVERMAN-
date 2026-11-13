@@ -611,7 +611,7 @@ export default function SalesPage() {
     }));
     const empGroups = visibleEmployeeGroups.map((g) => ({
       label: g.label,
-      rows: g.rows.map((x) => ({ id: `${x.employeeId}|${x.store ?? ""}`, name: x.name, agg: x as SalesAgg })),
+      rows: g.rows.map((x, i) => ({ id: `${x.employeeId}|${x.store ?? ""}`, name: `${i + 1}. ${x.name}`, agg: x as SalesAgg })),
     }));
     const out = [build("По кассам — сравнение периодов", "Касса", regGroups, prevReg)];
     if (empGroups.some((g) => g.rows.length > 0)) out.push(build("По сотрудникам — сравнение периодов", "Сотрудник", empGroups, prevEmp));
@@ -951,9 +951,9 @@ export default function SalesPage() {
               empRows.push([`Город: ${g.label}`, "", "", "", "", "", "", "", ""]);
               empKinds.push("group");
               empPick.push(`Город «${g.label}» — строка-заголовок`);
-              for (const x of g.rows) {
+              for (const [i, x] of g.rows.entries()) {
                 const d = displayed(x);
-                empRows.push([x.name, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), conversionLabel(d.receipts, x.shiftTraffic), costText(x.cost), profitText(d.revenue, x.cost)]);
+                empRows.push([`${i + 1}. ${x.name}`, money(d.revenue), d.receipts, d.items, avg(d.revenue, d.receipts), depth(d.items, d.receipts), conversionLabel(d.receipts, x.shiftTraffic), costText(x.cost), profitText(d.revenue, x.cost)]);
                 empKinds.push("normal");
                 empPick.push(`Сотрудник ${x.name} (город ${g.label})`);
               }
@@ -1348,9 +1348,9 @@ export default function SalesPage() {
               return (
                 <div key={group.store ?? "none"} className="flex flex-col gap-2">
                   <div className="text-[11px] uppercase tracking-wide text-mutedLight">{group.label}</div>
-                  {group.rows.map((r) => (
+                  {group.rows.map((r, i) => (
                     <div key={`${r.employeeId}|${r.store ?? ""}`} className="flex flex-col gap-1 rounded-lg border border-borderSoft p-3 text-[13px]">
-                      <div className="font-semibold">{r.name}</div>
+                      <div className="font-semibold">{i + 1}. {r.name}</div>
                       <SalesField
                         label="Оборот"
                         value={money(displayed(r).revenue)}
@@ -1455,7 +1455,7 @@ export default function SalesPage() {
                   <div className="min-w-[880px] pt-2.5 pb-1 text-[10.5px] uppercase tracking-wide text-mutedLight">
                     {group.label}
                   </div>
-                  {group.rows.map((r) => {
+                  {group.rows.map((r, i) => {
                     const d = displayed(r);
                     const avgCheck = d.receipts > 0 ? d.revenue / d.receipts : 0;
                     const checkDepth = d.receipts > 0 ? d.items / d.receipts : 0;
@@ -1464,7 +1464,7 @@ export default function SalesPage() {
                         key={`${r.employeeId}|${r.store ?? ""}`}
                         className="min-w-[880px] grid grid-cols-[1.2fr_1fr_0.55fr_0.8fr_0.9fr_0.7fr_0.8fr] gap-3 py-2.5 border-b border-borderSoft items-center text-[13px]"
                       >
-                        <div className="font-semibold">{r.name}</div>
+                        <div className="font-semibold">{i + 1}. {r.name}</div>
                         <div className="num">
                           {money(d.revenue)}
                           {!showGross && r.returnedAmount > 0 && (

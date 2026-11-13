@@ -814,7 +814,8 @@ export async function buildIntradayReport(scope: ReportScope, date: string, unti
     const rl = [`Всего: ${returnSummary(retAmount, retReceipts, retItems)}`];
     if (retTotal > 0) rl.push("", line("Наличные", money(retCash / 100)), line("Безнал", money((retTotal - retCash) / 100)));
     if (withReturns.length > 0) rl.push("");
-    for (const [, e] of withReturns) rl.push(`${shortName(e.name)}\n   ${returnSummary(e.retAmount, e.retReceipts, e.retItems)}`);
+    // номер — место сотрудника в списке продаж выше, чтобы везде один и тот же номер у одного продавца
+    for (const entry of withReturns) rl.push(`${people.indexOf(entry) + 1}. ${shortName(entry[1].name)}\n   ${returnSummary(entry[1].retAmount, entry[1].retReceipts, entry[1].retItems)}`);
     returnsBlock = pre(rl.join("\n"));
   }
 
