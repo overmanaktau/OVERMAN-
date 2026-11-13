@@ -531,9 +531,9 @@ async function employeePlanRows(store: string, from: string, to: string): Promis
 }
 
 function employeePlanLines(rows: EmpPlanRow[]): string[] {
-  const lines = [`${"№ сотрудник".padEnd(14)}${"план".padStart(10)}${"факт".padStart(10)}${"%".padStart(6)}`];
+  const lines = [`${"№ сотрудник".padEnd(14)}${"план".padStart(10)}${"факт".padStart(10)}${"%".padStart(8)}`];
   for (const [i, r] of rows.entries()) {
-    lines.push(`${`${i + 1}.`.padEnd(3)}${shortName(r.name).slice(0, 11).padEnd(11)}${num(r.plan).padStart(10)}${(r.planPast > 0 || r.fact > 0 ? num(r.fact) : "—").padStart(10)}${(r.planPast > 0 ? pctText(r.fact, r.planPast) : "").padStart(6)}`);
+    lines.push(`${`${i + 1}.`.padEnd(3)}${shortName(r.name).slice(0, 11).padEnd(11)}${num(r.plan).padStart(10)}${(r.planPast > 0 || r.fact > 0 ? num(r.fact) : "—").padStart(10)}${(r.planPast > 0 ? pctText(r.fact, r.planPast) : "").padStart(8)}`);
     if (r.addOn > 0) lines.push(`  + недобор ${money(r.addOn)} (всего ${money(r.plan + r.addOn)})`);
     else if (r.addOn < 0) lines.push(`  − опережение ${money(-r.addOn)} (всего ${money(r.plan + r.addOn)})`);
   }
@@ -541,7 +541,7 @@ function employeePlanLines(rows: EmpPlanRow[]): string[] {
   const addOn = rows.reduce((a, r) => a + r.addOn, 0);
   const planPast = rows.reduce((a, r) => a + r.planPast, 0);
   const fact = rows.reduce((a, r) => a + r.fact, 0);
-  lines.push("─".repeat(40), `Итого план ${money(plan)}`);
+  lines.push("─".repeat(42), `Итого план ${money(plan)}`);
   if (addOn > 0) lines.push(`+ недобор ${money(addOn)} (всего ${money(plan + addOn)})`);
   else if (addOn < 0) lines.push(`− опережение ${money(-addOn)} (всего ${money(plan + addOn)})`);
   if (planPast > 0) lines.push(`Факт ${money(fact)}`, `Выполнение ${pctText(fact, planPast)}`);
