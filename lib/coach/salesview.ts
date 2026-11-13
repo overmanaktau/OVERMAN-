@@ -532,7 +532,7 @@ async function employeePlanRows(store: string, from: string, to: string): Promis
 }
 
 function employeePlanLines(rows: EmpPlanRow[]): string[] {
-  const lines = [`${"№ сотрудник".padEnd(14)}${"план".padStart(10)}${"факт".padStart(10)}${"%".padStart(8)}`];
+  const lines = [`${"сотрудник".padEnd(14)}${"план".padStart(10)}${"факт".padStart(10)}${"%".padStart(8)}`];
   for (const [i, r] of rows.entries()) {
     lines.push(`${`${i + 1}.`.padEnd(3)}${shortName(r.name).slice(0, 11).padEnd(11)}${num(r.plan).padStart(10)}${(r.planPast > 0 || r.fact > 0 ? num(r.fact) : "—").padStart(10)}${(r.planPast > 0 ? pctText(r.fact, r.planPast) : "").padStart(8)}`);
     if (r.addOn > 0) lines.push(`  + недобор ${money(r.addOn)} (всего ${money(r.plan + r.addOn)})`);

@@ -8,6 +8,7 @@ import { fetchAuditAll, fetchAuditEvents, fetchAuditRecords, fetchEmployeeLogins
 import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { escapeHtml } from "@/lib/telegram";
 import { shortName } from "@/lib/reports/sales";
+import { describeChange, type DiffCtx } from "@/lib/verify/diffText";
 
 const MAX_DAYS_PER_RUN = 25;
 
@@ -16,6 +17,32 @@ function almatyToday(): string {
 }
 const msStamp = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
 const dm = (ymd: string) => `${ymd.slice(8, 10)}.${ymd.slice(5, 7)}`;
+
+// Подписи полей и имена людей для понятного текста правок (lib/verify/diffText.ts); логин в журнале → имя сотрудника
+export const diffCtx = (logins: Map<string, string>): DiffCtx => ({
+  label: (k) => FIELD_RU[k] ?? k,
+  person: (l) => shortName(logins.get(String(l ?? "")) ?? String(l ?? "")) || "—",
+});
+
+// Сообщение владельцу блоками правок: что не помещается в одно сообщение Телеграма, продолжается в следующем; показываем до 60 правок за раз
+async function notifyOwnerBlocks(head: string, entries: string[], foot = ""): Promise<void> {
+  const MAX = 3500;
+  const LIMIT = 60;
+  let cur = head;
+  let hasBody = false;
+  for (const e of entries.slice(0, LIMIT)) {
+    const block = `• ${escapeHtml(e)}`;
+    if (hasBody && cur.length + block.length + 1 > MAX) {
+      await notifyOwner(cur);
+      cur = "<i>продолжение</i>";
+      hasBody = false;
+    }
+    cur += `\n${block}`;
+    hasBody = true;
+  }
+  if (entries.length > LIMIT) cur += `\n… и ещё ${entries.length - LIMIT}`;
+  await notifyOwner(`${cur}${foot}`);
+}
 
 export type ChangesSummary = {
   since: string;
@@ -47,6 +74,7 @@ export async function checkMsChanges(opts: { origin: string; secret: string; sin
   const all: AuditRecord[] = every.filter((r) => r.entityType === "retaildemand" || r.entityType === "retailsalesreturn");
   const meaningful = all.filter((r) => !(r.eventType === "create" && r.source === "posapi")); // обычные продажи с кассы — не правка
   const logins = await fetchEmployeeLogins().catch(() => new Map<string, string>());
+  const ctx = diffCtx(logins);
 
   // 2. Что именно поменялось (по каждой записи)
   const rows: Record<string, unknown>[] = [];
@@ -73,13 +101,9 @@ export async function checkMsChanges(opts: { origin: string; secret: string; sin
         applied_at: e.docDate && e.docDate >= today ? new Date().toISOString() : null,
       });
       if (e.docDate && e.docDate < today) {
-        const who = logins.get(rec.uid) ?? rec.uid;
-        const kind = rec.entityType === "retailsalesreturn" ? "возврат" : "чек";
-        let what = rec.eventType === "delete" ? "удалён" : rec.eventType === "create" ? "создан вручную" : "изменён";
-        const owner = e.diff?.owner;
-        if (owner) what = `ответственный ${shortName(logins.get(String(owner.oldValue)) ?? String(owner.oldValue ?? "—"))} → ${shortName(logins.get(String(owner.newValue)) ?? String(owner.newValue ?? "—"))}`;
-        else if (e.diff) what = `изменено: ${Object.keys(e.diff).join(", ")}`;
-        lines.push(`${kind} №${e.name} от ${dm(e.docDate)}: ${what} (${shortName(who)})`);
+        lines.push(
+          describeChange({ kind: rec.entityType === "retailsalesreturn" ? "возврат" : "чек", name: e.name, docDate: e.docDate, info: e.info, eventType: rec.eventType, who: shortName(logins.get(rec.uid) ?? rec.uid), atMs: rec.moment, diff: e.diff }, ctx)
+        );
       }
     }
   }
@@ -113,11 +137,9 @@ export async function checkMsChanges(opts: { origin: string; secret: string; sin
   const last = every.reduce((m, r) => (r.moment > m ? r.moment : m), since);
   if (apply) await supabaseAdmin.from("moysklad_sync_state").update({ audit_cursor: last }).eq("id", true);
   if (opts.notify !== false && apply && (lines.length > 0 || failed.length > 0)) {
-    const shown = lines.slice(0, 15).map((l) => `• ${escapeHtml(l)}`).join("\n");
-    const more = lines.length > 15 ? `\n… и ещё ${lines.length - 15}` : "";
     const done = resynced.length > 0 ? `\n\nПерсчитано дней в портале и отчётах: ${resynced.length} (${resynced.map(dm).join(", ")}).` : "";
     const bad = failed.length > 0 ? `\n⚠️ Не удалось пересчитать: ${escapeHtml(failed.join("; "))}` : "";
-    await notifyOwner(`🔄 <b>Изменения в МойСклад</b> (чеки и возвраты задним числом)\n${shown}${more}${done}${bad}`);
+    await notifyOwnerBlocks("🔄 <b>Изменения в МойСклад</b> (чеки и возвраты задним числом)", lines, `${done}${bad}`);
   }
   return { since, records: meaningful.length, events, affectedDays, resynced, failed, pendingLeft: Math.max(0, affectedDays.length - resynced.length - failed.length), lines };
 }
@@ -134,7 +156,6 @@ export const ENTITY_RU: Record<string, string> = {
 };
 const NOISE_EVENTS = new Set(["print", "sendemailfromentity", "loginlogout", "export", "import", "sendtobooks", "download"]);
 const NOISE_ENTITIES = new Set(["usersettings", "retaildemand", "retailsalesreturn", ""]);
-const EVENT_RU: Record<string, string> = { create: "создан", update: "изменён", delete: "удалён" };
 export const FIELD_RU: Record<string, string> = {
   cashSum: "оплата наличными", noCashSum: "оплата безналом", retailStore: "касса", name: "название", salePrices: "цены продажи", buyPrice: "закупочная цена", minPrice: "минимальная цена", article: "артикул", code: "код", archived: "в архиве", description: "описание",
   positions: "позиции", sum: "сумма", store: "склад", agent: "контрагент", moment: "дата", applicable: "проведён", deleted: "удалён", productFolder: "группа", phone: "телефон", email: "почта", tags: "теги",
@@ -157,6 +178,7 @@ export async function checkOtherMsChanges(opts: { since?: string; apply?: boolea
     return true;
   });
   const logins = await fetchEmployeeLogins().catch(() => new Map<string, string>());
+  const ctx = diffCtx(logins);
   // запись на границе курсора читается повторно — то, что уже есть в журнале, второй раз не показываем
   const seen = new Set<string>();
   if (meaningful.length > 0) {
@@ -170,12 +192,10 @@ export async function checkOtherMsChanges(opts: { since?: string; apply?: boolea
     const evs = await fetchAuditEvents(rec.id).catch(() => []);
     const kind = ENTITY_RU[rec.entityType] ?? rec.entityType;
     const who = shortName(logins.get(rec.uid) ?? rec.uid);
-    const act = EVENT_RU[rec.eventType] ?? rec.eventType;
     const list = evs.length > 0 ? evs : [{ entityId: rec.id, name: "", docDate: null, diff: null, info: "" }];
     for (const e of list) {
       rows.push({ audit_id: rec.id, entity_id: e.entityId || rec.id, entity_type: rec.entityType, doc_name: e.name, doc_date: e.docDate, event_type: rec.eventType, source: rec.source, uid: rec.uid, at_ms: rec.moment, diff: e.diff, info: e.info, applied_at: new Date().toISOString() });
-      const fields = rec.eventType === "update" ? Object.keys(e.diff ?? {}).map((k) => FIELD_RU[k] ?? k) : [];
-      lines.push(`${kind}${e.name ? ` «${e.name.slice(0, 60)}»` : ""} — ${act}${fields.length ? `: ${fields.join(", ")}` : ""} (${who})`);
+      lines.push(describeChange({ kind, name: e.name, docDate: e.docDate, info: e.info, eventType: rec.eventType, who, atMs: rec.moment, diff: e.diff }, ctx));
     }
   }
   if (apply && rows.length > 0) {
@@ -187,9 +207,7 @@ export async function checkOtherMsChanges(opts: { since?: string; apply?: boolea
   const last = all.reduce((m, r) => (r.moment > m ? r.moment : m), since);
   if (apply) await supabaseAdmin.from("moysklad_sync_state").update({ audit_cursor_all: last }).eq("id", true);
   if (opts.notify !== false && apply && lines.length > 0) {
-    const shown = lines.slice(0, 20).map((l) => `• ${escapeHtml(l)}`).join("\n");
-    const more = lines.length > 20 ? `\n… и ещё ${lines.length - 20}` : "";
-    await notifyOwner(`📦 <b>Изменения в МойСклад</b> (товары, склад, документы, справочники)\n${shown}${more}`);
+    await notifyOwnerBlocks("📦 <b>Изменения в МойСклад</b> (товары, склад, документы, справочники)", lines);
   }
   return { since, records: meaningful.length, lines };
 }

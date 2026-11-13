@@ -2,7 +2,8 @@
 // сгорание бонусов, доступы и заявки сотрудников, таргет, подписчики бота клиентов, сбои и задержанные отчёты. Каждый раздел — только если было что показать.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml, packSections } from "@/lib/telegram";
-import { ENTITY_RU, FIELD_RU } from "@/lib/verify/msChanges";
+import { ENTITY_RU, diffCtx } from "@/lib/verify/msChanges";
+import { describeChange } from "@/lib/verify/diffText";
 import { fetchEmployeeLogins } from "@/lib/moyskladAudit";
 import { shortPerson, shortenRequester } from "@/lib/personName";
 
@@ -18,6 +19,27 @@ function section(title: string, lines: string[], total?: number): string | null 
   if (lines.length === 0) return null;
   const more = (total ?? lines.length) > MAX_LINES ? `${NL}…и ещё ${(total ?? lines.length) - MAX_LINES}` : "";
   return `<b>${title}</b>${NL}${lines.slice(0, MAX_LINES).join(NL)}${more}`;
+}
+
+// Раздел, который не помещается в одно сообщение Телеграма, делится на несколько: заголовок повторяется с пометкой «продолжение»; показываем до 60 записей
+function chunkSection(title: string, entries: string[], total: number, max = 3400): string[] {
+  if (entries.length === 0) return [];
+  const shown = entries.slice(0, 60);
+  const out: string[] = [];
+  let cur = `<b>${title}</b>`;
+  let has = false;
+  for (const e of shown) {
+    if (has && cur.length + e.length + 1 > max) {
+      out.push(cur);
+      cur = `<b>${title}</b> <i>(продолжение)</i>`;
+      has = false;
+    }
+    cur += `${NL}${e}`;
+    has = true;
+  }
+  if (total > shown.length) cur += `${NL}…и ещё ${total - shown.length}`;
+  out.push(cur);
+  return out;
 }
 
 async function safe<T>(label: string, errors: string[], fn: () => Promise<T>, fallback: T): Promise<T> {
@@ -40,25 +62,12 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
     return (data ?? []) as { entity_type: string; doc_name: string; doc_date: string | null; event_type: string; uid: string | null; at_ms: string | null; diff: Record<string, unknown> | null; info: string | null }[];
   }, []);
   const logins = await fetchEmployeeLogins().catch(() => new Map<string, string>());
-  const person = (login: unknown) => shortPerson(logins.get(String(login ?? "")) ?? String(login ?? "") ) || "—";
-  parts.push(
-    section(
-      "🧾 МойСклад — изменения (чеки, возвраты, товары, склад, документы)",
-      ms.map((r) => {
-        const kind = ENTITY_RU[r.entity_type] ?? r.entity_type;
-        const keys = Object.keys(r.diff ?? {});
-        const owner = (r.diff as Record<string, { oldValue?: unknown; newValue?: unknown }> | null)?.owner;
-        const fields = keys.filter((k) => k !== "owner").map((k) => FIELD_RU[k] ?? k);
-        const parts2: string[] = [];
-        if (owner) parts2.push(`ответственный ${escapeHtml(person(owner.oldValue))} → ${escapeHtml(person(owner.newValue))}`);
-        if (fields.length) parts2.push(`изменено: ${fields.join(", ")}`);
-        const what = r.event_type === "delete" ? "удалён" : r.event_type === "create" ? "создан" : parts2.length ? parts2.join("; ") : "изменён";
-        const info = (r.info ?? "").replace(/^от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*/, "").slice(0, 60);
-        return `• ${kind} ${escapeHtml(r.doc_name)}${r.doc_date ? ` от ${ruDate(r.doc_date)}` : ""}${info ? ` · ${escapeHtml(info)}` : ""} — ${what} (${escapeHtml(person(r.uid))})`;
-      }),
-      ms.length
-    )
+  const ctx = diffCtx(logins);
+  // каждая правка — что за документ, кто и когда менял, что именно поменялось (было → стало)
+  const msEntries = ms.map(
+    (r) => `• ${escapeHtml(describeChange({ kind: ENTITY_RU[r.entity_type] ?? r.entity_type, name: r.doc_name, docDate: r.doc_date, info: r.info, eventType: r.event_type, who: ctx.person(r.uid), atMs: r.at_ms, diff: r.diff }, ctx))}`
   );
+  parts.push(...chunkSection("🧾 МойСклад — изменения (чеки, возвраты, товары, склад, документы)", msEntries, ms.length));
 
   // 2. Портал: внесённые правки данных и планы
   const hist = await safe("История правок", errors, async () => {
