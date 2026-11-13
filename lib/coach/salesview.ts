@@ -527,7 +527,8 @@ async function employeePlanRows(store: string, from: string, to: string): Promis
       return { id, name, plan, addOn, planPast, fact };
     })
   );
-  return rows.filter((r) => r.plan > 0).sort((a, b) => b.plan - a.plan);
+  // по факту (оборот за период) по убыванию, а при равенстве — по плану: номер в списке означает место продавца
+  return rows.filter((r) => r.plan > 0).sort((a, b) => b.fact - a.fact || b.plan - a.plan);
 }
 
 function employeePlanLines(rows: EmpPlanRow[]): string[] {
