@@ -57,7 +57,10 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
 
   // 1. МойСклад: правки чеков и возвратов задним числом (журнал изменений)
   const ms = await safe("МойСклад", errors, async () => {
-    const { data, error } = await supabaseAdmin.from("moysklad_change_log").select("entity_type, doc_name, doc_date, event_type, uid, at_ms, diff, info").gte("detected_at", sinceIso).lt("detected_at", untilIso).order("at_ms", { ascending: true }).limit(200);
+    const { data, error } = await supabaseAdmin.from("moysklad_change_log").select("entity_type, doc_name, doc_date, event_type, uid, at_ms, diff, info").gte("detected_at", sinceIso).lt("detected_at", untilIso)
+      // правки карточек товаров (цены, названия, фото…) в сводку не попадают (владелец, 14.11.2026); создание и удаление товаров остаются
+      .or("event_type.neq.update,entity_type.not.in.(product,variant,bundle,service,productfolder)")
+      .order("at_ms", { ascending: true }).limit(200);
     if (error) throw error;
     return (data ?? []) as { entity_type: string; doc_name: string; doc_date: string | null; event_type: string; uid: string | null; at_ms: string | null; diff: Record<string, unknown> | null; info: string | null }[];
   }, []);
