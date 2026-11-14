@@ -165,7 +165,9 @@ export const FIELD_RU: Record<string, string> = {
 
 export type OtherChangesSummary = { since: string; records: number; lines: string[] };
 
-export async function checkOtherMsChanges(opts: { since?: string; apply?: boolean; notify?: boolean }): Promise<OtherChangesSummary> {
+// Отдельное сообщение владельцу «Товары, склад, документы» отключено по его просьбе (14.11.2026): правки читаются и пишутся в журнал (moysklad_change_log),
+// их видно в ночной сводке «Что изменилось за сутки», но в личку по одной не приходят.
+export async function checkOtherMsChanges(opts: { since?: string; apply?: boolean }): Promise<OtherChangesSummary> {
   const apply = opts.apply !== false;
   const { data: st } = await supabaseAdmin.from("moysklad_sync_state").select("audit_cursor_all").eq("id", true).maybeSingle();
   const stored = st?.audit_cursor_all as string | null | undefined;
@@ -206,8 +208,5 @@ export async function checkOtherMsChanges(opts: { since?: string; apply?: boolea
   }
   const last = all.reduce((m, r) => (r.moment > m ? r.moment : m), since);
   if (apply) await supabaseAdmin.from("moysklad_sync_state").update({ audit_cursor_all: last }).eq("id", true);
-  if (opts.notify !== false && apply && lines.length > 0) {
-    await notifyOwnerBlocks("📦 <b>Изменения в МойСклад</b> (товары, склад, документы, справочники)", lines);
-  }
   return { since, records: meaningful.length, lines };
 }

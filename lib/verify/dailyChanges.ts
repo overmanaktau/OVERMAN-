@@ -3,7 +3,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { escapeHtml, packSections } from "@/lib/telegram";
 import { ENTITY_RU, diffCtx } from "@/lib/verify/msChanges";
-import { describeChange } from "@/lib/verify/diffText";
+import { describeChanges } from "@/lib/verify/diffText";
 import { fetchEmployeeLogins } from "@/lib/moyskladAudit";
 import { shortPerson, shortenRequester } from "@/lib/personName";
 
@@ -64,10 +64,11 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
   const logins = await fetchEmployeeLogins().catch(() => new Map<string, string>());
   const ctx = diffCtx(logins);
   // каждая правка — что за документ, кто и когда менял, что именно поменялось (было → стало)
-  const msEntries = ms.map(
-    (r) => `• ${escapeHtml(describeChange({ kind: ENTITY_RU[r.entity_type] ?? r.entity_type, name: r.doc_name, docDate: r.doc_date, info: r.info, eventType: r.event_type, who: ctx.person(r.uid), atMs: r.at_ms, diff: r.diff }, ctx))}`
-  );
-  parts.push(...chunkSection("🧾 МойСклад — изменения (чеки, возвраты, товары, склад, документы)", msEntries, ms.length));
+  const msEntries = describeChanges(
+    ms.map((r) => ({ kind: ENTITY_RU[r.entity_type] ?? r.entity_type, name: r.doc_name, docDate: r.doc_date, info: r.info, eventType: r.event_type, who: ctx.person(r.uid), atMs: r.at_ms, diff: r.diff })),
+    ctx
+  ).map((e) => `• ${escapeHtml(e)}`);
+  parts.push(...chunkSection("🧾 МойСклад — изменения (чеки, возвраты, товары, склад, документы)", msEntries, msEntries.length));
 
   // 2. Портал: внесённые правки данных и планы
   const hist = await safe("История правок", errors, async () => {

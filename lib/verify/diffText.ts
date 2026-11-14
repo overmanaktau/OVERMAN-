@@ -104,11 +104,10 @@ function almatyLabel(atMs: string | null): string {
   return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 
-// Описание одной правки целиком: что за документ, кто и когда менял, что именно поменялось
-export function describeChange(
-  r: { kind: string; name: string; docDate: string | null; info: string | null; eventType: string; who: string; atMs: string | null; diff: unknown },
-  ctx: DiffCtx
-): string {
+export type ChangeRec = { kind: string; name: string; docDate: string | null; info: string | null; eventType: string; who: string; atMs: string | null; diff: unknown };
+
+// Описание одной правки целиком: что за документ, кто и когда менял, что именно поменялось; count — сколько одинаковых правок склеено в эту
+export function describeChange(r: ChangeRec, ctx: DiffCtx, count = 1): string {
   const isDoc = r.kind === "чек" || r.kind === "возврат";
   const title = isDoc ? `${r.kind} ${r.name}` : `${r.kind}${r.name ? ` «${r.name.slice(0, 70)}»` : ""}`;
   const date = r.docDate ? ` от ${r.docDate.slice(8, 10)}.${r.docDate.slice(5, 7)}` : "";
@@ -116,7 +115,7 @@ export function describeChange(
   const tail = (r.info ?? "").replace(/^от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*/, "").trim();
   const m = /^(.*?)\s*([\d.]+) тенге$/.exec(tail);
   const info = m ? [m[1], rub(Number(m[2]))].filter(Boolean).join(", ") : tail.slice(0, 60);
-  const verb = r.eventType === "delete" ? "удалён" : r.eventType === "create" ? "создан" : "изменён";
+  const verb = `${r.eventType === "delete" ? "удалён" : r.eventType === "create" ? "создан" : "изменён"}${count > 1 ? ` (${count} шт.)` : ""}`;
   const when = almatyLabel(r.atMs);
   const lines = [`${title}${date}${info ? ` · ${info}` : ""} — ${verb}`, `   ${r.who}${when ? `, ${when}` : ""}`];
   if (r.eventType === "update") {
@@ -124,4 +123,30 @@ export function describeChange(
     lines.push(...(d.length > 0 ? d.map((l) => `   ${l}`) : ["   (в журнале нет подробностей, что именно изменено)"]));
   }
   return lines.join("\n");
+}
+
+// Список правок: одинаковые правки разных размеров одного товара («Куртка B7025 Coffee (L)», «… (M)», «… (XL)» с одним и тем же было → стало, один автор)
+// склеиваются в одну запись с перечнем размеров — иначе сводка по смене цены у 20 курток занимала бы сотню строк
+export function describeChanges(list: ChangeRec[], ctx: DiffCtx): string[] {
+  const groups = new Map<string, { first: ChangeRec; model: string; sizes: string[] }>();
+  const order: (string | ChangeRec)[] = [];
+  for (const r of list) {
+    const m = r.eventType === "update" && (r.kind === "товар" || r.kind === "модификация") ? /^(.*?)\s*\(\s*([^()]*?)\s*\)\s*$/.exec(r.name) : null;
+    if (!m) {
+      order.push(r);
+      continue;
+    }
+    const key = `${r.kind}|${m[1]}|${r.who}|${JSON.stringify(r.diff)}`;
+    const g = groups.get(key);
+    if (g) g.sizes.push(m[2]);
+    else {
+      groups.set(key, { first: r, model: m[1], sizes: [m[2]] });
+      order.push(key);
+    }
+  }
+  return order.map((o) => {
+    if (typeof o !== "string") return describeChange(o, ctx);
+    const g = groups.get(o)!;
+    return g.sizes.length === 1 ? describeChange(g.first, ctx) : describeChange({ ...g.first, name: `${g.model} (${g.sizes.join(", ")})` }, ctx, g.sizes.length);
+  });
 }

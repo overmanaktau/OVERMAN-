@@ -21,7 +21,7 @@ async function handle(request: Request) {
     const secret = cronSecret ?? "";
     const result = await checkMsChanges({ origin: url.origin, secret, since, apply: !dry, notify: url.searchParams.get("notify") !== "0" });
     // остальные изменения (товары, склад, документы) — отдельным курсором; сбой тут не должен ломать разбор чеков
-    const other = await checkOtherMsChanges({ since, apply: !dry, notify: url.searchParams.get("notify") !== "0" }).catch((e) => ({ error: getErrorMessage(e) }));
+    const other = await checkOtherMsChanges({ since, apply: !dry }).catch((e) => ({ error: getErrorMessage(e) }));
     return NextResponse.json({ ok: true, dry, ...result, other });
   } catch (e) {
     // тихий сбой хуже шума: если разбор журнала не удался, владелец узнаёт об этом сразу (иначе правки в МойСклад остались бы незамеченными)
