@@ -2,7 +2,7 @@
 import { citiesOf, seesSpend, type SmmRole } from "@/lib/smm/config";
 import type { ReplyMarkup } from "@/lib/smm/telegram";
 
-export type Feat = "tg" | "ps" | "st" | "cs" | "on" | "sp";
+export type Feat = "tg" | "ps" | "st" | "cs" | "on" | "sp" | "mt";
 export const BTN: Record<Feat, string> = {
   tg: "🎯 Что в таргете",
   ps: "📊 Аналитика постов",
@@ -10,11 +10,13 @@ export const BTN: Record<Feat, string> = {
   cs: "🛍 Продажи по категориям",
   on: "🛒 Онлайн-продажи",
   sp: "💵 Расход на рекламу",
+  mt: "📋 Мои задачи",
 };
 export const REMOVE_KEYBOARD = { remove_keyboard: true };
 
 export function canUse(role: SmmRole, feat: Feat): boolean {
   if (feat === "sp") return seesSpend(role);
+  if (feat === "mt") return role === "admin"; // личные задачи владельца
   if (feat === "on") return citiesOf(role).includes("aktau");
   return true;
 }

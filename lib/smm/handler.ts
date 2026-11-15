@@ -14,6 +14,7 @@ import { storiesList } from "@/lib/smm/stories";
 import { notifyOwnerOfRequest } from "@/lib/smm/approvals";
 import { notifyOwner } from "@/lib/verify/notifyOwner";
 import { BTN, canUse, menuFor, type Feat } from "@/lib/smm/menu";
+import { handleMyTasksCallback, showMyTasks } from "@/lib/smm/myTasks";
 import type { ReplyMarkup, Transport } from "@/lib/smm/telegram";
 import type { SmmUser } from "@/lib/smm/users";
 
@@ -77,7 +78,7 @@ function citiesFromCode(user: SmmUser, code: string): CityKey[] {
   return wanted.filter((c) => allowed.includes(c));
 }
 
-const FEAT_ASKS_PERIOD: Record<Feat, boolean> = { tg: true, ps: true, st: true, cs: true, on: true, sp: true };
+const FEAT_ASKS_PERIOD: Record<Feat, boolean> = { tg: true, ps: true, st: true, cs: true, on: true, sp: true, mt: false };
 
 async function startFeature(t: Transport, u: SmmUser, chat: number, feat: Feat) {
   if (!canUse(u.role, feat)) {
@@ -203,6 +204,11 @@ export async function handleSmmUpdate(update: SmmUpdate, t: Transport): Promise<
     return;
   }
   const feat = (Object.keys(BTN) as Feat[]).find((f) => BTN[f] === text);
+  if (feat === "mt") {
+    await setAwaiting(user, null);
+    if (canUse(user.role, "mt")) await showMyTasks(t, chat);
+    return;
+  }
   if (feat) {
     await setAwaiting(user, null);
     await startFeature(t, user, chat, feat);
@@ -278,6 +284,12 @@ async function handleCallback(cb: NonNullable<SmmUpdate["callback_query"]>, t: T
   const me = user;
   await t.answer(cb.id);
   const today = todayInAlmaty();
+
+  // «Мои задачи» (только администратор): день, неделя, отметки
+  if (kind === "mt") {
+    if (canUse(me.role, "mt")) await handleMyTasksCallback(t, chat, messageId, args);
+    return;
+  }
 
   if (kind === "bk") {
     if (args[0] === "m") {
