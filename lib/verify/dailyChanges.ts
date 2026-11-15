@@ -60,6 +60,8 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
     const { data, error } = await supabaseAdmin.from("moysklad_change_log").select("entity_type, doc_name, doc_date, event_type, uid, at_ms, diff, info").gte("detected_at", sinceIso).lt("detected_at", untilIso)
       // карточки товаров (создание, правки цен, названий, фото…) в сводку не попадают (владелец: 14.11.2026 правки, 15.11.2026 создание); удаление товара остаётся
       .or("event_type.eq.delete,entity_type.not.in.(product,variant,bundle,service,productfolder)")
+      // приёмки и перемещения в сводку не попадают совсем (владелец, 15.11.2026)
+      .not("entity_type", "in", "(supply,move)")
       .order("at_ms", { ascending: true }).limit(200);
     if (error) throw error;
     return (data ?? []) as { entity_type: string; doc_name: string; doc_date: string | null; event_type: string; uid: string | null; at_ms: string | null; diff: Record<string, unknown> | null; info: string | null }[];
@@ -71,7 +73,7 @@ export async function buildDailyChanges(sinceIso: string, untilIso: string): Pro
     ms.map((r) => ({ kind: ENTITY_RU[r.entity_type] ?? r.entity_type, name: r.doc_name, docDate: r.doc_date, info: r.info, eventType: r.event_type, who: ctx.person(r.uid), atMs: r.at_ms, diff: r.diff })),
     ctx
   ).map((e) => `• ${escapeHtml(e)}`);
-  parts.push(...chunkSection("🧾 МойСклад — изменения (чеки, возвраты, товары, склад, документы)", msEntries, msEntries.length));
+  parts.push(...chunkSection("🧾 МойСклад — изменения", msEntries, msEntries.length));
 
   // 2. Портал: внесённые правки данных и планы
   const hist = await safe("История правок", errors, async () => {
