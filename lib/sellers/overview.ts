@@ -18,6 +18,7 @@ export type SellerRow = {
   today: number;
   week: number;
   receipts: number;
+  avgCheck: number | null; // средний чек: оборот / чеки за месяц
   depth: number | null; // глубина чека: товаров в чеке в среднем за месяц
 };
 
@@ -114,6 +115,7 @@ export async function citySellers(store: string): Promise<CitySellers> {
       today: p.today,
       week: p.week,
       receipts: p.receipts,
+      avgCheck: p.receipts > 0 ? p.turnover / p.receipts : null,
       depth: p.receipts > 0 ? p.items / p.receipts : null,
     });
   }

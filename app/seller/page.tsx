@@ -213,6 +213,9 @@ export default function SellerPage() {
                         Неделя
                       </th>
                       <th className="whitespace-nowrap px-1 py-2 text-right">Чеки</th>
+                      <th className="whitespace-nowrap px-1 py-2 text-right" title="Оборот, делённый на количество чеков за месяц">
+                        Средний чек
+                      </th>
                       <th className="whitespace-nowrap px-1 py-2 text-right" title="Сколько товаров в среднем в одном чеке за месяц">
                         Глубина чека
                       </th>
@@ -251,12 +254,13 @@ export default function SellerPage() {
                         <td className="px-1 py-3.5 text-right whitespace-nowrap font-bold">{money(r.today)}</td>
                         <td className="px-1 py-3.5 text-right whitespace-nowrap font-bold">{money(r.week)}</td>
                         <td className="px-1 py-3.5 text-right font-extrabold">{trim2Ru(r.receipts)}</td>
+                        <td className="px-1 py-3.5 text-right whitespace-nowrap font-extrabold">{r.avgCheck === null ? "—" : money(r.avgCheck)}</td>
                         <td className="px-1 py-3.5 text-right font-extrabold">{r.depth === null ? "—" : trim2Ru(r.depth)}</td>
                       </tr>
                     ))}
                     {d.rows.length === 0 && (
                       <tr>
-                        <td colSpan={12} className="px-3 py-8 text-center font-extrabold" style={{ color: LABEL }}>
+                        <td colSpan={13} className="px-3 py-8 text-center font-extrabold" style={{ color: LABEL }}>
                           В этом месяце продаж пока нет.
                         </td>
                       </tr>
@@ -274,7 +278,7 @@ export default function SellerPage() {
                   <span className="font-black">Сегодня</span> и <span className="font-black">Неделя</span> — оборот по факту: за сегодняшний день и с понедельника по сегодня. Оба с учётом возвратов.
                 </p>
                 <p>
-                  <span className="font-black">Чеки</span> — сколько чеков пробито с начала месяца. <span className="font-black">Глубина чека</span> — сколько товаров в среднем в одном чеке за месяц.
+                  <span className="font-black">Чеки</span> — сколько чеков пробито с начала месяца. <span className="font-black">Средний чек</span> — оборот, делённый на количество чеков за месяц. <span className="font-black">Глубина чека</span> — сколько товаров в среднем в одном чеке за месяц.
                 </p>
                 <p>Бонус сейчас = оборот × ставка (выполнение 0–85% — 2%, 86–90% — 2,5%, 91–99% — 3%, от 100% — 4%).</p>
               </div>
