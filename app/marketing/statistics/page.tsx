@@ -7,7 +7,6 @@ import { useAuth } from "@/components/AuthGate";
 import { useStoreSelection } from "@/components/StoreSelection";
 import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
-import { downloadExcel } from "@/lib/exportExcel";
 import PdfButton from "@/components/PdfButton";
 import type { PdfDoc, PdfTone } from "@/lib/downloadPdf";
 import { ruPeriod } from "@/lib/fileNames";
@@ -235,7 +234,7 @@ export default function StatisticsPage() {
 
       // Same rows sumSales totals, but kept per-day (dates can repeat across
       // registers, hence the accumulate-into-Map instead of a plain group-by)
-      // for the per-day Excel export below.
+      // for the per-day table in the PDF.
       function groupSalesByDate(rows: { sale_date: string; revenue: number; receipts_count: number }[]) {
         const map = new Map<string, { revenue: number; receipts: number }>();
         for (const row of rows) {
@@ -450,60 +449,6 @@ export default function StatisticsPage() {
   }
   const maxChartValue = Math.max(1, ...chartDays.flatMap((d) => [d.plan, d.fact]));
 
-  function buildTable() {
-    if (!range) return null;
-    const byDate = new Map(current.map((r) => [r.entry_date, r]));
-    const headers = [
-      "Дата",
-      "Трафик план",
-      "Трафик факт",
-      "Количество чеков",
-      "Конверсия, %",
-      "Средний чек",
-      ...CHANNEL_DEFS.map((c) => c.label),
-      "Итого по каналам",
-    ];
-    const rows: (string | number)[][] = [];
-    for (let cursor = new Date(range.start); cursor <= range.end; cursor = addDays(cursor, 1)) {
-      const key = ymd(cursor);
-      const traffic = byDate.get(key);
-      const sales = salesByDate.get(key);
-      const fact = traffic?.traffic_fact ?? 0;
-      const receipts = sales?.receipts ?? 0;
-      const dayChannelTotal = CHANNEL_DEFS.reduce((sum, c) => sum + (traffic?.[c.key] ?? 0), 0);
-      rows.push([
-        // dd.mm.yyyy, not the raw ISO key — Excel's RU locale auto-detects
-        // "2026-09-01" as a date too, but then renders it too wide for the
-        // default column width ("####"); this format fits it cleanly.
-        `${pad2(cursor.getDate())}.${pad2(cursor.getMonth() + 1)}.${cursor.getFullYear()}`,
-        traffic?.traffic_plan ?? 0,
-        fact,
-        sales ? receipts : "",
-        sales && fact > 0 ? Number(((receipts / fact) * 100).toFixed(2)) : "",
-        sales && receipts > 0 ? Math.round(sales.revenue / receipts) : "",
-        ...CHANNEL_DEFS.map((c) => Math.round(traffic?.[c.key] ?? 0)),
-        Math.round(dayChannelTotal),
-      ]);
-    }
-    rows.push([
-      "Итого",
-      totals.plan,
-      totals.fact,
-      salesTotals.receipts,
-      conversionPct !== null ? Number(conversionPct.toFixed(2)) : "",
-      avgCheck !== null ? Math.round(avgCheck) : "",
-      ...CHANNEL_DEFS.map((c) => Math.round(totals[c.key])),
-      Math.round(channelTotal),
-    ]);
-    return { headers, rows };
-  }
-
-  function handleDownload() {
-    const t = buildTable();
-    if (!t || !range) return;
-    downloadExcel(`statistika_${ymd(range.start)}_${ymd(range.end)}.csv`, t.headers, t.rows);
-  }
-
   // PDF: карточки с цветом по нормам, таблица «все показатели: норма и статус», что требует внимания, расходы по каналам, статистика по дням.
   // Нормы те же, что на карточках страницы: план от 100% (внимание от 90%), цена посетителя до 500 ₸ (до 600), маркетинг от среднего чека до 8% (до 9%).
   function buildStatsPdf(): PdfDoc {
@@ -659,20 +604,6 @@ export default function StatisticsPage() {
             build={buildStatsPdf}
             className="text-[13px] font-semibold text-muted border border-border rounded-md px-3 py-2 hover:bg-paper disabled:opacity-50"
           />
-          <button
-            type="button"
-            onClick={handleDownload}
-            disabled={loading || !range || current.length === 0}
-            className="flex items-center gap-1.5 text-[13px] font-semibold text-muted border border-border rounded-md px-3 py-2 hover:bg-paper disabled:opacity-50"
-            title="Скачать в Excel"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <path d="M7 10l5 5 5-5" />
-              <path d="M12 15V3" />
-            </svg>
-            Скачать
-          </button>
           </div>
         </div>
         {error && (
