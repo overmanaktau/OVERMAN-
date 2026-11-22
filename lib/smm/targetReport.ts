@@ -14,7 +14,7 @@ import { escapeHtml } from "@/lib/telegram";
 
 const AKTAU_CITY_KEY = "1289448"; // город Актау в таргетинге Meta
 const LOOKBACK_DAYS = 60; // насколько назад ищем настоящий день запуска публикации
-const CLICK_PRICE_LIMIT = 0.8; // $: цена клика от этого значения красится в светло-красный, ниже — зелёная (решение владельца)
+const CLICK_PRICE_LIMIT = 0.08; // $: цена клика от этого значения красится в светло-красный, ниже — зелёная (решение владельца, 0,08 $)
 
 type Stats = { spend: number; impressions: number; reach: number; clicks: number; comments: number };
 type Pub = { seg: string; key: string; mediaId: string | null; thumb: string | null; ads: Set<string>; stats: Stats; first: string; last: string };
@@ -195,7 +195,7 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
     pdf.text(`${p.ads.size} объявл.`, x + cardW - 2.2, ty, { align: "right" });
     ty += 4.4;
     for (const [label, fn] of metricRows) {
-      // «Цена клика» выделена плашкой: до 0,8 $ зелёная, от 0,8 $ светло-красная
+      // «Цена клика» выделена плашкой: до 0,08 $ зелёная, от 0,08 $ светло-красная
       const price = label === "Цена клика" && p.stats.clicks > 0;
       const tooHigh = price && p.stats.spend / p.stats.clicks >= CLICK_PRICE_LIMIT;
       const ink: [number, number, number] = tooHigh ? [176, 70, 48] : [38, 120, 78];
