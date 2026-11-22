@@ -162,6 +162,7 @@ function applyCfg(sec: PdfSection, cfg: SecCfg, withNotes: boolean, show: Record
     widths: pickCols(sec.widths),
     rowKinds: sec.rowKinds ? rowsIdx.map((i) => sec.rowKinds![i]) : undefined,
     indent: sec.indent ? rowsIdx.map((i) => sec.indent![i]) : undefined,
+    tones: sec.tones ? rowsIdx.map((i) => sec.tones![i].filter((_, c) => keepCols[c])) : undefined,
     optional: undefined,
     load: undefined,
   };
@@ -281,7 +282,7 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
               ))}
             </div>
           )}
-          {doc.kpis && doc.kpis.length > 0 && (
+          {doc.kpis && doc.kpis.length > 0 && !doc.fixedKpis && (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center gap-3">
                 <div className="font-bold">Показатели (карточки сверху)</div>

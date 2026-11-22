@@ -12,6 +12,9 @@ export type PdfGroup = "cost" | "conversion";
 
 export type PdfRowKind = "normal" | "group" | "sub" | "total";
 
+// Светофор: норма / внимание / проблема — красит карточку показателя или ячейку таблицы.
+export type PdfTone = "good" | "warn" | "bad";
+
 export type PdfSection = {
   title?: string;
   note?: string;
@@ -26,6 +29,7 @@ export type PdfSection = {
   grid?: boolean; // контуры: линии между всеми ячейками, группы колонок отделены жирнее
   signColors?: boolean; // ячейки, начинающиеся с «+» / «−», красятся зелёным / красным (разница к прошлому периоду)
   softRed?: boolean[][]; // по строкам и колонкам: ячейки, выделяемые лёгким красным (например, валовый % ниже 50)
+  tones?: (PdfTone | null | undefined)[][]; // по строкам и колонкам: ячейки в цвета светофора (зелёный / жёлтый / красный)
   indent?: number[]; // отступ первой колонки (уровень вложенности) по строкам
   // — для окна «Что скачать» (PdfButton): —
   fixed?: boolean; // в окне «Что скачать» нет выбора колонок и строк: в PDF всегда всё
@@ -45,7 +49,8 @@ export type PdfDoc = {
   title: string;
   subtitle?: string; // период, фильтры
   meta?: string[]; // мелкие подписи под заголовком
-  kpis?: { label: string; value: string; note?: string; group?: PdfGroup }[]; // group: карточка скрывается галочкой своей группы
+  kpis?: { label: string; value: string; note?: string; group?: PdfGroup; tone?: PdfTone }[]; // group: карточка скрывается галочкой своей группы; tone — цвет карточки
+  fixedKpis?: boolean; // в окне «Что скачать» нет выбора карточек: в PDF всегда все
   sections: PdfSection[];
   orientation?: "portrait" | "landscape";
   author?: string | null;
@@ -67,6 +72,8 @@ const C = {
   greenBg: [214, 236, 221] as [number, number, number],
   redBg: [246, 218, 210] as [number, number, number],
   green: [38, 120, 78] as [number, number, number],
+  yellowBg: [251, 240, 204] as [number, number, number],
+  yellow: [146, 104, 18] as [number, number, number],
   red: [176, 70, 48] as [number, number, number],
 };
 
@@ -158,11 +165,13 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
       const row = Math.floor(i / perRow);
       const x = M + col * (cardW + gap);
       const cy = y + row * (cardH + gap);
-      pdf.setFillColor(...C.paper);
+      const toneBg = k.tone === "good" ? C.greenBg : k.tone === "warn" ? C.yellowBg : k.tone === "bad" ? C.redBg : C.paper;
+      const toneBar = k.tone === "good" ? C.green : k.tone === "warn" ? C.yellow : k.tone === "bad" ? C.red : C.accent;
+      pdf.setFillColor(...toneBg);
       pdf.setDrawColor(...C.border);
       pdf.setLineWidth(0.25);
       pdf.roundedRect(x, cy, cardW, cardH, 2, 2, "FD");
-      pdf.setFillColor(...C.accent);
+      pdf.setFillColor(...toneBar);
       pdf.roundedRect(x, cy + 3.5, 0.9, cardH - 7, 0.4, 0.4, "F");
       pdf.setFont("NotoSans", "normal");
       pdf.setFontSize(7.4);
@@ -301,6 +310,12 @@ export function buildPdf(doc: PdfDoc, fonts: PdfFonts): jsPDF {
             data.cell.styles.textColor = C.red;
             data.cell.styles.fillColor = C.redBg;
           }
+        }
+        const tone = section.tones?.[data.row.index]?.[data.column.index];
+        if (tone) {
+          data.cell.styles.textColor = tone === "good" ? C.green : tone === "warn" ? C.yellow : C.red;
+          data.cell.styles.fillColor = tone === "good" ? C.greenBg : tone === "warn" ? C.yellowBg : C.redBg;
+          data.cell.styles.fontStyle = "bold";
         }
         if (section.softRed?.[data.row.index]?.[data.column.index]) {
           data.cell.styles.textColor = C.red;

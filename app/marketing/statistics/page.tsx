@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { getErrorMessage } from "@/lib/errors";
 import { downloadExcel } from "@/lib/exportExcel";
 import PdfButton from "@/components/PdfButton";
-import type { PdfDoc } from "@/lib/downloadPdf";
+import type { PdfDoc, PdfTone } from "@/lib/downloadPdf";
 import { ruPeriod } from "@/lib/fileNames";
 
 const PERIODS = ["Вчера", "Прошлая неделя", "Эта неделя", "С начала месяца", "Прошлый месяц", "Всё время"];
@@ -504,84 +504,147 @@ export default function StatisticsPage() {
     downloadExcel(`statistika_${ymd(range.start)}_${ymd(range.end)}.csv`, t.headers, t.rows);
   }
 
+  // PDF: карточки с цветом по нормам, таблица «все показатели: норма и статус», что требует внимания, расходы по каналам, статистика по дням.
+  // Нормы те же, что на карточках страницы: план от 100% (внимание от 90%), цена посетителя до 500 ₸ (до 600), маркетинг от среднего чека до 8% (до 9%).
   function buildStatsPdf(): PdfDoc {
-    const t = buildTable();
-    if (!t || !range) throw new Error("Нет данных за период");
+    if (!range) throw new Error("Нет данных за период");
     const ru = (d: Date) => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
-    const last = t.rows.length - 1;
+    const hasPrev = range.hasPrev;
+    const toneOf = (x: "positive" | "warning" | "negative"): PdfTone => (x === "positive" ? "good" : x === "warning" ? "warn" : "bad");
+    const WORD: Record<PdfTone, string> = { good: "НОРМА", warn: "ВНИМАНИЕ", bad: "ПРОБЛЕМА" };
+    const pv = (v: number | null) => (hasPrev ? v : null);
+    const pctText = (n: number) => `${trim2Ru(n)}%`;
+    const was = (v: number | null, f: (n: number) => string) => (v === null ? "" : ` · было ${f(v)}`);
+    const chgText = (cur: number, prev: number) => {
+      const v = pctChange(cur, prev);
+      return v === null ? "" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${trim2Ru(Math.abs(v))}%`;
+    };
+    // для показателей без нормы: лучше / хуже, чем в прошлом периоде («больше — лучше» или «меньше — лучше»)
+    const vs = (cur: number | null, prev: number | null, better: "up" | "down"): PdfTone | null => {
+      if (cur === null || prev === null || cur === prev) return null;
+      return (cur > prev) === (better === "up") ? "good" : "bad";
+    };
+    const vsWord = (x: PdfTone | null) => (x === "good" ? "лучше, чем раньше" : x === "bad" ? "хуже, чем раньше" : "как раньше");
+
+    const prevConversion = prevTotals.fact > 0 ? (prevSalesTotals.receipts / prevTotals.fact) * 100 : null;
+    const prevDone = pv(prevPlanCompletionPct);
+    const prevVisitor = pv(prevCostPerVisitor);
+    const prevBuyer = pv(prevCostPerBuyer);
+    const prevCheckPct = pv(prevSpendVsCheckPct);
+    const prevConv = pv(prevConversion);
+    const prevAvg = pv(prevAvgCheck);
+
+    const planT = planCompletionPct === null ? null : toneOf(planCompletionTone(planCompletionPct));
+    const visitorT = costPerVisitor === null ? null : toneOf(costPerVisitorTone(costPerVisitor));
+    const checkT = spendVsCheckPct === null ? null : toneOf(spendVsCheckTone(spendVsCheckPct));
+    const buyerT = vs(costPerBuyer, prevBuyer, "down");
+    const visitorsT = vs(totals.fact, hasPrev ? prevTotals.fact : null, "up");
+    const receiptsT = vs(salesTotals.receipts, hasPrev ? prevSalesTotals.receipts : null, "up");
+    const convT = vs(conversionPct, prevConv, "up");
+    const avgT = vs(avgCheck, prevAvg, "up");
+
+    const kpis: NonNullable<PdfDoc["kpis"]> = [
+      { label: "Выполнение плана по трафику", value: planCompletionPct === null ? "не задан" : pctText(planCompletionPct), note: planT === null ? "план трафика не внесён" : `${WORD[planT]} · норма от 100%`, tone: planT ?? "warn" },
+      { label: "Общий расход на маркетинг", value: money(totalSpend), note: hasPrev && prevTotalSpend > 0 ? `${chgText(totalSpend, prevTotalSpend)} к прошлому периоду` : "в прошлом периоде расхода не было" },
+      { label: "Доп. расходы", value: money(expensesTotal), note: hasPrev && prevExpensesTotal > 0 ? `${chgText(expensesTotal, prevExpensesTotal)} к прошлому периоду` : "не вносились" },
+      { label: "Цена одного посетителя", value: costPerVisitor === null ? "—" : money(costPerVisitor), note: visitorT === null ? undefined : `${WORD[visitorT]} · норма до 500 ₸${was(prevVisitor, money)}`, tone: visitorT ?? undefined },
+      { label: "Цена одного покупателя", value: costPerBuyer === null ? "—" : money(costPerBuyer), note: costPerBuyer === null ? undefined : `${vsWord(buyerT)}${was(prevBuyer, money)}` },
+      { label: "Маркетинг, % от среднего чека", value: spendVsCheckPct === null ? "—" : pctText(spendVsCheckPct), note: checkT === null ? undefined : `${WORD[checkT]} · норма до 8% · чек ${avgCheck === null ? "—" : money(avgCheck)}`, tone: checkT ?? undefined },
+    ];
+
+    type Row = { label: string; value: string; norm: string; status: string; tone: PdfTone | null; prev: string };
+    const rows: Row[] = [
+      { label: "Выполнение плана по трафику", value: planCompletionPct === null ? "не задан" : pctText(planCompletionPct), norm: "от 100%", status: planT === null ? "план не внесён" : WORD[planT], tone: planT ?? "warn", prev: prevDone === null ? "—" : pctText(prevDone) },
+      { label: "Цена одного посетителя", value: costPerVisitor === null ? "—" : money(costPerVisitor), norm: "до 500 ₸ (внимание до 600 ₸)", status: visitorT ? WORD[visitorT] : "—", tone: visitorT, prev: prevVisitor === null ? "—" : money(prevVisitor) },
+      { label: "Маркетинг, % от среднего чека", value: spendVsCheckPct === null ? "—" : pctText(spendVsCheckPct), norm: "до 8% (внимание до 9%)", status: checkT ? WORD[checkT] : "—", tone: checkT, prev: prevCheckPct === null ? "—" : pctText(prevCheckPct) },
+      { label: "Цена одного покупателя", value: costPerBuyer === null ? "—" : money(costPerBuyer), norm: "нормы нет, меньше — лучше", status: costPerBuyer === null ? "—" : vsWord(buyerT), tone: buyerT, prev: prevBuyer === null ? "—" : money(prevBuyer) },
+      { label: "Общий расход на маркетинг", value: money(totalSpend), norm: "нормы нет", status: "—", tone: null, prev: hasPrev ? money(prevTotalSpend) : "—" },
+      { label: "Посетители", value: trafficText(totals.fact), norm: "нормы нет, больше — лучше", status: vsWord(visitorsT), tone: visitorsT, prev: hasPrev ? trafficText(prevTotals.fact) : "—" },
+      { label: "Чеки (покупки)", value: String(salesTotals.receipts), norm: "нормы нет, больше — лучше", status: vsWord(receiptsT), tone: receiptsT, prev: hasPrev ? String(prevSalesTotals.receipts) : "—" },
+      { label: "Из 100 посетителей купили", value: conversionPct === null ? "—" : trim2Ru(conversionPct), norm: "нормы нет, больше — лучше", status: conversionPct === null ? "—" : vsWord(convT), tone: convT, prev: prevConv === null ? "—" : trim2Ru(prevConv) },
+      { label: "Средний чек", value: avgCheck === null ? "—" : money(avgCheck), norm: "нормы нет, больше — лучше", status: avgCheck === null ? "—" : vsWord(avgT), tone: avgT, prev: prevAvg === null ? "—" : money(prevAvg) },
+    ];
+
+    const attn: string[] = [];
+    if (planCompletionPct === null) attn.push("План трафика на этот период не внесён — выполнение плана посчитать нельзя.");
+    else if (planT !== "good") attn.push(`План по трафику выполнен на ${pctText(planCompletionPct)} — ниже нормы (от 100%).`);
+    if (visitorT && visitorT !== "good" && costPerVisitor !== null) attn.push(`Цена одного посетителя ${money(costPerVisitor)} — выше нормы (до 500 ₸).`);
+    if (checkT && checkT !== "good" && spendVsCheckPct !== null) attn.push(`Маркетинг съел ${pctText(spendVsCheckPct)} среднего чека — выше нормы (до 8%).`);
+    for (const r of rows) if (r.tone === "bad" && r.norm.startsWith("нормы нет")) attn.push(`${r.label}: ${r.value} — хуже, чем в прошлом периоде (${r.prev}).`);
+    if (attn.length === 0) attn.push("По нормам портала проблем нет.");
+
+    const chSum = CHANNEL_DEFS.map((c) => ({ label: c.label, cur: totals[c.key], prev: hasPrev ? prevTotals[c.key] : 0 })).sort((a, b) => b.cur - a.cur);
+    const chRows: (string | number)[][] = chSum
+      .filter((x) => x.cur > 0 || x.prev > 0)
+      .map((x) => [x.label, money(x.cur), channelTotal > 0 ? pctText((x.cur / channelTotal) * 100) : "—", hasPrev ? money(x.prev) : "—", x.prev > 0 ? chgText(x.cur, x.prev) : "—"]);
+    chRows.push(["Всего по каналам", money(channelTotal), "100%", hasPrev ? money(prevChannelTotal) : "—", prevChannelTotal > 0 ? chgText(channelTotal, prevChannelTotal) : "—"]);
+
+    // при нескольких городах за одну дату строк несколько — складываем
+    const byDate = new Map<string, { fact: number; spend: number }>();
+    for (const r of current) {
+      const a = byDate.get(r.entry_date) ?? { fact: 0, spend: 0 };
+      a.fact += r.traffic_fact ?? 0;
+      a.spend += CHANNEL_DEFS.reduce((sum, c) => sum + (r[c.key] ?? 0), 0);
+      byDate.set(r.entry_date, a);
+    }
+    const days: (string | number)[][] = [];
+    for (let cursor = new Date(range.start); cursor <= range.end; cursor = addDays(cursor, 1)) {
+      const key = ymd(cursor);
+      const sl = salesByDate.get(key);
+      const fact = byDate.get(key)?.fact ?? 0;
+      const sp = byDate.get(key)?.spend ?? 0;
+      days.push([
+        `${WEEKDAYS[cursor.getDay()]}, ${pad2(cursor.getDate())}.${pad2(cursor.getMonth() + 1)}`,
+        trafficText(fact),
+        sl ? String(sl.receipts) : "—",
+        sl && fact > 0 ? trim2Ru((sl.receipts / fact) * 100) : "—",
+        sl && sl.receipts > 0 ? money(sl.revenue / sl.receipts) : "—",
+        money(sp),
+        fact > 0 ? money(sp / fact) : "—",
+      ]);
+    }
+    days.push(["Итого", trafficText(totals.fact), String(salesTotals.receipts), conversionPct === null ? "—" : trim2Ru(conversionPct), avgCheck === null ? "—" : money(avgCheck), money(channelTotal), totals.fact > 0 ? money(channelTotal / totals.fact) : "—"]);
+
+    const prevLabel = hasPrev ? `Прошлый период: ${ru(range.prevStart)}${range.prevStart.getTime() === range.prevEnd.getTime() ? "" : ` — ${ru(range.prevEnd)}`}. ` : "";
     return {
       fileName: `Статистика ${ruPeriod(ymd(range.start), ymd(range.end))}`,
       title: "Статистика маркетинга",
       subtitle: `${ru(range.start)} — ${ru(range.end)}`,
+      meta: [`${prevLabel}Цвета: зелёный — норма, жёлтый — внимание, красный — проблема. Нормы те же, что на карточках страницы «Маркетинг — Статистика».`],
       orientation: "landscape",
-      kpis: [
-        { label: "Трафик, факт", value: trafficText(totals.fact), note: `план ${trafficText(totals.plan)}` },
-        { label: "Чеков", value: salesTotals.receipts.toLocaleString("ru-RU") },
-        { label: "Конверсия", group: "conversion" as const, value: conversionPct !== null ? `${trim2(conversionPct)}%` : "—" },
-        { label: "Средний чек", value: avgCheck !== null ? `${Math.round(avgCheck).toLocaleString("ru-RU")} ₸` : "—" },
-      ],
+      fixedKpis: true,
+      kpis,
       sections: [
+        {
+          title: "Все показатели: норма и статус",
+          fixed: true,
+          headers: ["Показатель", "Сейчас", "Норма", "Статус", "В прошлом периоде"],
+          rows: rows.map((r) => [r.label, r.value, r.norm, r.status, r.prev]),
+          tones: rows.map((r) => [null, null, null, r.tone, null]),
+          align: ["left", "right", "left", "left", "right"],
+          widths: [2.6, 1.4, 2.6, 1.9, 1.5],
+        },
+        { title: "Что требует внимания", fixed: true, headers: ["Коротко"], rows: attn.map((a) => [a]), align: ["left"], fontSize: 9.4 },
+        {
+          title: "Куда ушли деньги",
+          fixed: true,
+          headers: ["Канал", "Потратили", "Доля", "В прошлом периоде", "Изменение"],
+          rows: chRows,
+          rowKinds: chRows.map((_, i) => (i === chRows.length - 1 ? "total" : "normal")),
+          align: ["left", "right", "right", "right", "right"],
+          widths: [2.4, 1.6, 1, 1.6, 1.2],
+        },
         {
           title: "Статистика по дням",
           fixed: true,
-          headers: t.headers,
-          groupCols: { conversion: t.headers.map((h, i) => (/конверс/i.test(h) ? i : -1)).filter((i) => i > 0) },
-          rows: t.rows.map((r) => r.map((c) => (c === "" ? "—" : c))),
-          rowKinds: t.rows.map((_, i) => (i === last ? "total" : "normal")),
-          align: t.headers.map((_, i) => (i === 0 ? "left" : "right")),
+          note: "«Из 100 купили» — сколько человек из ста вошедших сделали покупку. «Цена посетителя» — расход по каналам ÷ посетители за день.",
+          headers: ["День", "Посетителей", "Чеков", "Из 100 купили", "Средний чек", "Расход по каналам", "Цена посетителя"],
+          rows: days,
+          rowKinds: days.map((_, i) => (i === days.length - 1 ? "total" : "normal")),
+          align: ["left", "right", "right", "right", "right", "right", "right"],
         },
-        ...comparisonSection(ru),
       ],
     };
-  }
-
-  // «Сравнение периодов» для PDF: по каждому показателю предыдущий период, выбранный и разница (цифра и %). Появляется в окне «Что скачать» отдельной галочкой, по умолчанию выключена.
-  function comparisonSection(ru: (d: Date) => string): NonNullable<PdfDoc["sections"]> {
-    if (!range || !range.hasPrev) return [];
-    type Kind = "int" | "money" | "pct" | "conv" | "traf";
-    const prevConversion = prevTotals.fact > 0 ? (prevSalesTotals.receipts / prevTotals.fact) * 100 : null;
-    const items: { label: string; cur: number | null; prev: number | null; kind: Kind }[] = [
-      { label: "Трафик план", cur: totals.plan, prev: prevTotals.plan, kind: "traf" },
-      { label: "Трафик факт", cur: totals.fact, prev: prevTotals.fact, kind: "traf" },
-      { label: "Выполнение плана", cur: planCompletionPct, prev: prevPlanCompletionPct, kind: "pct" },
-      { label: "Количество чеков", cur: salesTotals.receipts, prev: prevSalesTotals.receipts, kind: "int" },
-      { label: "Конверсия", cur: conversionPct, prev: prevConversion, kind: "conv" },
-      { label: "Средний чек", cur: avgCheck, prev: prevAvgCheck, kind: "money" },
-      ...CHANNEL_DEFS.map((c) => ({ label: c.label, cur: totals[c.key], prev: prevTotals[c.key], kind: "money" as Kind })),
-      { label: "Итого по каналам", cur: channelTotal, prev: prevChannelTotal, kind: "money" },
-      { label: "Доп. расходы", cur: expensesTotal, prev: prevExpensesTotal, kind: "money" },
-      { label: "Всего расходов", cur: totalSpend, prev: prevTotalSpend, kind: "money" },
-      { label: "Цена одного посетителя", cur: costPerVisitor, prev: prevCostPerVisitor, kind: "money" },
-      { label: "Цена одного покупателя", cur: costPerBuyer, prev: prevCostPerBuyer, kind: "money" },
-    ];
-    const num = (n: number, digits: number) => n.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-    const fmt = (n: number | null, kind: Kind) => (n === null ? "—" : kind === "pct" || kind === "conv" ? `${trim2Ru(n)}%` : kind === "traf" ? trafficText(n) : kind === "money" ? `${num(n, 0)} ₸` : num(n, 0));
-    // digits = 0 — целые (деньги, штуки), иначе по правилу: целое без дробной части, иначе два знака
-    const signed = (n: number, digits: number) => {
-      const r = digits === 0 ? Math.round(n) : Math.round(n * 100) / 100;
-      return `${r > 0 ? "+" : r < 0 ? "−" : ""}${digits === 0 ? num(Math.abs(r), 0) : trim2Ru(Math.abs(r))}`;
-    };
-    const rows: (string | number)[][] = items.map((it) => {
-      if (it.cur === null || it.prev === null) return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), "—", "—"];
-      const abs = it.cur - it.prev;
-      const pc = pctChange(it.cur, it.prev);
-      const absText = it.kind === "traf" ? signed(abs, 2) : it.kind === "conv" || it.kind === "pct" ? `${signed(abs, 2)} п.п.` : it.kind === "money" ? `${signed(abs, 0)} ₸` : signed(abs, 0);
-      return [it.label, fmt(it.prev, it.kind), fmt(it.cur, it.kind), absText, pc === null ? "—" : `${signed(pc, 2)}%`];
-    });
-    const prevLabel = `${ru(range.prevStart)}${range.prevStart.getTime() === range.prevEnd.getTime() ? "" : ` — ${ru(range.prevEnd)}`}`;
-    const curLabel = `${ru(range.start)}${range.start.getTime() === range.end.getTime() ? "" : ` — ${ru(range.end)}`}`;
-    return [
-      {
-        title: "Сравнение периодов",
-        hint: "По каждому показателю: предыдущий период, выбранный и разница (цифра и %).",
-        note: `Предыдущий период: ${prevLabel}. Выбранный: ${curLabel}. Разница — выбранный минус предыдущий; у процентов — в процентных пунктах и в %.`,
-        optional: true,
-        headers: ["Показатель", prevLabel, curLabel, "Разница", "Разница, %"],
-        rows,
-        align: ["left", "right", "right", "right", "right"],
-        widths: [2.6, 1.9, 1.9, 1.5, 1.2],
-      },
-    ];
   }
 
   return (
