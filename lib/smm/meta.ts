@@ -56,15 +56,20 @@ export type TargetPost = {
 };
 
 // Активные объявления кабинета, сгруппированные по публикации (на один пост обычно идёт несколько объявлений).
+// Meta оставляет объявлению статус «Активно», даже когда период показа его группы уже закончился (деньги при этом не тратятся),
+// поэтому такие объявления не считаем: активно — значит статус «Активно» и конец показа группы ещё не наступил (проверено 22.11.2026: Актау 46 «активных», тратили 26).
 export async function listTargetPosts(city: CityKey): Promise<TargetPost[]> {
   const posts = new Map<string, TargetPost>();
+  const nowMs = Date.now();
   let page = await graph<any>(`/${CITIES[city].ad}/ads`, {
-    fields: "id,name,effective_status,campaign{name},creative{effective_instagram_media_id,instagram_permalink_url,thumbnail_url,object_type}",
+    fields: "id,name,effective_status,adset{end_time},campaign{name},creative{effective_instagram_media_id,instagram_permalink_url,thumbnail_url,object_type}",
     effective_status: '["ACTIVE"]',
     limit: "100",
   });
   for (let i = 0; i < 10; i++) {
     for (const ad of page.data ?? []) {
+      const end = ad.adset?.end_time ? new Date(ad.adset.end_time).getTime() : null;
+      if (end !== null && Number.isFinite(end) && end < nowMs) continue; // период показа закончился
       const c = ad.creative ?? {};
       const key = String(c.effective_instagram_media_id ?? c.instagram_permalink_url ?? ad.id);
       const p: TargetPost = posts.get(key) ?? { key, permalink: c.instagram_permalink_url ?? null, mediaId: c.effective_instagram_media_id ?? null, campaign: ad.campaign?.name ?? "", adIds: [], adNames: [], objectType: c.object_type ?? null, thumb: c.thumbnail_url ?? null };
@@ -93,10 +98,18 @@ export async function postCover(p: { mediaId: string | null; thumb: string | nul
 }
 
 export async function adStatuses(ids: string[]): Promise<Record<string, string>> {
-  if (ids.length === 0) return {};
-  const r = await graph<Record<string, { effective_status?: string }>>("/", { ids: ids.join(","), fields: "effective_status" });
   const out: Record<string, string> = {};
-  for (const [id, v] of Object.entries(r)) out[id] = v.effective_status ?? "";
+  // Meta не принимает запрос списком (параметр ids отключён), поэтому по одному объявлению
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const v = await graph<{ effective_status?: string }>(`/${id}`, { fields: "effective_status" });
+        out[id] = v.effective_status ?? "";
+      } catch {
+        // объявление могло быть удалено — статус просто не покажем
+      }
+    })
+  );
   return out;
 }
 
