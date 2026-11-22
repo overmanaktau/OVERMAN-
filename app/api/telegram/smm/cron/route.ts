@@ -5,6 +5,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { watchTarget } from "@/lib/smm/adsWatch";
 import { runMorning } from "@/lib/smm/digest";
 import { sendWeeklyTargetReports } from "@/lib/smm/targetReport";
+import { sendWeeklyMarketingReport } from "@/lib/reports/marketingWeekly";
 import { CITY_KEYS, type CityKey } from "@/lib/smm/config";
 import { syncStories } from "@/lib/smm/stories";
 import { telegramTransport, type ReplyMarkup, type Transport } from "@/lib/smm/telegram";
@@ -14,6 +15,7 @@ export const maxDuration = 300;
 
 // Расписание бота СММ (pg_cron): ?job=ads — слежение за таргетом (каждые 10 минут), ?job=stories — сбор историй (каждый час),
 // ?job=morning — утренняя рассылка (7:10 по Алматы; повтор в 7:40 досылает недоставленное),
+// ?job=marketing&city=aktau|aktobe — недельный PDF «Статистика маркетинга» за прошлую неделю, тоже только владельцу (параметры как у targets),
 // ?job=targets&city=aktau|aktobe — недельный отчёт по таргету за прошлую неделю, только владельцу (понедельник утром; &from=&until= — другой период, &dry=1 — только посчитать, &force=1 — отправить ещё раз).
 // Для проверок: ?mock=1 — ничего не отправлять, а вернуть тексты; ?to=<id Telegram> — только этому сотруднику; ?force=1 — игнорировать журнал отправок.
 async function handle(request: Request) {
@@ -51,6 +53,15 @@ async function handle(request: Request) {
     }
     if (job === "ads") return NextResponse.json({ ok: true, results: await watchTarget(transport, { only }), ...(mock ? { sent } : {}) });
     if (job === "stories") return NextResponse.json({ ok: true, results: await syncStories() });
+    if (job === "marketing") {
+      const city = params.get("city") as CityKey;
+      if (!CITY_KEYS.includes(city)) return NextResponse.json({ error: "Укажите city=aktau | aktobe." }, { status: 400 });
+      const ymd = /^\d{4}-\d{2}-\d{2}$/;
+      const from = params.get("from") ?? undefined;
+      const until = params.get("until") ?? undefined;
+      if ((from && !ymd.test(from)) || (until && !ymd.test(until)) || (!!from !== !!until)) return NextResponse.json({ error: "from и until — вместе, в виде ГГГГ-ММ-ДД." }, { status: 400 });
+      return NextResponse.json({ ok: true, result: await sendWeeklyMarketingReport({ city, from, to: until, force, dry: mock || params.get("dry") === "1" }) });
+    }
     if (job === "targets") {
       const city = params.get("city") as CityKey;
       if (!CITY_KEYS.includes(city)) return NextResponse.json({ error: "Укажите city=aktau | aktobe." }, { status: 400 });

@@ -56,7 +56,7 @@ function segmentOf(city: CityKey, ad: any): string {
 const FALLBACK_TITLE: Record<string, string> = { all: "Актобе", aktau: "Актау", mang: "Мангистау", similar: "Похожая аудитория" };
 const isPromote = (name: string) => /^(публикация в instagram|instagram post)/i.test(name.trim()); // кампании, созданные кнопкой «Продвигать» — по одной на видео
 
-async function loadFonts() {
+export async function loadFonts() {
   const get = async (name: string) => {
     try {
       return (await readFile(path.join(process.cwd(), "public", "fonts", "pdf", name))).toString("base64");
