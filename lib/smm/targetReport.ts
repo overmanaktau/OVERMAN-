@@ -96,8 +96,8 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
   pdf.addFont("NotoSerif-Bold.ttf", "NotoSerif", "bold");
   const W = 210, H = 297, M = 8, COLS = 4, GAP = 3;
   const cardW = (W - 2 * M - GAP * (COLS - 1)) / COLS;
-  const coverH = 60; // с девятью строками цифр на лист всё равно влезают два ряда
-  const lineH = 4;
+  const coverH = 50; // обложка заполняет рамку, лишнее по краям обрезается
+  const lineH = 3.6;
   const metricRows: [string, (s: Stats) => string][] = [
     ["Потрачено", (s) => usd(s.spend)],
     ["Показы", (s) => num(s.impressions)],
@@ -109,12 +109,12 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
     ["Комментарии", (s) => num(s.comments)],
     ["Сохранения", (s) => num(s.saves)],
   ];
-  const cardH = 9.5 + coverH + 3 + 5 + metricRows.length * lineH + 3;
+  const cardH = 7.5 + coverH + 2.5 + 4.2 + Math.ceil(metricRows.length / 2) * lineH + 2; // цифры по две в строке
   const total = list.reduce((x, p) => x + p.stats.spend, 0);
 
   const header = (first: boolean) => {
     pdf.setFillColor(28, 26, 23);
-    pdf.rect(0, 0, W, first ? 26 : 12, "F");
+    pdf.rect(0, 0, W, first ? 19 : 12, "F");
     pdf.setTextColor(255, 255, 255);
     pdf.setFont("NotoSerif", "bold");
     let size = first ? 15 : 10;
@@ -124,20 +124,19 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
       size -= 0.5;
       pdf.setFontSize(size);
     }
-    pdf.text(text, M, first ? 11 : 8);
+    pdf.text(text, M, first ? 9 : 8);
     pdf.setFont("NotoSans", "normal");
     if (first) {
       pdf.setFontSize(8.5);
-      pdf.text(`Публикации, которые шли в таргете: ${ruDate(from)} — ${ruDate(to)}`, M, 17.5);
-      pdf.text(`Публикаций: ${list.length} · потрачено ${usd(total)}`, M, 22);
+      pdf.text(`Публикации, которые шли в таргете: ${ruDate(from)} — ${ruDate(to)} · публикаций ${list.length} · потрачено ${usd(total)}`, M, 15);
     }
     pdf.setFontSize(7);
-    pdf.text("OVERMAN · ПОРТАЛ БИЗНЕСА", W - M, first ? 11 : 8, { align: "right" });
+    pdf.text("OVERMAN · ПОРТАЛ БИЗНЕСА", W - M, first ? 9 : 8, { align: "right" });
   };
 
   header(true);
-  const rowsPerPage = (first: boolean) => Math.floor((H - 12 - (first ? 32 : 17) - 6) / (cardH + GAP)) || 1;
-  let y = 32;
+  const rowsPerPage = (first: boolean) => Math.floor((H - 9 - (first ? 23 : 16) + GAP) / (cardH + GAP)) || 1;
+  let y = 23;
   let rowOnPage = 0;
   let limit = rowsPerPage(true);
   list.forEach((p, idx) => {
@@ -148,7 +147,7 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
       if (rowOnPage >= limit) {
         pdf.addPage();
         header(false);
-        y = 17;
+        y = 16;
         rowOnPage = 0;
         limit = rowsPerPage(false);
       }
@@ -164,23 +163,28 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
     pdf.setFontSize(8);
     pdf.setTextColor(28, 26, 23);
     const dates = running ? `${ddmm(p.first)} — сейчас` : p.first === p.last ? ddmm(p.first) : `${ddmm(p.first)} — ${ddmm(p.last)}`;
-    pdf.text(dates, x + cardW / 2, y + 3.9, { align: "center" });
+    pdf.text(dates, x + cardW / 2, y + 3.6, { align: "center" });
     if (p.first < from || p.last > to) {
       pdf.setFont("NotoSans", "normal");
       pdf.setFontSize(6);
       pdf.setTextColor(140, 133, 119);
-      pdf.text(`цифры за ${ddmm(from)} — ${ddmm(to)}`, x + cardW / 2, y + 7, { align: "center" });
+      pdf.text(`цифры за ${ddmm(from)} — ${ddmm(to)}`, x + cardW / 2, y + 6.3, { align: "center" });
     }
     // обложка целиком, по центру
-    const bx = x + 1.5, by = y + 9.5, bw = cardW - 3, bh = coverH;
+    const bx = x + 1.5, by = y + 7.5, bw = cardW - 3, bh = coverH;
     pdf.setFillColor(232, 227, 217);
     pdf.rect(bx, by, bw, bh, "F");
     const cov = covers.get(p.key);
     if (cov) {
       const props = pdf.getImageProperties(cov.data);
-      const k = Math.min(bw / props.width, bh / props.height);
+      const k = Math.max(bw / props.width, bh / props.height);
       const iw = props.width * k, ih = props.height * k;
+      pdf.saveGraphicsState();
+      pdf.rect(bx, by, bw, bh, null);
+      pdf.clip();
+      pdf.discardPath();
       pdf.addImage(cov.data, cov.fmt, bx + (bw - iw) / 2, by + (bh - ih) / 2, iw, ih);
+      pdf.restoreGraphicsState();
     } else {
       pdf.setFont("NotoSans", "normal");
       pdf.setFontSize(7);
@@ -188,7 +192,7 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
       pdf.text("нет обложки", bx + bw / 2, by + bh / 2, { align: "center" });
     }
     // статус и цифры
-    let ty = by + bh + 4.2;
+    let ty = by + bh + 3.6;
     pdf.setFont("NotoSans", "bold");
     pdf.setFontSize(6.6);
     pdf.setTextColor(running ? 38 : 120, running ? 120 : 110, running ? 78 : 95);
@@ -196,25 +200,31 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
     pdf.setTextColor(140, 133, 119);
     pdf.setFont("NotoSans", "normal");
     pdf.text(`${p.ads.size} объявл.`, x + cardW - 2.2, ty, { align: "right" });
-    ty += 4.4;
-    for (const [label, fn] of metricRows) {
-      // «Цена клика» выделена плашкой: до 0,08 $ зелёная, от 0,08 $ светло-красная
-      const price = label === "Цена клика" && p.stats.clicks > 0;
-      const tooHigh = price && p.stats.spend / p.stats.clicks >= CLICK_PRICE_LIMIT;
-      const ink: [number, number, number] = tooHigh ? [176, 70, 48] : [38, 120, 78];
-      if (price) {
-        pdf.setFillColor(...(tooHigh ? ([246, 218, 210] as [number, number, number]) : ([214, 236, 221] as [number, number, number])));
-        pdf.rect(x + 1.2, ty - 3, cardW - 2.4, lineH, "F");
+    ty += 3.9;
+    const half = (cardW - 4) / 2;
+    for (let i = 0; i < metricRows.length; i += 2) {
+      for (let j = 0; j < 2 && i + j < metricRows.length; j++) {
+        const [label, fn] = metricRows[i + j];
+        const cx = x + 2 + j * half;
+        // «Цена клика» выделена плашкой: до 0,08 $ зелёная, от 0,08 $ светло-красная
+        const price = label === "Цена клика" && p.stats.clicks > 0;
+        const tooHigh = price && Math.round((p.stats.spend / p.stats.clicks) * 100) / 100 >= CLICK_PRICE_LIMIT; // сравниваем с тем, что напечатано на листе (до цента)
+        const ink = tooHigh ? [176, 70, 48] : [38, 120, 78];
+        if (price) {
+          const bg = tooHigh ? [246, 218, 210] : [214, 236, 221];
+          pdf.setFillColor(bg[0], bg[1], bg[2]);
+          pdf.rect(cx - 0.7, ty - 2.5, half, lineH, "F");
+        }
+        pdf.setFont("NotoSans", price ? "bold" : "normal");
+        pdf.setFontSize(5.8);
+        if (price) pdf.setTextColor(ink[0], ink[1], ink[2]);
+        else pdf.setTextColor(91, 85, 72);
+        pdf.text(label, cx, ty);
+        pdf.setFont("NotoSans", "bold");
+        if (price) pdf.setTextColor(ink[0], ink[1], ink[2]);
+        else pdf.setTextColor(28, 26, 23);
+        pdf.text(fn(p.stats), cx + half - 1.6, ty, { align: "right" });
       }
-      pdf.setFont("NotoSans", price ? "bold" : "normal");
-      pdf.setFontSize(7);
-      if (price) pdf.setTextColor(...ink);
-      else pdf.setTextColor(91, 85, 72);
-      pdf.text(label, x + 2.2, ty);
-      pdf.setFont("NotoSans", "bold");
-      if (price) pdf.setTextColor(...ink);
-      else pdf.setTextColor(28, 26, 23);
-      pdf.text(fn(p.stats), x + cardW - 2.2, ty, { align: "right" });
       ty += lineH;
     }
   });
