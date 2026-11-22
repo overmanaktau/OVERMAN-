@@ -14,7 +14,7 @@ export const maxDuration = 300;
 
 // Расписание бота СММ (pg_cron): ?job=ads — слежение за таргетом (каждые 10 минут), ?job=stories — сбор историй (каждый час),
 // ?job=morning — утренняя рассылка (7:10 по Алматы; повтор в 7:40 досылает недоставленное),
-// ?job=targets&city=aktau|aktobe — недельный отчёт по таргету за прошлую неделю, только владельцу (понедельник утром; &from=&to= — другой период, &dry=1 — только посчитать, &force=1 — отправить ещё раз).
+// ?job=targets&city=aktau|aktobe — недельный отчёт по таргету за прошлую неделю, только владельцу (понедельник утром; &from=&until= — другой период, &dry=1 — только посчитать, &force=1 — отправить ещё раз).
 // Для проверок: ?mock=1 — ничего не отправлять, а вернуть тексты; ?to=<id Telegram> — только этому сотруднику; ?force=1 — игнорировать журнал отправок.
 async function handle(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -56,9 +56,9 @@ async function handle(request: Request) {
       if (!CITY_KEYS.includes(city)) return NextResponse.json({ error: "Укажите city=aktau | aktobe." }, { status: 400 });
       const ymd = /^\d{4}-\d{2}-\d{2}$/;
       const from = params.get("from") ?? undefined;
-      const to = params.get("to") ?? undefined;
-      if ((from && !ymd.test(from)) || (to && !ymd.test(to)) || (!!from !== !!to)) return NextResponse.json({ error: "from и to — вместе, в виде ГГГГ-ММ-ДД." }, { status: 400 });
-      return NextResponse.json({ ok: true, result: await sendWeeklyTargetReports({ city, from, to, force, dry: mock || params.get("dry") === "1" }) });
+      const until = params.get("until") ?? undefined;
+      if ((from && !ymd.test(from)) || (until && !ymd.test(until)) || (!!from !== !!until)) return NextResponse.json({ error: "from и until — вместе, в виде ГГГГ-ММ-ДД." }, { status: 400 });
+      return NextResponse.json({ ok: true, result: await sendWeeklyTargetReports({ city, from, to: until, force, dry: mock || params.get("dry") === "1" }) });
     }
     if (job === "morning") return NextResponse.json({ ok: true, result: await runMorning(transport, { only, force }), ...(mock ? { sent } : {}) });
     return NextResponse.json({ error: "Укажите job=ads | stories | morning." }, { status: 400 });
