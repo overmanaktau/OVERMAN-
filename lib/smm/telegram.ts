@@ -51,6 +51,21 @@ export const telegramTransport: Transport = {
   },
 };
 
+// Отправить файл (например, PDF) в личный чат бота СММ.
+export async function sendSmmDocument(chatId: number, fileName: string, bytes: Uint8Array, caption?: string): Promise<number | null> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  if (caption) {
+    form.append("caption", caption);
+    form.append("parse_mode", "HTML");
+  }
+  form.append("document", new Blob([Buffer.from(bytes)], { type: "application/pdf" }), fileName);
+  const res = await fetch(`${API}/bot${token()}/sendDocument`, { method: "POST", body: form });
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+  if (!res.ok || !data.ok) throw new Error(`Telegram: ${data.description ?? "не удалось отправить файл"}`);
+  return data.result?.message_id ?? null;
+}
+
 // Длинный текст режем по строкам на сообщения до лимита Telegram.
 export function splitText(text: string, max = 3800): string[] {
   const out: string[] = [];
