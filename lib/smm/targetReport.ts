@@ -16,7 +16,7 @@ const AKTAU_CITY_KEY = "1289448"; // город Актау в таргетинг
 const LOOKBACK_DAYS = 60; // насколько назад ищем настоящий день запуска публикации
 const CLICK_PRICE_LIMIT = 0.08; // $: цена клика от этого значения красится в светло-красный, ниже — зелёная (решение владельца, 0,08 $)
 
-type Stats = { spend: number; impressions: number; reach: number; clicks: number; comments: number };
+type Stats = { spend: number; impressions: number; reach: number; clicks: number; likes: number; comments: number; saves: number; views: number };
 type Pub = { seg: string; key: string; mediaId: string | null; thumb: string | null; ads: Set<string>; stats: Stats; first: string; last: string };
 type Cover = { data: string; fmt: "JPEG" | "PNG" } | null;
 export type TargetReport = { title: string; fileName: string; bytes: Uint8Array; publications: number; spend: number };
@@ -96,15 +96,18 @@ function renderPdf(list: Pub[], title: string, from: string, to: string, covers:
   pdf.addFont("NotoSerif-Bold.ttf", "NotoSerif", "bold");
   const W = 210, H = 297, M = 8, COLS = 4, GAP = 3;
   const cardW = (W - 2 * M - GAP * (COLS - 1)) / COLS;
-  const coverH = 70;
+  const coverH = 60; // с девятью строками цифр на лист всё равно влезают два ряда
   const lineH = 4;
   const metricRows: [string, (s: Stats) => string][] = [
     ["Потрачено", (s) => usd(s.spend)],
     ["Показы", (s) => num(s.impressions)],
     ["Охват", (s) => num(s.reach)],
+    ["Просмотры", (s) => num(s.views)],
     ["Клики", (s) => num(s.clicks)],
     ["Цена клика", (s) => (s.clicks > 0 ? usd(s.spend / s.clicks) : "—")],
+    ["Лайки", (s) => num(s.likes)],
     ["Комментарии", (s) => num(s.comments)],
+    ["Сохранения", (s) => num(s.saves)],
   ];
   const cardH = 9.5 + coverH + 3 + 5 + metricRows.length * lineH + 3;
   const total = list.reduce((x, p) => x + p.stats.spend, 0);
@@ -271,7 +274,7 @@ export async function buildTargetReports(city: CityKey, from: string, to: string
     const seg = segmentOf(city, ad);
     const key = String(c.effective_instagram_media_id ?? c.instagram_permalink_url ?? id);
     const k = `${seg}|${key}`;
-    const p: Pub = pubs.get(k) ?? { seg, key, mediaId: c.effective_instagram_media_id ?? null, thumb: c.thumbnail_url ?? null, ads: new Set(), stats: { spend: 0, impressions: 0, reach: 0, clicks: 0, comments: 0 }, first: r.date_start, last: r.date_start };
+    const p: Pub = pubs.get(k) ?? { seg, key, mediaId: c.effective_instagram_media_id ?? null, thumb: c.thumbnail_url ?? null, ads: new Set(), stats: { spend: 0, impressions: 0, reach: 0, clicks: 0, likes: 0, comments: 0, saves: 0, views: 0 }, first: r.date_start, last: r.date_start };
     p.ads.add(id);
     if (r.date_start >= from && r.date_start <= to) {
       const act: Record<string, number> = {};
@@ -280,7 +283,10 @@ export async function buildTargetReports(city: CityKey, from: string, to: string
       p.stats.impressions += Number(r.impressions ?? 0);
       p.stats.reach += Number(r.reach ?? 0);
       p.stats.clicks += Number(r.clicks ?? 0);
+      p.stats.likes += act["post_reaction"] ?? 0; // реакции на публикацию (в Instagram это лайки)
       p.stats.comments += act["comment"] ?? 0;
+      p.stats.saves += act["onsite_conversion.post_save"] ?? 0;
+      p.stats.views += act["video_view"] ?? 0;
       const cn = String(ad.campaign?.name ?? "");
       if (cn && !isPromote(cn)) {
         const m = campSpend.get(seg) ?? new Map<string, number>();
