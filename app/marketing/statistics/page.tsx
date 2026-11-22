@@ -523,6 +523,7 @@ export default function StatisticsPage() {
       sections: [
         {
           title: "Статистика по дням",
+          fixed: true,
           headers: t.headers,
           groupCols: { conversion: t.headers.map((h, i) => (/конверс/i.test(h) ? i : -1)).filter((i) => i > 0) },
           rows: t.rows.map((r) => r.map((c) => (c === "" ? "—" : c))),

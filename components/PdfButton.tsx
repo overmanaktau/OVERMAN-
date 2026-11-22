@@ -366,29 +366,31 @@ function Chooser({ doc, author, onClose }: { doc: PdfDoc; author: string | null 
                       </div>
                     )}
 
-                    <div className="flex flex-col gap-1.5">
-                      <button type="button" className={`${linkBtn} text-left w-fit`} onClick={() => toggleOpen(`c${i}`)}>
-                        {colsOpen ? "▾" : "▸"} Показатели: {cfg.cols.filter((v, c) => v && !hiddenCols.has(c)).length} из {cfg.cols.length - hiddenCols.size}
-                      </button>
-                      {colsOpen && (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 pl-3">
-                          {sec.headers.map((h, c) => (hiddenCols.has(c) ? null : (
-                            <label key={c} className={`flex items-center gap-1.5 ${c === 0 ? "opacity-60" : "cursor-pointer"}`}>
-                              <input
-                                type="checkbox"
-                                className={box}
-                                disabled={c === 0}
-                                checked={cfg.cols[c] || c === 0}
-                                onChange={(e) => setCfg(i, { cols: cfg.cols.map((v, k) => (k === c ? e.target.checked : v)) })}
-                              />
-                              {h || "—"}
-                            </label>
-                          )))}
-                        </div>
-                      )}
-                    </div>
+                    {!sec.fixed && (
+                      <div className="flex flex-col gap-1.5">
+                        <button type="button" className={`${linkBtn} text-left w-fit`} onClick={() => toggleOpen(`c${i}`)}>
+                          {colsOpen ? "▾" : "▸"} Показатели: {cfg.cols.filter((v, c) => v && !hiddenCols.has(c)).length} из {cfg.cols.length - hiddenCols.size}
+                        </button>
+                        {colsOpen && (
+                          <div className="flex flex-wrap gap-x-4 gap-y-1.5 pl-3">
+                            {sec.headers.map((h, c) => (hiddenCols.has(c) ? null : (
+                              <label key={c} className={`flex items-center gap-1.5 ${c === 0 ? "opacity-60" : "cursor-pointer"}`}>
+                                <input
+                                  type="checkbox"
+                                  className={box}
+                                  disabled={c === 0}
+                                  checked={cfg.cols[c] || c === 0}
+                                  onChange={(e) => setCfg(i, { cols: cfg.cols.map((v, k) => (k === c ? e.target.checked : v)) })}
+                                />
+                                {h || "—"}
+                              </label>
+                            )))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-                    {shape.unitLabels.length > 1 && (
+                    {!sec.fixed && shape.unitLabels.length > 1 && (
                       <div className="flex flex-col gap-1.5">
                         <button type="button" className={`${linkBtn} text-left w-fit`} onClick={() => toggleOpen(`r${i}`)}>
                           {rowsOpen ? "▾" : "▸"} {rowsTitle(sec.headers[0])}: {shape.unitLabels.length - cfg.excluded.size} из {shape.unitLabels.length}
