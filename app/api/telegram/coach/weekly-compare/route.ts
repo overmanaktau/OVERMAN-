@@ -64,7 +64,7 @@ async function handle(request: Request) {
 Контрольный пересчёт: ${checked.reason}. Данным верить нельзя.`);
       return NextResponse.json({ error: `контрольный пересчёт: ${checked.reason}` }, { status: 409 });
     }
-    const { weeks, city } = checked.value;
+    const { weeks, city, month } = checked.value;
     // Неисправленное расхождение за любой из 14 дней — неправильный отчёт не отправляем (как у групповых отчётов).
     const hold = await activeHoldFor([store], { from: weeks[0].from, to: weeks[1].to });
     if (hold && url.searchParams.get("send")) {
@@ -72,7 +72,7 @@ async function handle(request: Request) {
 Не исправлено расхождение за ${hold.check_date.split("-").reverse().join(".")}. Как только его исправят, отправьте PDF вручную или дождитесь следующего понедельника.`);
       return NextResponse.json({ held: `расхождение за ${hold.check_date}` }, { status: 409 });
     }
-    const pdf = await buildWeeklyComparePdf(weeks, city);
+    const pdf = await buildWeeklyComparePdf(weeks, city, undefined, month);
     const sendTo = Number(url.searchParams.get("send"));
     const fmt = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
     const fileName = `Сравнение недель ${city} ${ruDay(weeks[1].to)}.pdf`;

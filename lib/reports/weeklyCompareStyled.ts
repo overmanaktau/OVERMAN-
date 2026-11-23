@@ -3,7 +3,7 @@
 import { trim2 } from "@/lib/numFormat";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { MONTH, dec, int, loadFonts, pct, ratios, signed, sumDays, weekdayOf, weekOfMonth, type CompareLabels, type CompareWeek } from "@/lib/reports/weeklyCompare";
+import { MONTH, dec, int, loadFonts, pct, ratios, signed, sumDays, weekdayOf, weekOfMonth, type CompareLabels, type CompareMonth, type CompareWeek } from "@/lib/reports/weeklyCompare";
 
 type RGB = [number, number, number];
 const C = {
@@ -24,7 +24,11 @@ const C = {
 type Cell = string | { content: string; colSpan?: number; rowSpan?: number; styles?: Record<string, unknown> };
 
 // Посетители: целое — без дробной части, иначе два знака после запятой
-const vis = (n: number) => (Number.isInteger(Math.round(n * 100) / 100) ? int(n) : dec(n, 2));
+const vis = (n: number) => {
+  if (Number.isInteger(Math.round(n * 100) / 100)) return int(n);
+  const [whole, frac] = dec(n, 2).split(",");
+  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, " ")},${frac}`; // тысячи через пробел, как у остальных чисел
+};
 const dm = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 const span = (w: CompareWeek) => `${dm(w.from)}–${dm(w.to)}`;
 const rel = (a: number, b: number): number | null => (a > 0 ? ((b - a) / a) * 100 : null);
@@ -34,7 +38,7 @@ const mix = (a: RGB, b: RGB, t: number): RGB => [Math.round(a[0] + (b[0] - a[0])
 
 const FOOT = "План оборота — дневной план города: план месяца по периодам раздела «Продажа», разложенный по дням недели (в выходные больше). План посетителей — из «Статистики». Оборот с учётом возвратов. Конверсия = чеки ÷ посетители, глубина = товары ÷ чеки.";
 
-export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], city: string, custom?: CompareLabels): Promise<Uint8Array> {
+export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], city: string, custom?: CompareLabels, month?: CompareMonth): Promise<Uint8Array> {
   const fonts = await loadFonts();
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   pdf.addFileToVFS("NotoSans-Regular.ttf", fonts.regular);
@@ -74,7 +78,7 @@ export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], c
   const planFill = (v: number | null): RGB | null => (v === null ? null : v >= 100 ? C.greenBg : v >= 80 ? C.yellowBg : C.redBg);
 
   const head = ["Число", "День", "Оборот\nплан", "Посетит.\nплан", "Оборот\nфакт", "Посетители", "Чеки", "Товары", "Средний\nчек", "Оборот,\n% плана", "Посетит.,\n% плана", "CR", "Глубина"];
-  type Meta = { kind: "band" | "day" | "total" | "diff"; day?: ReturnType<typeof sumDays> };
+  type Meta = { kind: "band" | "day" | "total" | "diff" | "gap"; day?: ReturnType<typeof sumDays> };
   const metas: Meta[] = [];
   const body: Cell[][] = [];
   const cells = (lbl: string, wd: string, t: ReturnType<typeof sumDays>): string[] => {
@@ -118,6 +122,17 @@ export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], c
   body.push(diffPct.map((p, i) => diffCell(i, relText(p))).filter((_, i) => !(i >= 7 && i <= 9)));
   metas.push({ kind: "diff" });
 
+  // после разницы — пустой белый абзац и итоги всего месяца (решение владельца 23.11.2026: «чтобы видели тоже его»)
+  if (month && !custom) {
+    body.push([{ content: "", colSpan: 13 }]);
+    metas.push({ kind: "gap" });
+    const mt = sumDays(month.days);
+    body.push([{ content: `Всего за ${month.name}   ·   ${span(month)}`, colSpan: 13 }]);
+    metas.push({ kind: "band" });
+    body.push(cells("итог", "", mt).map((c, k) => (k === 0 ? { content: "Итого", colSpan: 2 } : c)).filter((_, k) => k !== 1) as Cell[]);
+    metas.push({ kind: "total", day: mt });
+  }
+
   autoTable(pdf, {
     startY: 21,
     head: [head],
@@ -133,6 +148,12 @@ export async function buildStyledComparePdf(weeks: [CompareWeek, CompareWeek], c
       const m = metas[data.row.index];
       const col = data.column.index;
       if (!m) return;
+      if (m.kind === "gap") {
+        data.cell.styles.fillColor = C.white;
+        data.cell.styles.minCellHeight = 7;
+        data.cell.styles.lineWidth = 0;
+        return;
+      }
       if (m.kind === "band") {
         data.cell.styles.fillColor = C.paper;
         data.cell.styles.fontStyle = "bold";

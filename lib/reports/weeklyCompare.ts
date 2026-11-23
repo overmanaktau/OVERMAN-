@@ -20,6 +20,8 @@ export type CompareDay = {
 };
 // monthPlan — план месяца города (сумма планов продавцов) для месяца начала периода; нужен итогам «Продажи и план» в боте.
 export type CompareWeek = { from: string; to: string; days: CompareDay[]; monthPlan?: number };
+// Итоги месяца для PDF «Сравнение недель»: с 1-го числа месяца второй недели по её последний день (name — «ноябрь»).
+export type CompareMonth = CompareWeek & { name: string };
 
 const CITY: Record<string, string> = { point_1: "Актау", point_3: "Актобе" };
 const WEEKDAY = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
@@ -136,11 +138,20 @@ export async function loadPeriodsCompare(store: string, p1: { from: string; to: 
 
 // Две подряд идущие недели (пн–вс). weekFrom — понедельник первой недели; по умолчанию — две последние
 // полностью прошедшие недели.
-export async function loadWeeklyCompare(store: string, today: string, weekFrom?: string): Promise<{ weeks: [CompareWeek, CompareWeek]; city: string }> {
+export async function loadWeeklyCompare(store: string, today: string, weekFrom?: string): Promise<{ weeks: [CompareWeek, CompareWeek]; city: string; month: CompareMonth }> {
   const lastMonday = mondayOf(today);
   const w1 = weekFrom ?? addDays(lastMonday, -14);
   const w2 = addDays(w1, 7);
-  return loadPeriodsCompare(store, { from: w1, to: addDays(w1, 6) }, { from: w2, to: addDays(w2, 6) });
+  // «этот месяц» — месяц второй недели (по её четвергу, как в подписях недель); неделя на стыке месяцев не тянет за собой лишние дни
+  const thursday = addDays(w2, 3);
+  const monthStart = `${thursday.slice(0, 7)}-01`;
+  const monthEnd = addDays(`${addDays(monthStart, 31).slice(0, 7)}-01`, -1);
+  const monthTo = addDays(w2, 6) < monthEnd ? addDays(w2, 6) : monthEnd;
+  const [pair, month] = await Promise.all([
+    loadPeriodsCompare(store, { from: w1, to: addDays(w1, 6) }, { from: w2, to: addDays(w2, 6) }),
+    loadPeriod(store, monthStart, monthTo),
+  ]);
+  return { ...pair, month: { ...month, name: MONTH[Number(thursday.slice(5, 7)) - 1] } };
 }
 
 // ───────── расчёты и оформление ─────────
@@ -199,7 +210,7 @@ export type CompareLabels = {
 
 // PDF в альбомной ориентации: два периода (по умолчанию две недели) по дням, итоги и разница второго от первого.
 // Оформление («тепловая карта») — в weeklyCompareStyled; подгружается по требованию, чтобы файлы не зависели друг от друга при загрузке.
-export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], city: string, custom?: CompareLabels): Promise<Uint8Array> {
+export async function buildWeeklyComparePdf(weeks: [CompareWeek, CompareWeek], city: string, custom?: CompareLabels, month?: CompareMonth): Promise<Uint8Array> {
   const { buildStyledComparePdf } = await import("@/lib/reports/weeklyCompareStyled");
-  return buildStyledComparePdf(weeks, city, custom);
+  return buildStyledComparePdf(weeks, city, custom, month);
 }
