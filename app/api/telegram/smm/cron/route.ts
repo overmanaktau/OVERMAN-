@@ -9,12 +9,14 @@ import { sendWeeklyMarketingReport } from "@/lib/reports/marketingWeekly";
 import { CITY_KEYS, type CityKey } from "@/lib/smm/config";
 import { syncStories } from "@/lib/smm/stories";
 import { telegramTransport, type ReplyMarkup, type Transport } from "@/lib/smm/telegram";
-import type { SmmUser } from "@/lib/smm/users";
+import { approvedUsers, type SmmUser } from "@/lib/smm/users";
+import { followersSummary } from "@/lib/smm/followers";
 
 export const maxDuration = 300;
 
 // Расписание бота СММ (pg_cron): ?job=ads — слежение за таргетом (каждые 10 минут), ?job=stories — сбор историй (каждый час),
 // ?job=morning — утренняя рассылка (7:10 по Алматы; повтор в 7:40 досылает недоставленное),
+// ?job=followers — сводка «новые подписчики Instagram за неделю» по городам, только владельцу (по запросу, расписания нет),
 // ?job=marketing&city=aktau|aktobe — недельный PDF «Статистика маркетинга» за прошлую неделю, тоже только владельцу (параметры как у targets),
 // ?job=targets&city=aktau|aktobe — недельный отчёт по таргету за прошлую неделю, только владельцу (понедельник утром; &from=&until= — другой период, &dry=1 — только посчитать, &force=1 — отправить ещё раз).
 // Для проверок: ?mock=1 — ничего не отправлять, а вернуть тексты; ?to=<id Telegram> — только этому сотруднику; ?force=1 — игнорировать журнал отправок.
@@ -53,6 +55,12 @@ async function handle(request: Request) {
     }
     if (job === "ads") return NextResponse.json({ ok: true, results: await watchTarget(transport, { only }), ...(mock ? { sent } : {}) });
     if (job === "stories") return NextResponse.json({ ok: true, results: await syncStories() });
+    if (job === "followers") {
+      const text = await followersSummary();
+      const admins = (await approvedUsers()).filter((u) => u.role === "admin");
+      for (const u of admins) await transport.send(u.telegram_chat_id, text);
+      return NextResponse.json({ ok: true, to: admins.length, text, ...(mock ? { sent } : {}) });
+    }
     if (job === "marketing") {
       const city = params.get("city") as CityKey;
       if (!CITY_KEYS.includes(city)) return NextResponse.json({ error: "Укажите city=aktau | aktobe." }, { status: 400 });
